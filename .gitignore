@@ -14,3 +14,4 @@ web-build/
 .env
 note
 *.log
+VERCEL_SECRETS_VALUES.txt
