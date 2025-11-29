@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { uploadImageToCatbox } from '@/lib/catbox';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 
@@ -55,25 +56,11 @@ export default function CompleteDriverRegistration() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('المستخدم غير موجود');
 
-    const response = await fetch(uri);
-    const blob = await response.blob();
-    const fileExt = uri.split('.').pop();
-    const fileName = `${user.id}/${path}.${fileExt}`;
-
-    const { data, error } = await supabase.storage
-      .from('driver-documents')
-      .upload(fileName, blob, {
-        contentType: `image/${fileExt}`,
-        upsert: true,
-      });
-
-    if (error) throw error;
-
-    const { data: { publicUrl } } = supabase.storage
-      .from('driver-documents')
-      .getPublicUrl(data.path);
-
-    return publicUrl;
+    // رفع الصورة إلى Catbox
+    const fileName = `${user.id}_${path}_${Date.now()}`;
+    const imageUrl = await uploadImageToCatbox(uri, fileName);
+    
+    return imageUrl;
   };
 
   const handleComplete = async () => {

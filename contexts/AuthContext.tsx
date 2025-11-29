@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Session, User as SupabaseUser } from '@supabase/supabase-js';
-import { supabase, getUserWithRole, User, UserRole } from '@/lib/supabase';
+import { supabase, getUserWithRole, isRegistrationComplete, User, UserRole } from '@/lib/supabase';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 
@@ -113,18 +113,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (user) {
               const { data: existingProfile } = await supabase
                 .from('profiles')
-                .select('id')
+                .select('id, role')
                 .eq('id', user.id)
                 .single();
 
               if (!existingProfile) {
-                // إنشاء ملف المستخدم الجديد
+                // إنشاء ملف المستخدم الجديد (بدون بيانات كاملة)
                 await supabase.from('profiles').insert({
                   id: user.id,
                   email: user.email,
-                  role: 'customer',
-                  full_name: user.user_metadata?.full_name || user.user_metadata?.name,
-                  avatar_url: user.user_metadata?.avatar_url,
+                  role: 'customer', // افتراضي
+                  full_name: user.user_metadata?.full_name || user.user_metadata?.name || null,
+                  avatar_url: user.user_metadata?.avatar_url || null,
                 });
               }
             }

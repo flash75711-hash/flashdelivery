@@ -53,3 +53,49 @@ export async function getUserWithRole(): Promise<User | null> {
   };
 }
 
+// التحقق من إكمال التسجيل
+export async function isRegistrationComplete(userId: string): Promise<boolean> {
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('full_name, phone, role')
+    .eq('id', userId)
+    .single();
+
+  if (!profile) return false;
+
+  // التحقق حسب نوع الحساب
+  switch (profile.role) {
+    case 'customer':
+      // للعميل: يجب أن يكون لديه الاسم والتليفون وعنوان واحد على الأقل
+      if (!profile.full_name || !profile.phone) return false;
+      const { data: addresses } = await supabase
+        .from('customer_addresses')
+        .select('id')
+        .eq('customer_id', userId)
+        .limit(1);
+      return addresses && addresses.length > 0;
+
+    case 'driver':
+      // للسائق: يجب أن يكون لديه الاسم والتليفون وصور المستندات
+      if (!profile.full_name || !profile.phone) return false;
+      const { data: driverProfile } = await supabase
+        .from('profiles')
+        .select('id_card_image_url, selfie_image_url')
+        .eq('id', userId)
+        .single();
+      return !!(driverProfile?.id_card_image_url && driverProfile?.selfie_image_url);
+
+    case 'vendor':
+      // لمزود الخدمة: يجب أن يكون لديه اسم المكان والموقع
+      const { data: vendor } = await supabase
+        .from('vendors')
+        .select('name, latitude, longitude')
+        .eq('id', userId)
+        .single();
+      return !!(vendor?.name && vendor?.latitude && vendor?.longitude);
+
+    default:
+      return true; // Admin لا يحتاج إكمال تسجيل
+  }
+}
+
