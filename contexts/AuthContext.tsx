@@ -10,7 +10,7 @@ interface AuthContextType {
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
-  signUp: (email: string, password: string, role: UserRole, fullName?: string) => Promise<void>;
+  signUp: (email: string, password: string, role: UserRole) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -135,7 +135,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const signUp = async (email: string, password: string, role: UserRole, fullName?: string) => {
+  const signUp = async (email: string, password: string, role: UserRole) => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -143,14 +143,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) throw error;
 
     if (data.user) {
-      // إنشاء ملف المستخدم
+      // إنشاء ملف المستخدم الأساسي (سيتم إكماله لاحقاً)
       const { error: profileError } = await supabase
         .from('profiles')
         .insert({
           id: data.user.id,
           email,
           role,
-          full_name: fullName,
         });
       if (profileError) throw profileError;
     }

@@ -45,6 +45,12 @@
           "locationAlwaysAndWhenInUsePermission": "نحتاج إلى موقعك لتتبع الطلبات"
         }
       ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "نحتاج إلى الوصول إلى الصور لرفع المستندات"
+        }
+      ],
       "expo-web-browser"
     ]
   }

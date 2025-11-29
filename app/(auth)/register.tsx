@@ -19,7 +19,6 @@ import { UserRole } from '@/lib/supabase';
 export default function RegisterScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [fullName, setFullName] = useState('');
   const [role, setRole] = useState<UserRole>('customer');
   const [loading, setLoading] = useState(false);
   const { signUp } = useAuth();
@@ -27,17 +26,16 @@ export default function RegisterScreen() {
   const { t } = useTranslation();
 
   const handleRegister = async () => {
-    if (!email || !password || !fullName) {
-      Alert.alert(t('common.error'), 'الرجاء إكمال جميع الحقول');
+    if (!email || !password) {
+      Alert.alert(t('common.error'), 'الرجاء إدخال البريد الإلكتروني وكلمة المرور');
       return;
     }
 
     setLoading(true);
     try {
-      await signUp(email, password, role, fullName);
-      Alert.alert('نجح', 'تم إنشاء الحساب بنجاح', [
-        { text: 'حسناً', onPress: () => router.replace('/(auth)/login') },
-      ]);
+      await signUp(email, password, role);
+      // الانتقال إلى شاشة إكمال التسجيل
+      router.push(`/(auth)/complete-registration/${role}?email=${encodeURIComponent(email)}`);
     } catch (error: any) {
       Alert.alert(t('common.error'), error.message || 'فشل إنشاء الحساب');
     } finally {
@@ -59,14 +57,7 @@ export default function RegisterScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.title}>إنشاء حساب جديد</Text>
 
-        <TextInput
-          style={styles.input}
-          placeholder={t('auth.fullName')}
-          value={fullName}
-          onChangeText={setFullName}
-          placeholderTextColor="#999"
-          textAlign="right"
-        />
+        <Text style={styles.subtitle}>أدخل بياناتك الأساسية واختر نوع الحساب</Text>
 
         <TextInput
           style={styles.input}
@@ -148,8 +139,14 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: 'bold',
     textAlign: 'center',
-    marginBottom: 30,
+    marginBottom: 10,
     color: '#1a1a1a',
+  },
+  subtitle: {
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 30,
+    color: '#666',
   },
   input: {
     backgroundColor: '#f5f5f5',
