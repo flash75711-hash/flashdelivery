@@ -10,11 +10,30 @@ WebBrowser.maybeCompleteAuthSession();
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
 
+// التحقق من وجود متغيرات البيئة
+if (!supabaseUrl || !supabaseAnonKey) {
+  const errorMessage = Platform.OS === 'web' 
+    ? '⚠️ متغيرات البيئة غير معرّفة!\n\nيرجى إضافة Environment Variables في Vercel:\n- EXPO_PUBLIC_SUPABASE_URL\n- EXPO_PUBLIC_SUPABASE_ANON_KEY\n\nراجع: VERCEL_SECRETS.md'
+    : '⚠️ متغيرات البيئة غير معرّفة!\n\nيرجى إضافة EXPO_PUBLIC_SUPABASE_URL و EXPO_PUBLIC_SUPABASE_ANON_KEY في ملف .env';
+  
+  console.error(errorMessage);
+  
+  // في المتصفح، عرض رسالة خطأ واضحة
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    console.error('Supabase configuration error:', {
+      hasUrl: !!supabaseUrl,
+      hasKey: !!supabaseAnonKey,
+      url: supabaseUrl || 'MISSING',
+      key: supabaseAnonKey ? '***' : 'MISSING'
+    });
+  }
+}
+
 // استخدام AsyncStorage في التطبيق فقط
 // في المتصفح، نترك Supabase يستخدم localStorage مباشرة
 const storage = Platform.OS === 'web' ? undefined : AsyncStorage;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+export const supabase = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseAnonKey || 'placeholder-key', {
   auth: {
     ...(storage && { storage: storage as any }),
     autoRefreshToken: true,
