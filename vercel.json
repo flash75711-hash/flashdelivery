@@ -2,7 +2,7 @@
   "buildCommand": "npx expo export -p web",
   "outputDirectory": "dist",
   "devCommand": "npx expo start --web",
-  "installCommand": "npm install",
+  "installCommand": "npm install --legacy-peer-deps",
   "framework": null,
   "rewrites": [
     {
