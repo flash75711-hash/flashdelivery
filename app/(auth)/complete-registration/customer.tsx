@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,9 +11,10 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
 
 interface Address {
   id?: string;
@@ -25,15 +26,50 @@ interface Address {
 }
 
 export default function CompleteCustomerRegistration() {
-  const { email } = useLocalSearchParams<{ email: string }>();
   const router = useRouter();
   
   const [fullName, setFullName] = useState('');
-  const [phone, setPhone] = useState('');
+  const [phone, setPhone] = useState(''); // سيتم جلبها من المستخدم الحالي
   const [addresses, setAddresses] = useState<Address[]>([
     { place_name: '', building_number: '', apartment_number: '', floor_number: '', is_default: true }
   ]);
   const [loading, setLoading] = useState(false);
+  const [gettingLocation, setGettingLocation] = useState<number | null>(null); // index of address being fetched
+  const [loadingPhone, setLoadingPhone] = useState(true);
+
+  // جلب رقم الهاتف من المستخدم الحالي
+  useEffect(() => {
+    const loadUserPhone = async () => {
+      try {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (authUser) {
+          // أولاً: جرب من auth.user.phone
+          if (authUser.phone) {
+            setPhone(authUser.phone);
+            setLoadingPhone(false);
+            return;
+          }
+          
+          // ثانياً: جرب من profile
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('phone')
+            .eq('id', authUser.id)
+            .single();
+          
+          if (profile?.phone) {
+            setPhone(profile.phone);
+          }
+        }
+      } catch (error) {
+        console.error('Error loading user phone:', error);
+      } finally {
+        setLoadingPhone(false);
+      }
+    };
+
+    loadUserPhone();
+  }, []);
 
   const addAddress = () => {
     setAddresses([...addresses, {
@@ -70,9 +106,110 @@ export default function CompleteCustomerRegistration() {
     setAddresses(newAddresses);
   };
 
+  const getCurrentLocation = async (index: number) => {
+    setGettingLocation(index);
+    try {
+      // طلب إذن الوصول للموقع
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('تنبيه', 'يجب السماح بالوصول للموقع لاستخدام هذه الميزة');
+        setGettingLocation(null);
+        return;
+      }
+
+      // الحصول على الموقع الحالي
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      console.log('Location:', location.coords.latitude, location.coords.longitude);
+
+      // استخدام Nominatim API (OpenStreetMap) لتحويل الإحداثيات إلى عنوان
+      const lat = location.coords.latitude;
+      const lon = location.coords.longitude;
+      const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&accept-language=ar`;
+      
+      const response = await fetch(nominatimUrl, {
+        headers: {
+          'User-Agent': 'FlashDelivery/1.0', // مطلوب من Nominatim
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('فشل جلب العنوان من الخدمة');
+      }
+
+      const data = await response.json();
+      console.log('Nominatim response:', data);
+
+      if (data && data.address) {
+        const address = data.address;
+        
+        // بناء اسم المكان من العنوان بشكل مفصل
+        const placeNameParts: string[] = [];
+        
+        // ترتيب الأجزاء حسب الأهمية (من الأصغر للأكبر)
+        if (address.road) placeNameParts.push(address.road);
+        if (address.house_number) placeNameParts.push(`مبنى ${address.house_number}`);
+        if (address.neighbourhood) placeNameParts.push(address.neighbourhood);
+        if (address.suburb) placeNameParts.push(address.suburb);
+        if (address.quarter || address.district) placeNameParts.push(address.quarter || address.district);
+        if (address.city || address.town || address.village) {
+          placeNameParts.push(address.city || address.town || address.village);
+        }
+        if (address.state) placeNameParts.push(address.state);
+        
+        // تحديد اسم المكان
+        let placeName: string;
+        
+        // إذا كان هناك شارع أو تفاصيل كافية، نستخدم placeNameParts
+        if (address.road || placeNameParts.length >= 2) {
+          placeName = placeNameParts.join('، ');
+        } else if (data.display_name) {
+          // استخدام display_name وإزالة البلد والرمز البريدي
+          placeName = data.display_name
+            .split(',')
+            .filter(part => {
+              const trimmed = part.trim();
+              // إزالة الرمز البريدي (أرقام فقط) و "مصر"
+              return trimmed !== 'مصر' && !/^\d+$/.test(trimmed);
+            })
+            .map(part => part.trim())
+            .join('، ');
+        } else {
+          placeName = 'موقعي الحالي';
+        }
+
+        console.log('Generated place name:', placeName);
+
+        // تحديث العنوان
+        updateAddress(index, 'place_name', placeName);
+        
+        // إذا كان هناك رقم منزل، يمكن استخدامه كرقم العقار
+        if (address.house_number) {
+          updateAddress(index, 'building_number', address.house_number);
+        }
+
+        Alert.alert('نجح', 'تم جلب العنوان بنجاح');
+      } else {
+        Alert.alert('تنبيه', 'لم يتم العثور على عنوان لهذا الموقع');
+      }
+    } catch (error: any) {
+      console.error('Error getting location:', error);
+      Alert.alert('خطأ', error.message || 'فشل جلب الموقع');
+    } finally {
+      setGettingLocation(null);
+    }
+  };
+
   const handleComplete = async () => {
-    if (!fullName || !phone) {
-      Alert.alert('خطأ', 'الرجاء إدخال الاسم الكامل ورقم التليفون');
+    if (!fullName) {
+      Alert.alert('خطأ', 'الرجاء إدخال الاسم الكامل');
+      return;
+    }
+
+    if (!phone) {
+      Alert.alert('خطأ', 'لم يتم العثور على رقم الهاتف. يرجى تسجيل الخروج والدخول مرة أخرى.');
       return;
     }
 
@@ -82,14 +219,22 @@ export default function CompleteCustomerRegistration() {
     }
 
     setLoading(true);
+    console.log('CompleteRegistration: Starting registration completion...');
+    
     try {
       // الحصول على المستخدم الحالي
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user }, error: getUserError } = await supabase.auth.getUser();
+      if (getUserError) {
+        console.error('CompleteRegistration: Error getting user:', getUserError);
+        throw getUserError;
+      }
       if (!user) {
         throw new Error('المستخدم غير موجود');
       }
+      console.log('CompleteRegistration: User ID:', user.id);
 
       // تحديث ملف المستخدم
+      console.log('CompleteRegistration: Updating profile...');
       const { error: profileError } = await supabase
         .from('profiles')
         .update({
@@ -98,11 +243,19 @@ export default function CompleteCustomerRegistration() {
         })
         .eq('id', user.id);
 
-      if (profileError) throw profileError;
+      if (profileError) {
+        console.error('CompleteRegistration: Error updating profile:', profileError);
+        throw profileError;
+      }
+      console.log('CompleteRegistration: Profile updated successfully');
 
       // إضافة العناوين
-      for (const address of addresses) {
-        const { error: addressError } = await supabase
+      console.log('CompleteRegistration: Adding addresses...', addresses.length);
+      for (let i = 0; i < addresses.length; i++) {
+        const address = addresses[i];
+        console.log(`CompleteRegistration: Inserting address ${i + 1}:`, address);
+        
+        const { data, error: addressError } = await supabase
           .from('customer_addresses')
           .insert({
             customer_id: user.id,
@@ -111,16 +264,33 @@ export default function CompleteCustomerRegistration() {
             apartment_number: address.apartment_number || null,
             floor_number: address.floor_number || null,
             is_default: address.is_default,
-          });
+          })
+          .select();
 
-        if (addressError) throw addressError;
+        if (addressError) {
+          console.error(`CompleteRegistration: Error inserting address ${i + 1}:`, addressError);
+          // إذا كان الخطأ بسبب عدم وجود الجدول، نعرض رسالة واضحة
+          if (addressError.code === 'PGRST116' || addressError.message?.includes('relation') || addressError.message?.includes('does not exist')) {
+            throw new Error('جدول العناوين غير موجود في قاعدة البيانات. يرجى إنشاء جدول customer_addresses أولاً.');
+          }
+          throw addressError;
+        }
+        console.log(`CompleteRegistration: Address ${i + 1} inserted successfully:`, data);
       }
 
-      Alert.alert('نجح', 'تم إكمال التسجيل بنجاح', [
-        { text: 'حسناً', onPress: () => router.replace('/(tabs)') },
-      ]);
+      console.log('CompleteRegistration: Registration completed successfully');
+      
+      // توجيه مباشر إلى الصفحة الرئيسية (سيتم التوجيه تلقائياً حسب role)
+      router.replace('/(tabs)');
+      
+      // عرض رسالة نجاح بعد التوجيه
+      setTimeout(() => {
+        Alert.alert('نجح', 'تم إكمال التسجيل بنجاح');
+      }, 500);
     } catch (error: any) {
-      Alert.alert('خطأ', error.message || 'فشل إكمال التسجيل');
+      console.error('CompleteRegistration: Error in handleComplete:', error);
+      const errorMessage = error.message || error.code || 'فشل إكمال التسجيل';
+      Alert.alert('خطأ', errorMessage);
     } finally {
       setLoading(false);
     }
@@ -144,15 +314,17 @@ export default function CompleteCustomerRegistration() {
           textAlign="right"
         />
 
-        <TextInput
-          style={styles.input}
-          placeholder="رقم التليفون"
-          value={phone}
-          onChangeText={setPhone}
-          keyboardType="phone-pad"
-          placeholderTextColor="#999"
-          textAlign="right"
-        />
+        {loadingPhone ? (
+          <View style={styles.phoneInfo}>
+            <ActivityIndicator size="small" color="#007AFF" />
+            <Text style={styles.phoneInfoText}>جاري جلب رقم الهاتف...</Text>
+          </View>
+        ) : phone ? (
+          <View style={styles.phoneInfo}>
+            <Ionicons name="call" size={20} color="#007AFF" />
+            <Text style={styles.phoneInfoText}>رقم الهاتف: {phone.replace('+20', '0')}</Text>
+          </View>
+        ) : null}
 
         <View style={styles.addressesSection}>
           <View style={styles.sectionHeader}>
@@ -177,14 +349,27 @@ export default function CompleteCustomerRegistration() {
                 )}
               </View>
 
-              <TextInput
-                style={styles.input}
-                placeholder="اسم المكان العام * (مثل: مول مصر، شارع النيل)"
-                value={address.place_name}
-                onChangeText={(text) => updateAddress(index, 'place_name', text)}
-                placeholderTextColor="#999"
-                textAlign="right"
-              />
+              <View style={styles.locationInputContainer}>
+                <TextInput
+                  style={[styles.input, styles.locationInput]}
+                  placeholder="اسم المكان العام * (مثل: مول مصر، شارع النيل)"
+                  value={address.place_name}
+                  onChangeText={(text) => updateAddress(index, 'place_name', text)}
+                  placeholderTextColor="#999"
+                  textAlign="right"
+                />
+                <TouchableOpacity
+                  style={[styles.locationButton, gettingLocation === index && styles.locationButtonLoading]}
+                  onPress={() => getCurrentLocation(index)}
+                  disabled={gettingLocation === index}
+                >
+                  {gettingLocation === index ? (
+                    <ActivityIndicator size="small" color="#007AFF" />
+                  ) : (
+                    <Ionicons name="location" size={20} color="#007AFF" />
+                  )}
+                </TouchableOpacity>
+              </View>
 
               <View style={styles.row}>
                 <TextInput
@@ -372,6 +557,43 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: '600',
+  },
+  phoneInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#e3f2fd',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  phoneInfoText: {
+    color: '#007AFF',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  locationInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
+  locationInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  locationButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#e3f2fd',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#007AFF',
+  },
+  locationButtonLoading: {
+    opacity: 0.6,
   },
 });
 

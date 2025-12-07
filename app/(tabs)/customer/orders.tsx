@@ -112,7 +112,7 @@ export default function CustomerOrdersScreen() {
             </View>
             <Text style={styles.orderAddress}>{item.pickup_address}</Text>
             <Text style={styles.orderAddress}>→ {item.delivery_address}</Text>
-            <Text style={styles.orderFee}>الأجرة: {item.total_fee} ر.س</Text>
+            <Text style={styles.orderFee}>الأجرة: {item.total_fee} ج.م</Text>
             {item.status === 'completed' && (
               <View style={styles.orderActions}>
                 <TouchableOpacity

@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
+import { Platform } from 'react-native';
 
 // إكمال جلسة المتصفح لـ OAuth
 WebBrowser.maybeCompleteAuthSession();
@@ -9,9 +10,13 @@ WebBrowser.maybeCompleteAuthSession();
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
 
+// استخدام AsyncStorage في التطبيق فقط
+// في المتصفح، نترك Supabase يستخدم localStorage مباشرة
+const storage = Platform.OS === 'web' ? undefined : AsyncStorage;
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    storage: AsyncStorage,
+    ...(storage && { storage: storage as any }),
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: true,
@@ -27,41 +32,86 @@ export interface User {
   id: string;
   email: string;
   role: UserRole;
-  full_name?: string;
-  phone?: string;
-  avatar_url?: string;
+  full_name?: string | null;
+  phone?: string | null;
+  avatar_url?: string | null;
+  registration_complete?: boolean;
 }
 
 // جلب معلومات المستخدم مع الدور
 export async function getUserWithRole(): Promise<User | null> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
+  console.log('getUserWithRole: Starting...');
+  try {
+    const { data: { user }, error: getUserError } = await supabase.auth.getUser();
+    if (getUserError) {
+      console.error('getUserWithRole: Error getting user:', getUserError);
+      return null;
+    }
+    if (!user) {
+      console.log('getUserWithRole: No user found');
+      return null;
+    }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', user.id)
-    .single();
+    console.log('getUserWithRole: Got user:', user.id);
+    try {
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
 
-  return {
-    id: user.id,
-    email: user.email || '',
-    role: (profile?.role as UserRole) || 'customer',
-    full_name: profile?.full_name,
-    phone: profile?.phone,
-    avatar_url: profile?.avatar_url,
-  };
+      if (error) {
+        console.error('getUserWithRole: Error fetching profile:', error);
+        // إذا لم يكن هناك ملف، نرجع بيانات أساسية
+        return {
+          id: user.id,
+          email: user.email || '',
+          role: 'customer' as UserRole, // افتراضي
+          full_name: user.user_metadata?.full_name || user.user_metadata?.name || null,
+          avatar_url: user.user_metadata?.avatar_url || null,
+        };
+      }
+
+      console.log('getUserWithRole: Profile found, role:', profile?.role);
+      return {
+        id: user.id,
+        email: user.email || '',
+        role: (profile?.role as UserRole) || 'customer',
+        full_name: profile?.full_name,
+        phone: profile?.phone,
+        avatar_url: profile?.avatar_url,
+        registration_complete: profile?.registration_complete,
+      };
+    } catch (error) {
+      console.error('getUserWithRole: Error in profile fetch:', error);
+      // في حالة الخطأ، نرجع بيانات أساسية من auth
+      return {
+        id: user.id,
+        email: user.email || '',
+        role: 'customer' as UserRole,
+        full_name: user.user_metadata?.full_name || user.user_metadata?.name || null,
+        avatar_url: user.user_metadata?.avatar_url || null,
+      };
+    }
+  } catch (error) {
+    console.error('getUserWithRole: Unexpected error:', error);
+    return null;
+  }
 }
 
 // التحقق من إكمال التسجيل
 export async function isRegistrationComplete(userId: string): Promise<boolean> {
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('full_name, phone, role')
-    .eq('id', userId)
-    .single();
+  try {
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('full_name, phone, role, registration_complete')
+      .eq('id', userId)
+      .single();
 
-  if (!profile) return false;
+    if (error || !profile) return false;
+    
+    // إذا كان registration_complete موجود و true، نرجع true مباشرة
+    if (profile.registration_complete === true) return true;
 
   // التحقق حسب نوع الحساب
   switch (profile.role) {
@@ -96,6 +146,10 @@ export async function isRegistrationComplete(userId: string): Promise<boolean> {
 
     default:
       return true; // Admin لا يحتاج إكمال تسجيل
+  }
+  } catch (error) {
+    console.error('Error checking registration completion:', error);
+    return false;
   }
 }
 

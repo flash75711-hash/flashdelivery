@@ -75,7 +75,7 @@ export default function DriverHistoryScreen() {
           <View style={styles.tripCard}>
             <View style={styles.tripHeader}>
               <Text style={styles.tripStatus}>{getStatusText(item.status)}</Text>
-              <Text style={styles.tripFee}>{item.total_fee} ر.س</Text>
+              <Text style={styles.tripFee}>{item.total_fee} ج.م</Text>
             </View>
             <Text style={styles.tripAddress}>
               من: {item.pickup_address}

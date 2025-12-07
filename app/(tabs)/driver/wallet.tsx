@@ -76,7 +76,7 @@ export default function DriverWalletScreen() {
 
       <View style={styles.balanceCard}>
         <Text style={styles.balanceLabel}>{t('driver.balance')}</Text>
-        <Text style={styles.balanceAmount}>{balance.toFixed(2)} ر.س</Text>
+        <Text style={styles.balanceAmount}>{balance.toFixed(2)} ج.م</Text>
         <Text style={styles.commissionText}>
           {t('driver.commission')}: 10%
         </Text>
@@ -102,12 +102,12 @@ export default function DriverWalletScreen() {
               />
               <Text style={styles.transactionAmount}>
                 {item.type === 'earning' ? '+' : '-'}
-                {item.amount} ر.س
+                {item.amount} ج.م
               </Text>
             </View>
             {item.commission > 0 && (
               <Text style={styles.commissionInfo}>
-                عمولة: {item.commission} ر.س
+                عمولة: {item.commission} ج.م
               </Text>
             )}
             <Text style={styles.transactionDate}>

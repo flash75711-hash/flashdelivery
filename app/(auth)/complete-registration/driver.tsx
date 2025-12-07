@@ -19,11 +19,11 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 
 export default function CompleteDriverRegistration() {
-  const { email } = useLocalSearchParams<{ email: string }>();
+  const { phone: phoneParam, email } = useLocalSearchParams<{ phone?: string; email?: string }>();
   const router = useRouter();
   
   const [fullName, setFullName] = useState('');
-  const [phone, setPhone] = useState('');
+  const [phone, setPhone] = useState(phoneParam || '');
   const [idCardImage, setIdCardImage] = useState<string | null>(null);
   const [selfieImage, setSelfieImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);

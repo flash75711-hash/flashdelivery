@@ -23,7 +23,7 @@ interface LocationData {
 }
 
 export default function CompleteVendorRegistration() {
-  const { email } = useLocalSearchParams<{ email: string }>();
+  const { phone: phoneParam, email } = useLocalSearchParams<{ phone?: string; email?: string }>();
   const router = useRouter();
   
   const [placeName, setPlaceName] = useState('');

@@ -183,7 +183,7 @@ export default function DriverTripsScreen() {
               إلى: {activeOrder.delivery_address}
             </Text>
             <Text style={styles.tripFee}>
-              الأجرة: {activeOrder.total_fee} ر.س
+              الأجرة: {activeOrder.total_fee} ج.م
             </Text>
           </View>
 
@@ -232,7 +232,7 @@ export default function DriverTripsScreen() {
             <View key={order.id} style={styles.orderCard}>
               <View style={styles.orderHeader}>
                 <Text style={styles.orderId}>طلب #{order.id.slice(0, 8)}</Text>
-                <Text style={styles.orderFee}>{order.total_fee} ر.س</Text>
+                <Text style={styles.orderFee}>{order.total_fee} ج.م</Text>
               </View>
               <Text style={styles.orderAddress}>
                 من: {order.pickup_address}

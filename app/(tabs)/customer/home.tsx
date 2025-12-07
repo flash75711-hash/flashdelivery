@@ -9,6 +9,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
+import CurrentLocationDisplay from '@/components/CurrentLocationDisplay';
 
 export default function CustomerHomeScreen() {
   const router = useRouter();
@@ -19,6 +20,8 @@ export default function CustomerHomeScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>{t('customer.home')}</Text>
       </View>
+
+      <CurrentLocationDisplay />
 
       <View style={styles.content}>
         <TouchableOpacity

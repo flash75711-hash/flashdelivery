@@ -6,6 +6,9 @@ import {
   SafeAreaView,
   ScrollView,
   RefreshControl,
+  TextInput,
+  TouchableOpacity,
+  Alert,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '@/lib/supabase';
@@ -27,10 +30,60 @@ export default function AdminDashboardScreen() {
     activeDrivers: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [maxDeliveryDistance, setMaxDeliveryDistance] = useState<string>('3');
+  const [editingDistance, setEditingDistance] = useState(false);
+  const [savingDistance, setSavingDistance] = useState(false);
 
   useEffect(() => {
     loadStats();
+    loadSettings();
   }, []);
+
+  const loadSettings = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('settings')
+        .select('value')
+        .eq('key', 'max_delivery_distance')
+        .single();
+
+      if (!error && data) {
+        setMaxDeliveryDistance(data.value);
+      }
+    } catch (error) {
+      console.error('Error loading settings:', error);
+    }
+  };
+
+  const saveMaxDeliveryDistance = async () => {
+    const distance = parseFloat(maxDeliveryDistance);
+    if (isNaN(distance) || distance <= 0) {
+      Alert.alert('خطأ', 'الرجاء إدخال رقم صحيح أكبر من صفر');
+      return;
+    }
+
+    setSavingDistance(true);
+    try {
+      const { error } = await supabase
+        .from('settings')
+        .upsert({
+          key: 'max_delivery_distance',
+          value: distance.toString(),
+          description: 'المسافة القصوى للتوصيل بالكيلومتر (للطلبات بدون مزود خدمة)',
+        }, {
+          onConflict: 'key',
+        });
+
+      if (error) throw error;
+      
+      setEditingDistance(false);
+      Alert.alert('نجح', 'تم حفظ المسافة القصوى للتوصيل بنجاح');
+    } catch (error: any) {
+      Alert.alert('خطأ', error.message || 'فشل حفظ الإعدادات');
+    } finally {
+      setSavingDistance(false);
+    }
+  };
 
   const loadStats = async () => {
     setLoading(true);
@@ -115,7 +168,7 @@ export default function AdminDashboardScreen() {
             icon="cash"
             iconColor="#34C759"
             title={t('admin.totalRevenue')}
-            value={`${stats.totalRevenue.toFixed(2)} ر.س`}
+            value={`${stats.totalRevenue.toFixed(2)} ج.م`}
           />
           <StatCard
             icon="car"
@@ -127,7 +180,7 @@ export default function AdminDashboardScreen() {
             icon="trending-up"
             iconColor="#FF9500"
             title={t('admin.totalCommissions')}
-            value={`${stats.totalCommissions.toFixed(2)} ر.س`}
+            value={`${stats.totalCommissions.toFixed(2)} ج.م`}
           />
           <StatCard
             icon="people"
@@ -135,6 +188,69 @@ export default function AdminDashboardScreen() {
             title={t('admin.activeDrivers')}
             value={stats.activeDrivers}
           />
+        </View>
+
+        {/* قسم الإعدادات */}
+        <View style={styles.settingsSection}>
+          <Text style={styles.settingsTitle}>الإعدادات</Text>
+          
+          <View style={styles.settingCard}>
+            <View style={styles.settingHeader}>
+              <View style={styles.settingInfo}>
+                <Ionicons name="location" size={24} color="#007AFF" />
+                <View style={styles.settingTextContainer}>
+                  <Text style={styles.settingLabel}>المسافة القصوى للتوصيل</Text>
+                  <Text style={styles.settingDescription}>
+                    المسافة القصوى بالكيلومتر للطلبات بدون مزود خدمة (افتراضي: 3 كم)
+                  </Text>
+                </View>
+              </View>
+            </View>
+            
+            {editingDistance ? (
+              <View style={styles.settingEditContainer}>
+                <TextInput
+                  style={styles.settingInput}
+                  value={maxDeliveryDistance}
+                  onChangeText={setMaxDeliveryDistance}
+                  keyboardType="numeric"
+                  placeholder="المسافة بالكيلومتر"
+                  placeholderTextColor="#999"
+                />
+                <View style={styles.settingButtons}>
+                  <TouchableOpacity
+                    style={[styles.settingButton, styles.cancelButton]}
+                    onPress={() => {
+                      setEditingDistance(false);
+                      loadSettings(); // إعادة تحميل القيمة الأصلية
+                    }}
+                  >
+                    <Text style={styles.cancelButtonText}>إلغاء</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.settingButton, styles.saveButton]}
+                    onPress={saveMaxDeliveryDistance}
+                    disabled={savingDistance}
+                  >
+                    <Text style={styles.saveButtonText}>
+                      {savingDistance ? 'جاري الحفظ...' : 'حفظ'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.settingValueContainer}>
+                <Text style={styles.settingValue}>{maxDeliveryDistance} كم</Text>
+                <TouchableOpacity
+                  style={styles.editButton}
+                  onPress={() => setEditingDistance(true)}
+                >
+                  <Ionicons name="pencil" size={20} color="#007AFF" />
+                  <Text style={styles.editButtonText}>تعديل</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -197,6 +313,120 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     textAlign: 'center',
+  },
+  settingsSection: {
+    marginTop: 32,
+  },
+  settingsTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+    marginBottom: 16,
+    textAlign: 'right',
+  },
+  settingCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  settingHeader: {
+    marginBottom: 16,
+  },
+  settingInfo: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  settingTextContainer: {
+    flex: 1,
+  },
+  settingLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 4,
+    textAlign: 'right',
+  },
+  settingDescription: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'right',
+    lineHeight: 20,
+  },
+  settingValueContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  settingValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#007AFF',
+  },
+  editButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#e3f2fd',
+  },
+  editButtonText: {
+    fontSize: 14,
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  settingEditContainer: {
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  settingInput: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 16,
+    marginBottom: 16,
+    textAlign: 'right',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  settingButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'flex-end',
+  },
+  settingButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 12,
+    minWidth: 100,
+    alignItems: 'center',
+  },
+  cancelButton: {
+    backgroundColor: '#f5f5f5',
+  },
+  cancelButtonText: {
+    color: '#666',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  saveButton: {
+    backgroundColor: '#007AFF',
+  },
+  saveButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 

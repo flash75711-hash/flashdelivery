@@ -115,7 +115,7 @@ export default function AdminOrdersScreen() {
               إلى: {item.delivery_address}
             </Text>
             <View style={styles.orderFooter}>
-              <Text style={styles.orderFee}>{item.total_fee} ر.س</Text>
+              <Text style={styles.orderFee}>{item.total_fee} ج.م</Text>
               <Text style={styles.orderDate}>
                 {new Date(item.created_at).toLocaleDateString('ar-SA')}
               </Text>

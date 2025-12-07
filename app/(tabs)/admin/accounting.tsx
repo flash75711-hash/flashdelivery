@@ -143,7 +143,7 @@ export default function AdminAccountingScreen() {
               </View>
             </View>
             <Text style={styles.duesAmount}>
-              {t('admin.weeklyDues')}: {item.weekly_dues.toFixed(2)} ر.س
+              {t('admin.weeklyDues')}: {item.weekly_dues.toFixed(2)} ج.م
             </Text>
             {!item.is_debt_cleared && item.weekly_dues > 0 && (
               <TouchableOpacity
