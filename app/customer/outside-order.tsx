@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,177 +6,357 @@ import {
   TouchableOpacity,
   StyleSheet,
   SafeAreaView,
-  FlatList,
   ActivityIndicator,
   Alert,
   ScrollView,
-  Keyboard,
-  Linking,
+  Image,
+  Platform,
+  Modal,
 } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
+import { supabase, reverseGeocode } from '@/lib/supabase';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import CurrentLocationDisplay from '@/components/CurrentLocationDisplay';
+import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
+import { uploadImageToImgBB } from '@/lib/imgbb';
 
-interface Vendor {
+interface Place {
   id: string;
   name: string;
   address: string;
-  phone: string;
+  type: 'mall' | 'market' | 'area';
+  latitude?: number;
+  longitude?: number;
 }
 
-interface OrderItem {
+interface ItemWithImage {
   id: string;
   name: string;
-  vendor: Vendor | null;
+  imageUri?: string; // رابط الصورة المحلية
+  imageUrl?: string; // رابط الصورة المرفوعة
+}
+
+interface PlaceWithItems {
+  id: string;
+  place: Place | null;
+  items: ItemWithImage[]; // قائمة العناصر مع الصور
 }
 
 export default function OutsideOrderScreen() {
   const { user } = useAuth();
   const router = useRouter();
-  const params = useLocalSearchParams();
   const { t } = useTranslation();
-  const [items, setItems] = useState<OrderItem[]>([{ id: Date.now().toString(), name: '', vendor: null }]);
-  const [searchQuery, setSearchQuery] = useState<{ [key: string]: string }>({});
-  const [vendors, setVendors] = useState<{ [key: string]: Vendor[] }>({});
-  const [searching, setSearching] = useState<{ [key: string]: boolean }>({});
-  const [activeSearchItemId, setActiveSearchItemId] = useState<string | null>(null);
+  const [placesWithItems, setPlacesWithItems] = useState<PlaceWithItems[]>([
+    { id: Date.now().toString(), place: null, items: [] }
+  ]);
   const [loading, setLoading] = useState(false);
-  const [maxDeliveryDistance, setMaxDeliveryDistance] = useState<number>(3); // المسافة القصوى بالكيلومتر (افتراضي 3)
+  const [maxDeliveryDistance, setMaxDeliveryDistance] = useState<number>(3);
+  const [userLocation, setUserLocation] = useState<{ lat: number; lon: number } | null>(null);
+  const [findingPlace, setFindingPlace] = useState<string | null>(null);
+  const [uploadingImageForItem, setUploadingImageForItem] = useState<string | null>(null); // itemId الذي يتم رفع صورته
+  const [showImageSourceModal, setShowImageSourceModal] = useState(false);
+  const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null);
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (activeSearchItemId && searchQuery[activeSearchItemId] && searchQuery[activeSearchItemId].length > 2) {
-      searchVendors(activeSearchItemId);
-    } else if (activeSearchItemId) {
-      setVendors(prev => ({ ...prev, [activeSearchItemId]: [] }));
-    }
-  }, [searchQuery, activeSearchItemId]);
-
-  const searchVendors = async (itemId: string) => {
-    const query = searchQuery[itemId];
-    if (!query || query.length < 3) return;
-
-    setSearching(prev => ({ ...prev, [itemId]: true }));
-    try {
-      const { data, error } = await supabase
-        .from('vendors')
-        .select('*')
-        .ilike('name', `%${query}%`)
-        .limit(10);
-
-      if (error) throw error;
-      setVendors(prev => ({ ...prev, [itemId]: data || [] }));
-    } catch (error) {
-      console.error('Error searching vendors:', error);
-    } finally {
-      setSearching(prev => ({ ...prev, [itemId]: false }));
-    }
-  };
-
-  const addItem = () => {
-    setItems([...items, { id: Date.now().toString(), name: '', vendor: null }]);
-  };
-
-  const updateItem = (itemId: string, value: string) => {
-    setItems(items.map(item => 
-      item.id === itemId ? { ...item, name: value } : item
-    ));
-  };
-
-  const removeItem = (itemId: string) => {
-    if (items.length > 1) {
-      setItems(items.filter(item => item.id !== itemId));
-      setSearchQuery(prev => {
-        const newQuery = { ...prev };
-        delete newQuery[itemId];
-        return newQuery;
-      });
-      setVendors(prev => {
-        const newVendors = { ...prev };
-        delete newVendors[itemId];
-        return newVendors;
-      });
-      if (activeSearchItemId === itemId) {
-        setActiveSearchItemId(null);
-      }
-    }
-  };
-
-  const selectVendor = (itemId: string, vendor: Vendor) => {
-    setItems(items.map(item => 
-      item.id === itemId ? { ...item, vendor } : item
-    ));
-    setActiveSearchItemId(null);
-    setSearchQuery(prev => {
-      const newQuery = { ...prev };
-      delete newQuery[itemId];
-      return newQuery;
-    });
-    setVendors(prev => {
-      const newVendors = { ...prev };
-      delete newVendors[itemId];
-      return newVendors;
-    });
-  };
-
-  const handleSearchFocus = (itemId: string) => {
-    setActiveSearchItemId(itemId);
-  };
-
-  // جلب المسافة القصوى للتوصيل من الإعدادات (أو استخدام القيمة الافتراضية)
-  useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        // محاولة جلب الإعدادات من جدول settings (إذا كان موجوداً)
-        const { data, error } = await supabase
-          .from('settings')
-          .select('value')
-          .eq('key', 'max_delivery_distance')
-          .single();
-        
-        if (!error && data && data.value) {
-          const distance = parseFloat(data.value);
-          if (!isNaN(distance) && distance > 0) {
-            setMaxDeliveryDistance(distance);
-          }
-        }
-      } catch (error) {
-        // إذا لم يكن الجدول موجوداً، نستخدم القيمة الافتراضية
-        console.log('Using default max delivery distance:', maxDeliveryDistance, 'km');
-      }
-    };
     loadSettings();
   }, []);
 
-  // الاتصال بمزود الخدمة
-  const callVendor = (phone: string) => {
-    if (!phone) {
-      Alert.alert('خطأ', 'رقم الهاتف غير متوفر');
+  // استقبال الموقع من CurrentLocationDisplay
+  const handleLocationUpdate = (location: { lat: number; lon: number; address: string } | null) => {
+    if (location) {
+      setUserLocation({
+        lat: location.lat,
+        lon: location.lon,
+      });
+    }
+  };
+
+  const loadSettings = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('settings')
+        .select('value')
+        .eq('key', 'max_delivery_distance')
+        .single();
+      
+      if (!error && data && data.value) {
+        const distance = parseFloat(data.value);
+        if (!isNaN(distance) && distance > 0) {
+          setMaxDeliveryDistance(distance);
+        }
+      }
+    } catch (error) {
+      console.log('Using default max delivery distance:', maxDeliveryDistance, 'km');
+    }
+  };
+
+  // إضافة مكان جديد
+  const addPlace = () => {
+    setPlacesWithItems([...placesWithItems, { id: Date.now().toString(), place: null, items: [] }]);
+  };
+
+  // حذف مكان
+  const removePlace = (placeId: string) => {
+    if (placesWithItems.length > 1) {
+      setPlacesWithItems(placesWithItems.filter(p => p.id !== placeId));
+    }
+  };
+
+  // إضافة عنصر لمكان معين
+  const addItemToPlace = (placeId: string) => {
+    setPlacesWithItems(placesWithItems.map(p => 
+      p.id === placeId 
+        ? { ...p, items: [...p.items, { id: Date.now().toString(), name: '' }] }
+        : p
+    ));
+  };
+
+  // تحديث عنصر في مكان معين
+  const updateItemInPlace = (placeId: string, itemId: string, value: string) => {
+    setPlacesWithItems(placesWithItems.map(p => 
+      p.id === placeId 
+        ? { ...p, items: p.items.map(item => item.id === itemId ? { ...item, name: value } : item) }
+        : p
+    ));
+  };
+
+  // حذف عنصر من مكان معين
+  const removeItemFromPlace = (placeId: string, itemId: string) => {
+    setPlacesWithItems(placesWithItems.map(p => 
+      p.id === placeId 
+        ? { ...p, items: p.items.filter(item => item.id !== itemId) }
+        : p
+    ));
+  };
+
+  // معالجة الصورة بعد اختيارها (من الكاميرا أو المعرض)
+  const processSelectedImage = async (imageUri: string, placeId: string, itemId: string) => {
+    try {
+      // ضغط الصورة وتحسينها باستخدام ImageManipulator
+      const manipulatedImage = await ImageManipulator.manipulateAsync(
+        imageUri,
+        [
+          // تقليل الحجم إذا كانت الصورة كبيرة (أقصى عرض 1200px)
+          { resize: { width: 1200 } },
+        ],
+        {
+          compress: 0.7, // ضغط بنسبة 70%
+          format: ImageManipulator.SaveFormat.JPEG,
+        }
+      );
+
+      setPlacesWithItems(placesWithItems.map(p => 
+        p.id === placeId 
+          ? { 
+              ...p, 
+              items: p.items.map(item => 
+                item.id === itemId ? { ...item, imageUri: manipulatedImage.uri } : item
+              )
+            }
+          : p
+      ));
+    } catch (error: any) {
+      console.error('Error processing image:', error);
+      Alert.alert('خطأ', 'فشل معالجة الصورة');
+    }
+  };
+
+  // فتح الكاميرا لالتقاط صورة
+  const openCamera = async (placeId: string, itemId: string) => {
+    try {
+      console.log('openCamera called:', { placeId, itemId, platform: Platform.OS });
+      
+      // في Web، الكاميرا قد لا تعمل بشكل صحيح
+      if (Platform.OS === 'web') {
+        Alert.alert(
+          'تنبيه',
+          'الكاميرا غير متاحة في المتصفح. يرجى استخدام المعرض لاختيار صورة.',
+          [{ text: 'حسناً', onPress: () => openImageLibrary(placeId, itemId) }]
+        );
+        return;
+      }
+      
+      // طلب أذونات الكاميرا
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      console.log('Camera permission status:', status);
+      
+      if (status !== 'granted') {
+        Alert.alert(
+          'تنبيه',
+          'يجب السماح بالوصول إلى الكاميرا لالتقاط الصور',
+          [
+            {
+              text: 'إعدادات',
+              onPress: () => {
+                // يمكن فتح إعدادات التطبيق هنا
+                console.log('Open settings');
+              },
+            },
+            {
+              text: 'إلغاء',
+              style: 'cancel',
+            },
+          ]
+        );
+        return;
+      }
+
+      console.log('Launching camera...');
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+
+      console.log('Camera result:', { canceled: result.canceled, hasAssets: !!result.assets?.[0] });
+
+      if (!result.canceled && result.assets && result.assets[0]) {
+        console.log('Processing image from camera...');
+        await processSelectedImage(result.assets[0].uri, placeId, itemId);
+      } else {
+        console.log('Camera was canceled or no image selected');
+      }
+    } catch (error: any) {
+      console.error('Error opening camera:', error);
+      Alert.alert('خطأ', `فشل فتح الكاميرا: ${error.message || 'خطأ غير معروف'}`);
+    }
+  };
+
+  // فتح المعرض لاختيار صورة
+  const openImageLibrary = async (placeId: string, itemId: string) => {
+    try {
+      console.log('openImageLibrary called:', { placeId, itemId });
+      
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      console.log('Media library permission status:', status);
+      
+      if (status !== 'granted') {
+        Alert.alert(
+          'تنبيه',
+          'يجب السماح بالوصول إلى الصور لاختيار صورة',
+          [
+            {
+              text: 'إعدادات',
+              onPress: () => {
+                console.log('Open settings');
+              },
+            },
+            {
+              text: 'إلغاء',
+              style: 'cancel',
+            },
+          ]
+        );
       return;
     }
     
-    const phoneNumber = phone.startsWith('+') ? phone : `+20${phone.replace(/^0/, '')}`;
-    const url = `tel:${phoneNumber}`;
-    
-    Linking.canOpenURL(url)
-      .then((supported) => {
-        if (supported) {
-          return Linking.openURL(url);
-        } else {
-          Alert.alert('خطأ', 'لا يمكن فتح تطبيق الهاتف');
-        }
-      })
-      .catch((err) => {
-        console.error('Error opening phone:', err);
-        Alert.alert('خطأ', 'فشل فتح تطبيق الهاتف');
+      console.log('Launching image library...');
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+        allowsMultipleSelection: false,
       });
+
+      console.log('Image library result:', { canceled: result.canceled, hasAssets: !!result.assets?.[0] });
+
+      if (!result.canceled && result.assets && result.assets[0]) {
+        console.log('Processing image from library...');
+        await processSelectedImage(result.assets[0].uri, placeId, itemId);
+        } else {
+        console.log('Image library was canceled or no image selected');
+      }
+    } catch (error: any) {
+      console.error('Error opening image library:', error);
+      Alert.alert('خطأ', `فشل فتح المعرض: ${error.message || 'خطأ غير معروف'}`);
+    }
   };
 
-  // حساب المسافة بين نقطتين (Haversine formula)
+  // اختيار صورة لعنصر معين (إظهار خيارات)
+  const pickImageForItem = (placeId: string, itemId: string) => {
+    console.log('pickImageForItem called:', { placeId, itemId, platform: Platform.OS });
+    
+    // في Web، نفتح المعرض مباشرة (لأن الكاميرا لا تعمل)
+    if (Platform.OS === 'web') {
+      openImageLibrary(placeId, itemId);
+      return;
+    }
+    
+    // في الموبايل، نعرض الخيارات
+    setSelectedPlaceId(placeId);
+    setSelectedItemId(itemId);
+    setShowImageSourceModal(true);
+  };
+
+  // إغلاق Modal وفتح الكاميرا
+  const handleOpenCamera = () => {
+    if (selectedPlaceId && selectedItemId) {
+      setShowImageSourceModal(false);
+      openCamera(selectedPlaceId, selectedItemId);
+      setSelectedPlaceId(null);
+      setSelectedItemId(null);
+    }
+  };
+
+  // إغلاق Modal وفتح المعرض
+  const handleOpenImageLibrary = () => {
+    if (selectedPlaceId && selectedItemId) {
+      setShowImageSourceModal(false);
+      openImageLibrary(selectedPlaceId, selectedItemId);
+      setSelectedPlaceId(null);
+      setSelectedItemId(null);
+    }
+  };
+
+  // حذف صورة من عنصر
+  const removeImageFromItem = (placeId: string, itemId: string) => {
+    setPlacesWithItems(placesWithItems.map(p => 
+      p.id === placeId 
+        ? { 
+            ...p, 
+            items: p.items.map(item => 
+              item.id === itemId ? { ...item, imageUri: undefined, imageUrl: undefined } : item
+            )
+          }
+        : p
+    ));
+  };
+
+  // رفع صورة لعنصر معين
+  const uploadImageForItem = async (placeId: string, itemId: string, imageUri: string): Promise<string | null> => {
+    setUploadingImageForItem(itemId);
+    try {
+      const imageUrl = await uploadImageToImgBB(imageUri);
+      setPlacesWithItems(placesWithItems.map(p => 
+        p.id === placeId 
+          ? { 
+              ...p, 
+              items: p.items.map(item => 
+                item.id === itemId ? { ...item, imageUrl } : item
+              )
+            }
+          : p
+      ));
+      return imageUrl;
+    } catch (error: any) {
+      console.error('Error uploading image:', error);
+      Alert.alert('خطأ', error.message || 'فشل رفع الصورة');
+      return null;
+    } finally {
+      setUploadingImageForItem(null);
+    }
+  };
+
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-    const R = 6371; // نصف قطر الأرض بالكيلومتر
+    const R = 6371;
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
     const a = 
@@ -187,54 +367,227 @@ export default function OutsideOrderScreen() {
     return R * c;
   };
 
-  // Geocode عنوان إلى lat/lon باستخدام Nominatim
-  const geocodeAddress = async (address: string): Promise<{ lat: number; lon: number } | null> => {
+  const getCityFromLocation = async (lat: number, lon: number): Promise<string | null> => {
     try {
-      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address + ', مصر')}&limit=1`;
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'FlashDelivery/1.0',
-        },
-      });
+      const data = await reverseGeocode(lat, lon);
       
-      if (!response.ok) return null;
-      
-      const data = await response.json();
-      if (data && data.length > 0) {
-        return {
-          lat: parseFloat(data[0].lat),
-          lon: parseFloat(data[0].lon),
-        };
+      if (data && data.address) {
+        return data.address.city || data.address.town || data.address.village || null;
       }
       return null;
-    } catch (error) {
-      console.error('Geocoding error:', error);
+    } catch (error: any) {
+      console.error('Error getting city:', error);
       return null;
     }
   };
 
+  const handleSmartSelection = async (placeId: string) => {
+    if (!userLocation) {
+      Alert.alert('تنبيه', 'يجب السماح بالوصول للموقع لاستخدام التحديد الذكي');
+      return;
+    }
+
+    setFindingPlace(placeId);
+    try {
+      // جلب اسم المدينة من الموقع الحالي
+      const cityName = await getCityFromLocation(userLocation.lat, userLocation.lon);
+      console.log('Customer city:', cityName);
+
+      // البحث عن أقرب مول أو سوق
+      let query = supabase
+        .from('places')
+        .select('*')
+        .in('type', ['mall', 'market'])
+        .limit(100);
+
+      const { data: malls, error: mallsError } = await query;
+
+      if (mallsError) {
+        console.error('Error fetching places:', mallsError);
+        throw mallsError;
+      }
+
+      // فلترة الأماكن التي لديها إحداثيات
+      let placesWithLocation = (malls || []).filter((place: any) => 
+        place.latitude != null && place.longitude != null
+      );
+
+      // إذا كان لدينا اسم المدينة، نفلتر الأماكن حسب المدينة
+      if (cityName && placesWithLocation.length > 0) {
+        // نبحث في العنوان عن اسم المدينة
+        const cityPlaces = placesWithLocation.filter((place: any) => {
+          const address = (place.address || '').toLowerCase();
+          const name = (place.name || '').toLowerCase();
+          const cityLower = cityName.toLowerCase();
+          
+          // البحث عن اسم المدينة في العنوان أو الاسم
+          return address.includes(cityLower) || name.includes(cityLower);
+        });
+
+        // إذا وجدنا أماكن في المدينة، نستخدمها
+        if (cityPlaces.length > 0) {
+          placesWithLocation = cityPlaces;
+        } else {
+          // إذا لم نجد أماكن في المدينة، نستخدم جميع الأماكن من قاعدة البيانات
+          console.log(`No places found in ${cityName}, using all places from database`);
+          placesWithLocation = (malls || []).filter((place: any) => 
+            place.latitude != null && place.longitude != null
+          );
+        }
+      }
+
+      if (placesWithLocation.length === 0) {
+        Alert.alert('تنبيه', 'لا توجد مولات أو أسواق متاحة مع مواقع محددة');
+        return;
+      }
+
+      // حساب المسافة لكل مكان واختيار الأقرب
+      let nearestPlace: Place | null = null;
+      let minDistance = Infinity;
+
+      placesWithLocation.forEach((place: any) => {
+        const distance = calculateDistance(
+          userLocation.lat,
+          userLocation.lon,
+          place.latitude,
+          place.longitude
+        );
+        if (distance < minDistance) {
+          minDistance = distance;
+          nearestPlace = {
+            id: place.id,
+            name: place.name,
+            address: place.address || '',
+            type: place.type,
+            latitude: place.latitude,
+            longitude: place.longitude,
+          };
+        }
+      });
+
+      if (nearestPlace) {
+        setPlacesWithItems(placesWithItems.map(p => 
+          p.id === placeId ? { ...p, place: nearestPlace } : p
+        ));
+        Alert.alert('نجح', `تم اختيار ${nearestPlace.name} (${minDistance.toFixed(1)} كم)`);
+      } else {
+        Alert.alert('تنبيه', 'لم يتم العثور على مكان قريب');
+      }
+    } catch (error: any) {
+      console.error('Error finding nearest place:', error);
+      Alert.alert('خطأ', 'فشل البحث عن أقرب مكان');
+    } finally {
+      setFindingPlace(null);
+    }
+  };
+
+  const handleOpenDirectory = (placeId: string) => {
+    router.push({
+      pathname: '/customer/places-directory',
+      params: { placeId, itemId: placeId, returnPath: '/customer/outside-order' }, // itemId للتوافق
+    });
+  };
+
+
+  // التحقق من اختيار مكان عند العودة من الدليل
+  useFocusEffect(
+    useCallback(() => {
+      const checkSelectedPlaces = async () => {
+        const updatedPlaces = [...placesWithItems];
+        let hasChanges = false;
+        
+        for (let i = 0; i < updatedPlaces.length; i++) {
+          const placeWithItems = updatedPlaces[i];
+          const storedPlace = await AsyncStorage.getItem(`selected_place_${placeWithItems.id}`);
+          if (storedPlace) {
+            const place = JSON.parse(storedPlace);
+            updatedPlaces[i] = { ...placeWithItems, place };
+            await AsyncStorage.removeItem(`selected_place_${placeWithItems.id}`);
+            hasChanges = true;
+          }
+        }
+        
+        if (hasChanges) {
+          setPlacesWithItems(updatedPlaces);
+        }
+      };
+      checkSelectedPlaces();
+    }, [placesWithItems.length])
+  );
+
   const handleSubmit = async () => {
-    // فلترة العناصر الصالحة (لها اسم على الأقل)
-    const validItems = items.filter(item => item.name.trim());
+    // التحقق من وجود أماكن محددة
+    const placesWithValidData = placesWithItems.filter(p => 
+      p.place && p.items.length > 0 && p.items.some(item => item.name.trim())
+    );
     
-    if (validItems.length === 0) {
-      Alert.alert('خطأ', 'الرجاء إدخال عنصر واحد على الأقل');
+    if (placesWithValidData.length === 0) {
+      Alert.alert('خطأ', 'الرجاء تحديد مكان واحد على الأقل وإدخال عنصر واحد على الأقل');
+      return;
+    }
+
+    // التحقق من وجود أماكن بدون عناصر
+    const placesWithoutItems = placesWithItems.filter(p => 
+      p.place && (!p.items.length || !p.items.some(item => item.name.trim()))
+    );
+    if (placesWithoutItems.length > 0) {
+      Alert.alert('تنبيه', 'الرجاء إدخال عناصر للأماكن المحددة');
       return;
     }
 
     setLoading(true);
     try {
+      // 0. رفع الصور لكل عنصر (إذا لم تكن مرفوعة بالفعل)
+      const uploadPromises: Array<Promise<{ placeId: string; itemId: string; imageUrl: string | null }>> = [];
+      
+      placesWithValidData.forEach(placeWithItems => {
+        placeWithItems.items.forEach(item => {
+          if (item.imageUri && !item.imageUrl) {
+            uploadPromises.push(
+              uploadImageForItem(placeWithItems.id, item.id, item.imageUri)
+                .then(imageUrl => ({ placeId: placeWithItems.id, itemId: item.id, imageUrl }))
+                .catch(() => ({ placeId: placeWithItems.id, itemId: item.id, imageUrl: null }))
+            );
+          }
+        });
+      });
+
+      // انتظار رفع جميع الصور وتحديث state
+      if (uploadPromises.length > 0) {
+        const uploadResults = await Promise.all(uploadPromises);
+        uploadResults.forEach(({ placeId, itemId, imageUrl }) => {
+          if (imageUrl) {
+            setPlacesWithItems(prev => prev.map(p => 
+              p.id === placeId 
+                ? { 
+                    ...p, 
+                    items: p.items.map(item => 
+                      item.id === itemId ? { ...item, imageUrl } : item
+                    )
+                  }
+                : p
+            ));
+          }
+        });
+        // انتظار قصير لضمان تحديث state
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+      
+      // تحديث placesWithValidData بعد رفع الصور
+      const updatedPlacesWithItems = placesWithItems.filter(p => 
+        p.place && p.items.length > 0 && p.items.some(item => item.name.trim())
+      );
+
       // 1. جلب عنوان العميل الافتراضي
       let customerAddress: any = null;
       
       try {
-        // جلب العناوين الافتراضية (قد يكون هناك أكثر من واحد)
         const { data: defaultAddresses, error: addressError } = await supabase
           .from('customer_addresses')
           .select('*')
           .eq('customer_id', user?.id)
           .eq('is_default', true)
-          .limit(1); // جلب أول عنوان افتراضي فقط
+          .limit(1);
 
         if (addressError) {
           console.warn('Error fetching default address:', addressError);
@@ -242,7 +595,6 @@ export default function OutsideOrderScreen() {
           customerAddress = defaultAddresses[0];
         }
         
-        // إذا لم يكن هناك عنوان افتراضي، جرب جلب أي عنوان
         if (!customerAddress) {
           const { data: anyAddresses, error: anyAddressError } = await supabase
             .from('customer_addresses')
@@ -252,7 +604,6 @@ export default function OutsideOrderScreen() {
             .limit(1);
           
           if (anyAddressError) {
-            console.warn('Error fetching any address:', anyAddressError);
             throw new Error('الرجاء إضافة عنوان توصيل في ملفك الشخصي أولاً');
           }
           
@@ -263,78 +614,35 @@ export default function OutsideOrderScreen() {
           }
         }
       } catch (error: any) {
-        // إذا كان الخطأ متعلق بالعناوين، نرميه
         if (error.message?.includes('عنوان')) {
           throw error;
         }
-        // وإلا نستمر بدون عنوان (للطلبات بدون مزود، قد لا نحتاج عنوان)
         console.warn('Could not fetch address, continuing without it:', error);
       }
 
-      // 2. فصل العناصر: مع مزود وبدون مزود
-      const itemsWithVendor: { [vendorId: string]: string[] } = {};
-      const itemsWithoutVendor: string[] = [];
+      // 2. تجميع العناصر حسب مكان الالتقاط (مع الصور)
+      const itemsByPlace: { [placeId: string]: { place: Place; items: { name: string; imageUrl?: string }[] } } = {};
       
-      console.log('Valid items:', validItems);
-      
-      validItems.forEach(item => {
-        if (item.vendor) {
-          const vendorId = item.vendor.id;
-          if (!itemsWithVendor[vendorId]) {
-            itemsWithVendor[vendorId] = [];
+      updatedPlacesWithItems.forEach(placeWithItems => {
+        if (placeWithItems.place) {
+          const placeId = placeWithItems.place.id;
+          const validItems = placeWithItems.items
+            .filter(item => item.name.trim())
+            .map(item => ({
+              name: item.name.trim(),
+              imageUrl: item.imageUrl || undefined,
+            }));
+          
+          if (validItems.length > 0) {
+            itemsByPlace[placeId] = {
+              place: placeWithItems.place,
+              items: validItems,
+            };
           }
-          itemsWithVendor[vendorId].push(item.name.trim());
-        } else {
-          itemsWithoutVendor.push(item.name.trim());
         }
       });
-      
-      console.log('Items with vendor:', itemsWithVendor);
-      console.log('Items without vendor:', itemsWithoutVendor);
 
-      // 3. جلب بيانات المزودين مع مواقعهم (إذا كان هناك عناصر مع مزود)
-      let vendorsData: any[] = [];
-      if (Object.keys(itemsWithVendor).length > 0) {
-        const vendorIds = Object.keys(itemsWithVendor);
-        const { data, error: vendorsError } = await supabase
-          .from('vendors')
-          .select('id, name, latitude, longitude')
-          .in('id', vendorIds);
-
-        if (vendorsError) throw vendorsError;
-        vendorsData = data || [];
-      }
-
-      // 4. حساب أبعد مزود عن العميل (إذا كان هناك مزودين)
-      let farthestVendor = vendorsData.length > 0 ? vendorsData[0] : null;
-      let maxDistance = 0;
-      let customerLocation: { lat: number; lon: number } | null = null;
-      
-      if (customerAddress && customerAddress.place_name) {
-        // Geocode عنوان العميل
-        customerLocation = await geocodeAddress(customerAddress.place_name);
-        
-        if (customerLocation && vendorsData.length > 0) {
-          // حساب المسافة من العميل لكل مزود
-          vendorsData.forEach(vendor => {
-            if (vendor.latitude && vendor.longitude) {
-              const distance = calculateDistance(
-                customerLocation!.lat,
-                customerLocation!.lon,
-                vendor.latitude,
-                vendor.longitude
-              );
-              if (distance > maxDistance) {
-                maxDistance = distance;
-                farthestVendor = vendor;
-              }
-            }
-          });
-        }
-      }
-
-      // 5. جلب السائقين المتاحين مع مواقعهم
-      // أولاً: جلب جميع السائقين
+      // 3. جلب السائقين المتاحين
       const { data: allDrivers, error: driversError } = await supabase
         .from('profiles')
         .select('id')
@@ -346,7 +654,6 @@ export default function OutsideOrderScreen() {
       if (!driversError && allDrivers && allDrivers.length > 0) {
         const driverIds = allDrivers.map(d => d.id);
         
-        // جلب آخر موقع لكل سائق
         const { data: locationsData, error: locationsError } = await supabase
           .from('driver_locations')
           .select('driver_id, latitude, longitude')
@@ -354,7 +661,6 @@ export default function OutsideOrderScreen() {
           .order('updated_at', { ascending: false });
 
         if (!locationsError && locationsData) {
-          // أخذ آخر موقع لكل سائق
           const latestLocations = new Map<string, { driver_id: string; latitude: number; longitude: number }>();
           locationsData.forEach(loc => {
             if (loc.latitude && loc.longitude && !latestLocations.has(loc.driver_id)) {
@@ -369,39 +675,22 @@ export default function OutsideOrderScreen() {
         }
       }
 
-      // 6. اختيار السائق المناسب
+      // 4. اختيار السائق المناسب لكل مكان وإنشاء الطلبات
+      const orders: any[] = [];
+      
+      Object.values(itemsByPlace).forEach(({ place, items: placeItems }) => {
       let selectedDriverId: string | null = null;
       
-      if (driversData && driversData.length > 0) {
-        if (farthestVendor && farthestVendor.latitude && farthestVendor.longitude) {
-          // إذا كان هناك مزود: اختيار أقرب سائق لأبعد مزود
+        if (driversData.length > 0 && place.latitude && place.longitude) {
           let minDistance = Infinity;
           driversData.forEach(driver => {
             if (driver.latitude && driver.longitude) {
               const distance = calculateDistance(
                 driver.latitude,
                 driver.longitude,
-                farthestVendor.latitude!,
-                farthestVendor.longitude!
+                place.latitude!,
+                place.longitude!
               );
-              if (distance < minDistance) {
-                minDistance = distance;
-                selectedDriverId = driver.driver_id;
-              }
-            }
-          });
-        } else if (customerLocation && itemsWithoutVendor.length > 0) {
-          // إذا لم يكن هناك مزود: اختيار سائق في نطاق المسافة القصوى من العميل
-          let minDistance = Infinity;
-          driversData.forEach(driver => {
-            if (driver.latitude && driver.longitude) {
-              const distance = calculateDistance(
-                customerLocation.lat,
-                customerLocation.lon,
-                driver.latitude,
-                driver.longitude
-              );
-              // فقط السائقين في النطاق المسموح
               if (distance <= maxDeliveryDistance && distance < minDistance) {
                 minDistance = distance;
                 selectedDriverId = driver.driver_id;
@@ -409,103 +698,56 @@ export default function OutsideOrderScreen() {
             }
           });
         }
-      }
 
-      // 7. إنشاء الطلبات
-      const orders: any[] = [];
-      
-      // أ. الطلبات مع مزود خدمة (مجمعة حسب المزود)
-      Object.entries(itemsWithVendor).forEach(([vendorId, itemsList]) => {
+        const deliveryAddr = customerAddress?.full_address || customerAddress?.place_name || 'موقع العميل';
+        
+        // استخراج أسماء العناصر وروابط الصور
+        const itemNames = placeItems.map(item => item.name);
+        const itemImages = placeItems
+          .map(item => item.imageUrl)
+          .filter((url): url is string => !!url);
+        
         orders.push({
           customer_id: user?.id,
-          vendor_id: vendorId,
+          vendor_id: null,
           driver_id: selectedDriverId,
-          items: itemsList,
+          items: itemNames,
           status: selectedDriverId ? 'accepted' : 'pending',
-          pickup_address: vendorsData.find(v => v.id === vendorId)?.name || '',
-          delivery_address: customerAddress?.full_address || customerAddress?.place_name || '',
+          pickup_address: place.name + (place.address ? ` - ${place.address}` : ''),
+          delivery_address: deliveryAddr,
           total_fee: 0,
+          images: itemImages.length > 0 ? itemImages : null,
         });
       });
       
-      // ب. الطلبات بدون مزود خدمة (طلب واحد لجميع العناصر)
-      if (itemsWithoutVendor.length > 0) {
-        // للطلبات بدون مزود، نحتاج عنوان للتوصيل
-        let deliveryAddr = 'موقع العميل'; // قيمة افتراضية
-        
-        if (customerAddress) {
-          deliveryAddr = customerAddress.full_address || customerAddress.place_name || 'موقع العميل';
-        } else {
-          // إذا لم يكن هناك عنوان، نستخدم عنوان افتراضي
-          console.warn('No customer address found, using default address');
-        }
-        
-        orders.push({
-          customer_id: user?.id,
-          vendor_id: null, // بدون مزود خدمة
-          driver_id: selectedDriverId,
-          items: itemsWithoutVendor,
-          status: selectedDriverId ? 'accepted' : 'pending',
-          pickup_address: deliveryAddr, // للطلبات بدون مزود، نقطة الالتقاط هي موقع العميل
-          delivery_address: deliveryAddr,
-          total_fee: 0,
-        });
-      }
-      
-      // التأكد من وجود طلبات للإرسال
       if (orders.length === 0) {
         throw new Error('لا توجد طلبات للإرسال');
       }
-
-      console.log('Submitting orders:', orders);
       
       const { data, error } = await supabase
         .from('orders')
         .insert(orders)
         .select();
 
-      if (error) {
-        console.error('Error inserting orders:', error);
-        throw error;
-      }
-      
-      console.log('Orders inserted successfully:', data);
-      
-      // بناء رسالة النجاح
-      let message = '';
-      if (orders.length === 1) {
-        if (orders[0].vendor_id === null) {
-          message = selectedDriverId 
+      if (error) throw error;
+
+      const hasAssignedDriver = orders.some(order => order.driver_id !== null);
+      const message = orders.length === 1
+        ? hasAssignedDriver 
             ? 'تم إرسال طلبك بنجاح! تم تعيين سائق تلقائياً.'
-            : `تم إرسال طلبك بنجاح! سيتم إرساله للسائقين في نطاق ${maxDeliveryDistance} كم.`;
-        } else {
-          message = selectedDriverId 
-            ? 'تم إرسال طلبك بنجاح! تم تعيين سائق تلقائياً.'
-            : 'تم إرسال طلبك بنجاح! بانتظار قبول السائق.';
-        }
-      } else {
-        message = selectedDriverId 
+          : `تم إرسال طلبك بنجاح! سيتم إرساله للسائقين في نطاق ${maxDeliveryDistance} كم.`
+        : hasAssignedDriver 
           ? `تم إرسال ${orders.length} طلب بنجاح! تم تعيين سائق تلقائياً.`
           : `تم إرسال ${orders.length} طلب بنجاح! بانتظار قبول السائق.`;
-      }
       
-      // توجيه مباشر إلى قائمة الطلبات
       router.replace('/(tabs)/customer/orders');
       
-      // عرض رسالة النجاح بعد التوجيه
       setTimeout(() => {
         Alert.alert('✅ نجح', message);
       }, 300);
     } catch (error: any) {
       console.error('Error in handleSubmit:', error);
-      const errorMessage = error.message || error.code || 'فشل إرسال الطلب';
-      console.error('Error details:', {
-        message: error.message,
-        code: error.code,
-        details: error.details,
-        hint: error.hint,
-      });
-      Alert.alert('خطأ', errorMessage);
+      Alert.alert('خطأ', error.message || 'فشل إرسال الطلب');
     } finally {
       setLoading(false);
     }
@@ -514,109 +756,175 @@ export default function OutsideOrderScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
+        <TouchableOpacity onPress={() => {
+          if (router.canGoBack()) {
+            router.back();
+          } else {
+            router.replace('/(tabs)/customer/home');
+          }
+        }}>
           <Ionicons name="arrow-back" size={24} color="#1a1a1a" />
         </TouchableOpacity>
         <Text style={styles.title}>{t('customer.outsideOrder')}</Text>
       </View>
 
-      <CurrentLocationDisplay />
+      <CurrentLocationDisplay onLocationUpdate={handleLocationUpdate} />
 
       <ScrollView style={styles.content} keyboardShouldPersistTaps="handled">
-        <Text style={styles.label}>{t('customer.itemList')}</Text>
-        {items.map((item, index) => (
-          <View key={item.id} style={styles.itemContainer}>
-            <View style={styles.itemRow}>
-              {/* حقل إدخال العنصر */}
-              <TextInput
-                style={styles.itemInput}
-                placeholder={`عنصر ${index + 1}`}
-                value={item.name}
-                onChangeText={(value) => updateItem(item.id, value)}
-                placeholderTextColor="#999"
-                textAlign="right"
-              />
-              
-              {/* مزود الخدمة المختار أو البحث */}
-              {item.vendor ? (
-                <View style={styles.vendorBadge}>
-                  <Text style={styles.vendorBadgeText} numberOfLines={1}>
-                    {item.vendor.name}
-                  </Text>
-                  <TouchableOpacity
-                    onPress={() => callVendor(item.vendor!.phone)}
-                    style={styles.callButton}
-                  >
-                    <Ionicons name="call" size={18} color="#34C759" />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => selectVendor(item.id, null as any)}
-                    style={styles.removeVendorButton}
-                  >
-                    <Ionicons name="close-circle" size={18} color="#FF3B30" />
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <View style={styles.vendorSearchWrapper}>
-                  <TextInput
-                    style={styles.vendorSearchInput}
-                    placeholder="ابحث..."
-                    value={searchQuery[item.id] || ''}
-                    onChangeText={(value) => {
-                      setSearchQuery(prev => ({ ...prev, [item.id]: value }));
-                      setActiveSearchItemId(item.id);
-                    }}
-                    onFocus={() => handleSearchFocus(item.id)}
-                    placeholderTextColor="#999"
-                    textAlign="right"
-                  />
-                  {searching[item.id] && (
-                    <ActivityIndicator size="small" color="#007AFF" style={styles.searchLoaderInline} />
-                  )}
-                </View>
-              )}
-              
-              {items.length > 1 && (
+        {placesWithItems.map((placeWithItems, placeIndex) => (
+          <View key={placeWithItems.id} style={styles.placeContainer}>
+            {/* عنوان المكان */}
+            <View style={styles.placeHeader}>
+              <Text style={styles.placeTitle}>
+                {placeWithItems.place ? placeWithItems.place.name : `مكان ${placeIndex + 1}`}
+              </Text>
+              {placesWithItems.length > 1 && (
                 <TouchableOpacity
-                  onPress={() => removeItem(item.id)}
-                  style={styles.removeButton}
+                  onPress={() => removePlace(placeWithItems.id)}
+                  style={styles.removePlaceButton}
                 >
                   <Ionicons name="close-circle" size={24} color="#FF3B30" />
                 </TouchableOpacity>
               )}
             </View>
 
-            {/* قائمة النتائج المنسدلة */}
-            {activeSearchItemId === item.id && vendors[item.id] && vendors[item.id].length > 0 && (
-              <View style={styles.vendorDropdown}>
-                <FlatList
-                  data={vendors[item.id]}
-                  keyExtractor={(vendor) => vendor.id}
-                  renderItem={({ item: vendor }) => (
+            {/* اختيار المكان */}
+            <View style={styles.pickupSection}>
+              {placeWithItems.place ? (
+                <View style={styles.selectedPlaceCard}>
+                  <View style={styles.selectedPlaceInfo}>
+                    <Text style={styles.selectedPlaceName}>{placeWithItems.place.name}</Text>
+                    <Text style={styles.selectedPlaceAddress}>{placeWithItems.place.address}</Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => setPlacesWithItems(placesWithItems.map(p => 
+                      p.id === placeWithItems.id ? { ...p, place: null, items: [] } : p
+                    ))}
+                    style={styles.removePlaceButton}
+                  >
+                    <Ionicons name="close-circle" size={20} color="#FF3B30" />
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.placeButtonsRow}>
+                  <TouchableOpacity
+                    style={[styles.placeButton, styles.smartButton]}
+                    onPress={() => handleSmartSelection(placeWithItems.id)}
+                    disabled={findingPlace === placeWithItems.id}
+                  >
+                    {findingPlace === placeWithItems.id ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <Ionicons name="sparkles" size={18} color="#fff" />
+                        <Text style={styles.placeButtonText}>التحديد الذكي</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.placeButton, styles.directoryButton]}
+                    onPress={() => handleOpenDirectory(placeWithItems.id)}
+                  >
+                    <Ionicons name="list" size={18} color="#fff" />
+                    <Text style={styles.placeButtonText}>الدليل</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+
+            {/* قائمة العناصر للمكان */}
+            {placeWithItems.place && (
+              <View style={styles.itemsSection}>
+                <Text style={styles.itemsLabel}>العناصر من {placeWithItems.place.name}</Text>
+                {placeWithItems.items.map((item) => (
+          <View key={item.id} style={styles.itemContainer}>
+            <View style={styles.itemRow}>
+              <TextInput
+                style={styles.itemInput}
+                        placeholder="اسم العنصر"
+                value={item.name}
+                        onChangeText={(value) => updateItemInPlace(placeWithItems.id, item.id, value)}
+                placeholderTextColor="#999"
+                textAlign="right"
+              />
+              
+                      {/* صورة العنصر بجانب حقل النص */}
+                      {item.imageUri || item.imageUrl ? (
+                  <TouchableOpacity
+                          style={styles.itemImageButton}
+                          onPress={() => {
+                            console.log('Image preview pressed:', { placeId: placeWithItems.id, itemId: item.id });
+                            pickImageForItem(placeWithItems.id, item.id);
+                          }}
+                          disabled={uploadingImageForItem === item.id}
+                          activeOpacity={0.7}
+                        >
+                          <View style={styles.itemImageContainer}>
+                            <Image 
+                              source={{ uri: item.imageUrl || item.imageUri }} 
+                              style={styles.itemImagePreview} 
+                            />
+                  <TouchableOpacity
+                              style={styles.removeImageButton}
+                              onPress={(e) => {
+                                e.stopPropagation();
+                                removeImageFromItem(placeWithItems.id, item.id);
+                              }}
+                  >
+                    <Ionicons name="close-circle" size={18} color="#FF3B30" />
+                  </TouchableOpacity>
+                            {item.imageUri && !item.imageUrl && uploadingImageForItem === item.id && (
+                              <View style={styles.uploadingOverlay}>
+                                <ActivityIndicator size="small" color="#007AFF" />
+                </View>
+                            )}
+                          </View>
+                        </TouchableOpacity>
+                      ) : (
+                        <TouchableOpacity
+                          style={styles.addImageButtonSmall}
+                          onPress={() => {
+                            console.log('Camera button pressed:', { placeId: placeWithItems.id, itemId: item.id });
+                            pickImageForItem(placeWithItems.id, item.id);
+                          }}
+                          disabled={uploadingImageForItem === item.id}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons name="camera" size={24} color="#007AFF" />
+                        </TouchableOpacity>
+                      )}
+                      
+                <TouchableOpacity
+                        onPress={() => removeItemFromPlace(placeWithItems.id, item.id)}
+                  style={styles.removeButton}
+                >
+                  <Ionicons name="close-circle" size={24} color="#FF3B30" />
+                </TouchableOpacity>
+            </View>
+                  </View>
+                ))}
                     <TouchableOpacity
-                      style={styles.vendorCard}
-                      onPress={() => selectVendor(item.id, vendor)}
+                  style={styles.addItemButton}
+                  onPress={() => addItemToPlace(placeWithItems.id)}
                     >
-                      <Text style={styles.vendorName}>{vendor.name}</Text>
-                      <Text style={styles.vendorAddress}>{vendor.address}</Text>
+                  <Ionicons name="add-circle" size={20} color="#007AFF" />
+                  <Text style={styles.addItemButtonText}>إضافة عنصر</Text>
                     </TouchableOpacity>
-                  )}
-                  nestedScrollEnabled
-                />
               </View>
             )}
           </View>
         ))}
 
-        <TouchableOpacity style={styles.addButton} onPress={addItem}>
+        <TouchableOpacity style={styles.addButton} onPress={addPlace}>
           <Ionicons name="add-circle" size={24} color="#007AFF" />
-          <Text style={styles.addButtonText}>إضافة عنصر</Text>
+          <Text style={styles.addButtonText}>إضافة مكان آخر</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={[styles.submitButton, loading && styles.submitButtonDisabled]}
           onPress={handleSubmit}
-          disabled={loading}
+          disabled={loading || uploadingImageForItem !== null}
         >
           {loading ? (
             <ActivityIndicator color="#fff" />
@@ -625,6 +933,60 @@ export default function OutsideOrderScreen() {
           )}
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Modal لاختيار مصدر الصورة */}
+      <Modal
+        visible={showImageSourceModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => {
+          setShowImageSourceModal(false);
+          setSelectedPlaceId(null);
+          setSelectedItemId(null);
+        }}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => {
+            setShowImageSourceModal(false);
+            setSelectedPlaceId(null);
+            setSelectedItemId(null);
+          }}
+        >
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>اختر مصدر الصورة</Text>
+            <Text style={styles.modalSubtitle}>من أين تريد اختيار الصورة؟</Text>
+            
+            <TouchableOpacity
+              style={styles.modalOption}
+              onPress={handleOpenCamera}
+            >
+              <Ionicons name="camera" size={24} color="#007AFF" />
+              <Text style={styles.modalOptionText}>الكاميرا</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.modalOption}
+              onPress={handleOpenImageLibrary}
+            >
+              <Ionicons name="images" size={24} color="#007AFF" />
+              <Text style={styles.modalOptionText}>المعرض</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.modalCancelButton}
+              onPress={() => {
+                setShowImageSourceModal(false);
+                setSelectedPlaceId(null);
+                setSelectedItemId(null);
+              }}
+            >
+              <Text style={styles.modalCancelText}>إلغاء</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -638,174 +1000,301 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#fff',
-    padding: 16,
+    padding: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
   },
   title: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 'bold',
-    marginLeft: 16,
+    marginLeft: 12,
     color: '#1a1a1a',
   },
   content: {
     flex: 1,
-    padding: 20,
+    padding: 10,
   },
   label: {
     fontSize: 16,
     fontWeight: '600',
-    marginBottom: 12,
+    marginBottom: 8,
     color: '#1a1a1a',
     textAlign: 'right',
   },
-  searchInput: {
+  placeContainer: {
+    marginBottom: 10,
+    padding: 10,
     backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    marginBottom: 12,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: '#e0e0e0',
   },
-  loader: {
-    marginVertical: 12,
-  },
-  vendorList: {
-    maxHeight: 200,
-    marginBottom: 24,
-  },
-  vendorCard: {
-    backgroundColor: '#fff',
-    padding: 16,
-    borderRadius: 12,
+  placeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: 8,
-    borderWidth: 2,
-    borderColor: '#e0e0e0',
   },
-  vendorCardSelected: {
-    borderColor: '#007AFF',
-    backgroundColor: '#f0f8ff',
-  },
-  vendorName: {
+  placeTitle: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: 'bold',
     color: '#1a1a1a',
-    marginBottom: 4,
     textAlign: 'right',
   },
-  vendorAddress: {
-    fontSize: 14,
+  itemsSection: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  itemsLabel: {
+    fontSize: 13,
+    fontWeight: '600',
     color: '#666',
+    marginBottom: 6,
     textAlign: 'right',
+  },
+  addItemButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 6,
+    marginTop: 4,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#007AFF',
+    borderStyle: 'dashed',
+  },
+  addItemButtonText: {
+    color: '#007AFF',
+    fontSize: 13,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  addImageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 10,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#007AFF',
+    borderStyle: 'dashed',
+  },
+  addImageButtonText: {
+    color: '#007AFF',
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 6,
   },
   itemContainer: {
-    marginBottom: 16,
-    padding: 12,
-    backgroundColor: '#fff',
-    borderRadius: 12,
+    marginBottom: 8,
+    padding: 8,
+    backgroundColor: '#f9f9f9',
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: '#e0e0e0',
   },
   itemRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 4,
+    marginBottom: 0,
   },
   itemInput: {
     flex: 1,
     backgroundColor: '#f5f5f5',
-    borderRadius: 12,
-    padding: 12,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    minWidth: 120,
-  },
-  vendorSearchWrapper: {
-    position: 'relative',
-    width: 140,
-  },
-  vendorSearchInput: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 12,
-    padding: 12,
+    borderRadius: 8,
+    padding: 8,
     fontSize: 14,
     borderWidth: 1,
     borderColor: '#e0e0e0',
-    textAlign: 'right',
-    width: '100%',
   },
-  searchLoaderInline: {
-    position: 'absolute',
-    left: 8,
-    top: 12,
+  removeButton: {
+    marginLeft: 2,
   },
-  vendorBadge: {
+  pickupSection: {
+    marginTop: 4,
+  },
+  placeButtonsRow: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  placeButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    gap: 4,
+  },
+  smartButton: {
+    backgroundColor: '#007AFF',
+  },
+  directoryButton: {
+    backgroundColor: '#34C759',
+  },
+  placeButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  selectedPlaceCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#e3f2fd',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
+    padding: 8,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: '#007AFF',
-    maxWidth: 180,
-    gap: 6,
   },
-  vendorBadgeText: {
-    fontSize: 14,
+  selectedPlaceInfo: {
+    flex: 1,
+  },
+  selectedPlaceName: {
+    fontSize: 13,
     fontWeight: '600',
     color: '#007AFF',
-    flex: 1,
+    marginBottom: 2,
     textAlign: 'right',
   },
-  callButton: {
-    padding: 4,
-    backgroundColor: '#34C759',
-    borderRadius: 8,
+  selectedPlaceAddress: {
+    fontSize: 11,
+    color: '#666',
+    textAlign: 'right',
   },
-  removeButton: {
-    marginLeft: 4,
-  },
-  removeVendorButton: {
-    padding: 2,
-  },
-  vendorDropdown: {
-    maxHeight: 200,
-    marginTop: 8,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    zIndex: 1000,
+  removePlaceButton: {
+    marginLeft: 6,
   },
   addButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 16,
-    marginBottom: 24,
+    padding: 10,
+    marginBottom: 12,
   },
   addButtonText: {
-    fontSize: 16,
+    fontSize: 15,
     color: '#007AFF',
-    marginLeft: 8,
+    marginLeft: 6,
     fontWeight: '600',
   },
   submitButton: {
     backgroundColor: '#007AFF',
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: 10,
+    padding: 12,
     alignItems: 'center',
+    marginTop: 6,
+    marginBottom: 12,
   },
   submitButtonDisabled: {
     opacity: 0.6,
   },
   submitButtonText: {
     color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  itemImageButton: {
+    marginLeft: 4,
+  },
+  itemImageContainer: {
+    position: 'relative',
+    width: 50,
+    height: 50,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: '#f5f5f5',
+    borderWidth: 2,
+    borderColor: '#007AFF',
+  },
+  itemImagePreview: {
+    width: 50,
+    height: 50,
+    borderRadius: 6,
+  },
+  addImageButtonSmall: {
+    width: 50,
+    height: 50,
+    borderRadius: 8,
+    backgroundColor: '#f5f5f5',
+    borderWidth: 2,
+    borderColor: '#007AFF',
+    borderStyle: 'dashed',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 4,
+  },
+  removeImageButton: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    zIndex: 10,
+  },
+  uploadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 16,
+    paddingBottom: 32,
+  },
+  modalTitle: {
     fontSize: 18,
+    fontWeight: '700',
+    color: '#1a1a1a',
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  modalSubtitle: {
+    fontSize: 13,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  modalOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 10,
+    marginBottom: 8,
+    gap: 10,
+  },
+  modalOptionText: {
+    fontSize: 15,
+    color: '#1a1a1a',
+    fontWeight: '600',
+  },
+  modalCancelButton: {
+    marginTop: 8,
+    padding: 12,
+    alignItems: 'center',
+  },
+  modalCancelText: {
+    fontSize: 15,
+    color: '#FF3B30',
     fontWeight: '600',
   },
 });
-

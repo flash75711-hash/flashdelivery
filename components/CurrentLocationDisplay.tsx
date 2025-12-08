@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
+import { reverseGeocode } from '../lib/supabase';
 
 interface CurrentLocationDisplayProps {
   onLocationUpdate?: (location: { lat: number; lon: number; address: string } | null) => void;
@@ -12,22 +13,50 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const reverseGeocode = useCallback(async (lat: number, lon: number): Promise<string | null> => {
+  const reverseGeocodeAddress = useCallback(async (lat: number, lon: number): Promise<string | null> => {
     try {
-      const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&accept-language=ar&addressdetails=1`;
+      const data = await reverseGeocode(lat, lon);
       
-      const response = await fetch(nominatimUrl, {
-        headers: {
-          'User-Agent': 'FlashDelivery/1.0',
-        },
-      });
-
-      if (!response.ok) return null;
-
-      const data = await response.json();
+      if (!data) return null;
 
       if (data && data.address) {
         const address = data.address;
+        
+        // أولوية: اسم المنطقة/الحي داخل المدينة
+        // نحاول جلب اسم المنطقة من عدة مصادر
+        let areaName = '';
+        
+        // 1. الحي (neighbourhood) - الأفضل
+        if (address.neighbourhood) {
+          areaName = address.neighbourhood;
+        }
+        // 2. المنطقة السكنية (suburb)
+        else if (address.suburb) {
+          areaName = address.suburb;
+        }
+        // 3. الحارة/الزقاق (quarter)
+        else if (address.quarter) {
+          areaName = address.quarter;
+        }
+        // 4. القطاع/المنطقة الإدارية (district)
+        else if (address.district) {
+          areaName = address.district;
+        }
+        // 5. المدينة الصغيرة (town)
+        else if (address.town) {
+          areaName = address.town;
+        }
+        
+        // إذا وجدنا اسم المنطقة، نضيف المدينة
+        if (areaName) {
+          const cityName = address.city || address.state || '';
+          if (cityName && cityName !== areaName) {
+            return `${areaName}، ${cityName}`;
+          }
+          return areaName;
+        }
+        
+        // إذا لم نجد منطقة محددة، نعرض العنوان الكامل
         const addressParts: string[] = [];
         
         // رقم المبنى/المنزل
@@ -75,11 +104,6 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
           addressParts.push(`محافظة ${address.state}`);
         }
         
-        // الرمز البريدي (اختياري)
-        if (address.postcode) {
-          addressParts.push(`(رمز بريدي: ${address.postcode})`);
-        }
-        
         // إذا كان هناك أجزاء، نرجعها
         if (addressParts.length > 0) {
           return addressParts.join('، ');
@@ -89,17 +113,17 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
         if (data.display_name) {
           return data.display_name
             .split(',')
-            .filter(part => {
+            .filter((part: string) => {
               const trimmed = part.trim();
               return trimmed !== 'مصر' && !/^\d+$/.test(trimmed);
             })
-            .map(part => part.trim())
+            .map((part: string) => part.trim())
             .join('، ');
         }
       }
       
       return null;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Reverse geocoding error:', error);
       return null;
     }
@@ -113,7 +137,7 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
       
       const lat = currentLocation.coords.latitude;
       const lon = currentLocation.coords.longitude;
-      const address = await reverseGeocode(lat, lon);
+      const address = await reverseGeocodeAddress(lat, lon);
       
       const locationData = {
         lat,
@@ -135,7 +159,7 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
         setLoading(false);
       }
     }
-  }, [reverseGeocode, onLocationUpdate, location]);
+  }, [reverseGeocodeAddress, onLocationUpdate, location]);
 
   const handleRefresh = useCallback(async () => {
     setLoading(true);
@@ -165,10 +189,10 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
 
     startLocationTracking();
     
-    // تحديث الموقع كل 10 ثوانٍ
+    // تحديث الموقع كل 30 ثانية (تقليل الاستدعاءات)
     const interval = setInterval(() => {
       updateLocation();
-    }, 10000);
+    }, 30000);
     
     return () => {
       clearInterval(interval);

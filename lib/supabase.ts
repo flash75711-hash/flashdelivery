@@ -142,7 +142,7 @@ export async function isRegistrationComplete(userId: string): Promise<boolean> {
         .select('id')
         .eq('customer_id', userId)
         .limit(1);
-      return addresses && addresses.length > 0;
+      return !!(addresses && addresses.length > 0);
 
     case 'driver':
       // للسائق: يجب أن يكون لديه الاسم والتليفون وصور المستندات
@@ -169,6 +169,67 @@ export async function isRegistrationComplete(userId: string): Promise<boolean> {
   } catch (error) {
     console.error('Error checking registration completion:', error);
     return false;
+  }
+}
+
+// Reverse geocoding using Supabase Edge Function (avoids CORS issues)
+export async function reverseGeocode(lat: number, lon: number): Promise<any | null> {
+  try {
+    // استخدام المتغير الموجود في أعلى الملف
+    if (!supabaseUrl || supabaseUrl === 'https://placeholder.supabase.co') {
+      console.warn('Supabase URL not configured, falling back to direct Nominatim call');
+      // Fallback to direct call (may fail due to CORS)
+      const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&accept-language=ar&addressdetails=1`;
+      const response = await fetch(nominatimUrl, {
+        headers: {
+          'User-Agent': 'FlashDelivery/1.0',
+        },
+      });
+      if (!response.ok) return null;
+      return await response.json();
+    }
+
+    // استخدام Edge Function
+    const edgeFunctionUrl = `${supabaseUrl}/functions/v1/reverse-geocode`;
+    const response = await fetch(edgeFunctionUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${supabaseAnonKey}`,
+      },
+      body: JSON.stringify({ lat, lon }),
+    });
+
+    if (!response.ok) {
+      console.warn('Reverse geocoding Edge Function failed:', response.status, 'Falling back to direct call');
+      // Fallback to direct call if Edge Function fails
+      const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&accept-language=ar&addressdetails=1`;
+      const fallbackResponse = await fetch(nominatimUrl, {
+        headers: {
+          'User-Agent': 'FlashDelivery/1.0',
+        },
+      });
+      if (!fallbackResponse.ok) return null;
+      return await fallbackResponse.json();
+    }
+
+    return await response.json();
+  } catch (error: any) {
+    console.error('Reverse geocoding error:', error);
+    // Fallback to direct call on error
+    try {
+      const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&accept-language=ar&addressdetails=1`;
+      const fallbackResponse = await fetch(nominatimUrl, {
+        headers: {
+          'User-Agent': 'FlashDelivery/1.0',
+        },
+      });
+      if (!fallbackResponse.ok) return null;
+      return await fallbackResponse.json();
+    } catch (fallbackError) {
+      console.error('Fallback reverse geocoding also failed:', fallbackError);
+      return null;
+    }
   }
 }
 

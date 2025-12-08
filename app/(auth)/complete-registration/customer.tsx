@@ -12,7 +12,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { supabase } from '@/lib/supabase';
+import { supabase, reverseGeocode } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 
@@ -124,23 +124,17 @@ export default function CompleteCustomerRegistration() {
 
       console.log('Location:', location.coords.latitude, location.coords.longitude);
 
-      // استخدام Nominatim API (OpenStreetMap) لتحويل الإحداثيات إلى عنوان
+      // استخدام Edge Function لتحويل الإحداثيات إلى عنوان (تجنب مشاكل CORS)
       const lat = location.coords.latitude;
       const lon = location.coords.longitude;
-      const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&accept-language=ar`;
       
-      const response = await fetch(nominatimUrl, {
-        headers: {
-          'User-Agent': 'FlashDelivery/1.0', // مطلوب من Nominatim
-        },
-      });
-
-      if (!response.ok) {
+      const data = await reverseGeocode(lat, lon);
+      
+      if (!data) {
         throw new Error('فشل جلب العنوان من الخدمة');
       }
-
-      const data = await response.json();
-      console.log('Nominatim response:', data);
+      
+      console.log('Reverse geocode response:', data);
 
       if (data && data.address) {
         const address = data.address;

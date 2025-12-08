@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
+import { supabase, reverseGeocode } from '@/lib/supabase';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
@@ -93,19 +93,12 @@ export default function DeliverPackageScreen() {
 
       const lat = location.coords.latitude;
       const lon = location.coords.longitude;
-      const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&accept-language=ar`;
       
-      const response = await fetch(nominatimUrl, {
-        headers: {
-          'User-Agent': 'FlashDelivery/1.0',
-        },
-      });
-
-      if (!response.ok) {
+      const data = await reverseGeocode(lat, lon);
+      
+      if (!data) {
         throw new Error('فشل جلب العنوان من الخدمة');
       }
-
-      const data = await response.json();
       
       if (data && data.address) {
         const address = data.address;
