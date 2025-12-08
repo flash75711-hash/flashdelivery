@@ -11,6 +11,7 @@ import {
   Alert,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -23,6 +24,7 @@ interface DashboardStats {
 
 export default function AdminDashboardScreen() {
   const { t } = useTranslation();
+  const router = useRouter();
   const [stats, setStats] = useState<DashboardStats>({
     totalRevenue: 0,
     totalTrips: 0,
@@ -188,6 +190,27 @@ export default function AdminDashboardScreen() {
             title={t('admin.activeDrivers')}
             value={stats.activeDrivers}
           />
+        </View>
+
+        {/* قسم الإدارة */}
+        <View style={styles.settingsSection}>
+          <Text style={styles.settingsTitle}>الإدارة</Text>
+          
+          <TouchableOpacity
+            style={styles.managementCard}
+            onPress={() => router.push('/(tabs)/admin/places')}
+          >
+            <View style={styles.managementInfo}>
+              <Ionicons name="location" size={24} color="#007AFF" />
+              <View style={styles.managementTextContainer}>
+                <Text style={styles.managementLabel}>إدارة الأماكن</Text>
+                <Text style={styles.managementDescription}>
+                  إضافة وتعديل وحذف المولات والأسواق والمناطق في الدليل
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={24} color="#999" />
+          </TouchableOpacity>
         </View>
 
         {/* قسم الإعدادات */}
@@ -427,6 +450,42 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  managementCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  managementInfo: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    flex: 1,
+  },
+  managementTextContainer: {
+    flex: 1,
+  },
+  managementLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 4,
+    textAlign: 'right',
+  },
+  managementDescription: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'right',
+    lineHeight: 20,
   },
 });
 

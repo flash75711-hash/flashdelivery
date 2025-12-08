@@ -62,6 +62,7 @@ export default function OutsideOrderScreen() {
   const [showImageSourceModal, setShowImageSourceModal] = useState(false);
   const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<{ uri: string; placeId: string; itemId: string } | null>(null);
 
   useEffect(() => {
     loadSettings();
@@ -138,25 +139,42 @@ export default function OutsideOrderScreen() {
   // معالجة الصورة بعد اختيارها (من الكاميرا أو المعرض)
   const processSelectedImage = async (imageUri: string, placeId: string, itemId: string) => {
     try {
-      // ضغط الصورة وتحسينها باستخدام ImageManipulator
-      const manipulatedImage = await ImageManipulator.manipulateAsync(
-        imageUri,
-        [
-          // تقليل الحجم إذا كانت الصورة كبيرة (أقصى عرض 1200px)
-          { resize: { width: 1200 } },
-        ],
-        {
-          compress: 0.7, // ضغط بنسبة 70%
-          format: ImageManipulator.SaveFormat.JPEG,
+      let finalImageUri = imageUri;
+      
+      // على الويب، ImageManipulator قد لا يعمل بشكل صحيح مع blob URLs
+      // لذلك نستخدم الصورة مباشرة أو نحولها إلى base64
+      if (Platform.OS === 'web' && imageUri.startsWith('blob:')) {
+        // على الويب، نستخدم blob URL مباشرة
+        // يمكن تحويلها إلى base64 إذا لزم الأمر
+        finalImageUri = imageUri;
+      } else {
+        // على الموبايل: ضغط الصورة وتحسينها باستخدام ImageManipulator
+        try {
+          const manipulatedImage = await ImageManipulator.manipulateAsync(
+            imageUri,
+            [
+              // تقليل الحجم إذا كانت الصورة كبيرة (أقصى عرض 1200px)
+              { resize: { width: 1200 } },
+            ],
+            {
+              compress: 0.7, // ضغط بنسبة 70%
+              format: ImageManipulator.SaveFormat.JPEG,
+            }
+          );
+          finalImageUri = manipulatedImage.uri;
+        } catch (manipulatorError: any) {
+          console.warn('ImageManipulator failed, using original image:', manipulatorError);
+          // إذا فشل ImageManipulator، نستخدم الصورة الأصلية
+          finalImageUri = imageUri;
         }
-      );
+      }
 
       setPlacesWithItems(placesWithItems.map(p => 
         p.id === placeId 
           ? { 
               ...p, 
               items: p.items.map(item => 
-                item.id === itemId ? { ...item, imageUri: manipulatedImage.uri } : item
+                item.id === itemId ? { ...item, imageUri: finalImageUri } : item
               )
             }
           : p
@@ -208,6 +226,7 @@ export default function OutsideOrderScreen() {
       }
 
       console.log('Launching camera...');
+      // @ts-ignore - MediaTypeOptions deprecated but still works
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
@@ -232,8 +251,53 @@ export default function OutsideOrderScreen() {
   // فتح المعرض لاختيار صورة
   const openImageLibrary = async (placeId: string, itemId: string) => {
     try {
-      console.log('openImageLibrary called:', { placeId, itemId });
+      console.log('openImageLibrary called:', { placeId, itemId, platform: Platform.OS });
       
+      // معالجة خاصة للويب
+      if (Platform.OS === 'web' && typeof document !== 'undefined') {
+        return new Promise<void>((resolve) => {
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.accept = 'image/*';
+          input.style.display = 'none';
+          
+          input.onchange = async (e: any) => {
+            const file = e.target.files?.[0];
+            if (file) {
+              try {
+                // إنشاء URL محلي للصورة
+                const imageUri = URL.createObjectURL(file);
+                console.log('File selected on web:', file.name);
+                await processSelectedImage(imageUri, placeId, itemId);
+                resolve();
+              } catch (error: any) {
+                console.error('Error processing file on web:', error);
+                Alert.alert('خطأ', `فشل معالجة الصورة: ${error.message || 'خطأ غير معروف'}`);
+                resolve();
+              }
+            } else {
+              console.log('No file selected on web');
+              resolve();
+            }
+            if (document.body.contains(input)) {
+              document.body.removeChild(input);
+            }
+          };
+          
+          input.oncancel = () => {
+            console.log('File picker canceled on web');
+            if (document.body.contains(input)) {
+              document.body.removeChild(input);
+            }
+            resolve();
+          };
+          
+          document.body.appendChild(input);
+          input.click();
+        });
+      }
+      
+      // للموبايل: استخدام expo-image-picker
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       console.log('Media library permission status:', status);
       
@@ -254,10 +318,11 @@ export default function OutsideOrderScreen() {
             },
           ]
         );
-      return;
-    }
+        return;
+      }
     
       console.log('Launching image library...');
+      // @ts-ignore - MediaTypeOptions deprecated but still works
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
@@ -271,7 +336,7 @@ export default function OutsideOrderScreen() {
       if (!result.canceled && result.assets && result.assets[0]) {
         console.log('Processing image from library...');
         await processSelectedImage(result.assets[0].uri, placeId, itemId);
-        } else {
+      } else {
         console.log('Image library was canceled or no image selected');
       }
     } catch (error: any) {
@@ -466,10 +531,11 @@ export default function OutsideOrderScreen() {
       });
 
       if (nearestPlace) {
+        const placeToSet: Place = nearestPlace;
         setPlacesWithItems(placesWithItems.map(p => 
-          p.id === placeId ? { ...p, place: nearestPlace } : p
+          p.id === placeId ? { ...p, place: placeToSet } : p
         ));
-        Alert.alert('نجح', `تم اختيار ${nearestPlace.name} (${minDistance.toFixed(1)} كم)`);
+        Alert.alert('نجح', `تم اختيار ${placeToSet.name} (${minDistance.toFixed(1)} كم)`);
       } else {
         Alert.alert('تنبيه', 'لم يتم العثور على مكان قريب');
       }
@@ -855,7 +921,11 @@ export default function OutsideOrderScreen() {
                           style={styles.itemImageButton}
                           onPress={() => {
                             console.log('Image preview pressed:', { placeId: placeWithItems.id, itemId: item.id });
-                            pickImageForItem(placeWithItems.id, item.id);
+                            setPreviewImage({
+                              uri: item.imageUrl || item.imageUri || '',
+                              placeId: placeWithItems.id,
+                              itemId: item.id,
+                            });
                           }}
                           disabled={uploadingImageForItem === item.id}
                           activeOpacity={0.7}
@@ -986,6 +1056,61 @@ export default function OutsideOrderScreen() {
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Modal لعرض الصورة بشكل كبير */}
+      <Modal
+        visible={previewImage !== null}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setPreviewImage(null)}
+      >
+        <View style={styles.imagePreviewModal}>
+          <TouchableOpacity
+            style={styles.imagePreviewCloseButton}
+            onPress={() => setPreviewImage(null)}
+          >
+            <Ionicons name="close" size={28} color="#fff" />
+          </TouchableOpacity>
+          
+          {previewImage && (
+            <>
+              <Image 
+                source={{ uri: previewImage.uri }} 
+                style={styles.imagePreviewImage}
+                resizeMode="contain"
+              />
+              
+              <View style={styles.imagePreviewActions}>
+                <TouchableOpacity
+                  style={styles.imagePreviewActionButton}
+                  onPress={() => {
+                    if (previewImage) {
+                      setPreviewImage(null);
+                      pickImageForItem(previewImage.placeId, previewImage.itemId);
+                    }
+                  }}
+                >
+                  <Ionicons name="camera" size={20} color="#fff" />
+                  <Text style={styles.imagePreviewActionText}>تغيير الصورة</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[styles.imagePreviewActionButton, styles.imagePreviewDeleteButton]}
+                  onPress={() => {
+                    if (previewImage) {
+                      removeImageFromItem(previewImage.placeId, previewImage.itemId);
+                      setPreviewImage(null);
+                    }
+                  }}
+                >
+                  <Ionicons name="trash" size={20} color="#fff" />
+                  <Text style={styles.imagePreviewActionText}>حذف</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -1295,6 +1420,52 @@ const styles = StyleSheet.create({
   modalCancelText: {
     fontSize: 15,
     color: '#FF3B30',
+    fontWeight: '600',
+  },
+  imagePreviewModal: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imagePreviewCloseButton: {
+    position: 'absolute',
+    top: 40,
+    right: 20,
+    zIndex: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 20,
+    padding: 8,
+  },
+  imagePreviewImage: {
+    width: '100%',
+    height: '70%',
+  },
+  imagePreviewActions: {
+    position: 'absolute',
+    bottom: 40,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 12,
+    paddingHorizontal: 20,
+  },
+  imagePreviewActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#007AFF',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 25,
+    gap: 8,
+  },
+  imagePreviewDeleteButton: {
+    backgroundColor: '#FF3B30',
+  },
+  imagePreviewActionText: {
+    color: '#fff',
+    fontSize: 15,
     fontWeight: '600',
   },
 });

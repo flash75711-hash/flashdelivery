@@ -84,3 +84,4 @@ eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRud3JteWJ
 3. تأكد من عمل Redeploy بعد إضافة المتغيرات
 4. تحقق من Console في المتصفح لرؤية رسائل الخطأ
 
+
