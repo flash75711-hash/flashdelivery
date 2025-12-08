@@ -24,16 +24,27 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [sendingOtp, setSendingOtp] = useState(false);
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
+  const [otpVerified, setOtpVerified] = useState(false);
   const router = useRouter();
   const { t } = useTranslation();
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, loadUser } = useAuth();
 
   // إذا كان المستخدم مسجل دخول بالفعل، نعيد التوجيه
   useEffect(() => {
     if (!authLoading && user) {
+      console.log('Login: User detected, navigating to tabs...');
       router.replace('/(tabs)');
     }
   }, [user, authLoading, router]);
+
+  // بعد التحقق من OTP، نستمع لتحديث حالة المستخدم
+  useEffect(() => {
+    if (otpVerified && !authLoading && user) {
+      console.log('Login: OTP verified and user loaded, navigating...');
+      setOtpVerified(false);
+      router.replace('/(tabs)');
+    }
+  }, [otpVerified, user, authLoading, router]);
 
   // عداد تنازلي للانتظار
   useEffect(() => {
@@ -139,14 +150,40 @@ export default function LoginScreen() {
       if (error) {
         console.error('Login: Error verifying OTP:', error);
         Alert.alert('خطأ', error.message || 'رمز التحقق غير صحيح');
-      } else if (data.session) {
-        console.log('Login: OTP verified successfully, session created');
-        // الانتظار قليلاً لضمان تحديث حالة المصادقة
-        await new Promise(resolve => setTimeout(resolve, 500));
-        router.replace('/(tabs)');
-      } else {
-        Alert.alert('خطأ', 'فشل إنشاء الجلسة');
+        setLoading(false);
+        return;
       }
+
+      if (!data.session) {
+        Alert.alert('خطأ', 'فشل إنشاء الجلسة');
+        setLoading(false);
+        return;
+      }
+
+      console.log('Login: OTP verified successfully, session created');
+      
+      // تعيين flag للتحقق من OTP
+      setOtpVerified(true);
+      
+      // استدعاء loadUser مباشرة لتحديث حالة المستخدم
+      try {
+        await loadUser();
+        console.log('Login: User loaded successfully');
+      } catch (loadError) {
+        console.error('Login: Error loading user:', loadError);
+        // نتابع حتى لو فشل loadUser لأن الجلسة موجودة
+      }
+
+      // الانتظار لوقت كافٍ لضمان تحديث AuthContext
+      // useEffect سيتعامل مع التوجيه عندما يصبح user موجوداً
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      // إذا لم يتم التوجيه تلقائياً، ننقل يدوياً
+      if (user) {
+        console.log('Login: Navigating to tabs (manual)...');
+        router.replace('/(tabs)');
+      }
+      
     } catch (error: any) {
       console.error('Login: Error in verify OTP:', error);
       Alert.alert('خطأ', error.message || 'حدث خطأ أثناء التحقق من رمز التحقق');

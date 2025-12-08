@@ -325,17 +325,52 @@ export default function CustomerProfileScreen() {
   };
 
   const handleLogout = () => {
-    Alert.alert('تسجيل الخروج', 'هل أنت متأكد من تسجيل الخروج؟', [
-      { text: 'إلغاء', style: 'cancel' },
-      {
-        text: 'تسجيل الخروج',
-        style: 'destructive',
-        onPress: async () => {
-          await signOut();
-          router.replace('/(auth)/login');
+    console.log('Profile: handleLogout called');
+    
+    // على الويب، Alert قد لا يعمل بشكل صحيح، لذا نستخدم confirm
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const confirmed = window.confirm('هل أنت متأكد من تسجيل الخروج؟');
+      if (confirmed) {
+        performLogout();
+      }
+    } else {
+      Alert.alert('تسجيل الخروج', 'هل أنت متأكد من تسجيل الخروج؟', [
+        { text: 'إلغاء', style: 'cancel' },
+        {
+          text: 'تسجيل الخروج',
+          style: 'destructive',
+          onPress: performLogout,
         },
-      },
-    ]);
+      ]);
+    }
+  };
+
+  const performLogout = async () => {
+    try {
+      setLoading(true);
+      console.log('Profile: Starting logout...');
+      await signOut();
+      console.log('Profile: Logout successful, navigating to login...');
+      // الانتظار قليلاً لضمان مسح الحالة
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // على الويب، نستخدم window.location لإعادة تحميل الصفحة بالكامل
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.location.href = '/login';
+      } else {
+        router.replace('/(auth)/login');
+      }
+    } catch (error: any) {
+      console.error('Profile: Error during logout:', error);
+      // حتى لو فشل، نحاول التنقل لصفحة تسجيل الدخول
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.location.href = '/login';
+      } else {
+        router.replace('/(auth)/login');
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (loadingData) {

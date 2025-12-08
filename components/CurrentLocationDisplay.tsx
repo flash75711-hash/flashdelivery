@@ -24,16 +24,23 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
       const address = data.address;
       const locationParts: string[] = [];
       
-      // 1. الشارع/الطريق (إن وجد) - الأهم للموقع الدقيق
+      // 1. رقم المبنى (إن وجد) - للموقع الدقيق جداً
+      if (address.house_number) {
+        locationParts.push(`مبنى ${address.house_number}`);
+      }
+      
+      // 2. الشارع/الطريق - الأهم للموقع الدقيق
       if (address.road) {
         locationParts.push(`شارع ${address.road}`);
       } else if (address.pedestrian) {
         locationParts.push(`ممر ${address.pedestrian}`);
       } else if (address.path) {
         locationParts.push(`طريق ${address.path}`);
+      } else if (address.footway) {
+        locationParts.push(`ممر ${address.footway}`);
       }
       
-      // 2. الحي/المنطقة داخل المدينة - الأهم للموقع التفصيلي
+      // 3. الحي/المنطقة داخل المدينة - الأهم للموقع التفصيلي
       if (address.neighbourhood) {
         locationParts.push(`حي ${address.neighbourhood}`);
       } else if (address.suburb) {
@@ -42,15 +49,14 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
         locationParts.push(`حارة ${address.quarter}`);
       } else if (address.district) {
         locationParts.push(`قطاع ${address.district}`);
+      } else if (address.city_district) {
+        locationParts.push(`منطقة ${address.city_district}`);
       }
       
-      // 3. المدينة
-      if (address.city) {
-        locationParts.push(`مدينة ${address.city}`);
-      } else if (address.town) {
-        locationParts.push(`بلدة ${address.town}`);
-      } else if (address.village) {
-        locationParts.push(`قرية ${address.village}`);
+      // 4. المدينة
+      const cityName = address.city || address.town || address.village;
+      if (cityName) {
+        locationParts.push(cityName);
       }
       
       // إذا وجدنا معلومات كافية، نرجعها
@@ -72,7 +78,7 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
                    !/^\d+$/.test(part) &&
                    part.length > 2;
           })
-          .slice(0, 4) // أول 4 أجزاء فقط
+          .slice(0, 5) // أول 5 أجزاء للحصول على تفاصيل أكثر
           .join('، ');
         
         if (cleaned) return cleaned;
@@ -259,21 +265,33 @@ async function getDetailedAddress(lat: number, lon: number): Promise<string | nu
       parts.push(`مبنى رقم ${address.house_number}`);
     }
 
-    // الشارع
+    // الشارع/الطريق
     if (address.road) {
       parts.push(`شارع ${address.road}`);
+    } else if (address.pedestrian) {
+      parts.push(`ممر ${address.pedestrian}`);
+    } else if (address.path) {
+      parts.push(`طريق ${address.path}`);
     }
 
-    // الحي
+    // الحي/المنطقة
     if (address.neighbourhood) {
       parts.push(`حي ${address.neighbourhood}`);
     } else if (address.suburb) {
       parts.push(`منطقة ${address.suburb}`);
+    } else if (address.quarter) {
+      parts.push(`حارة ${address.quarter}`);
+    } else if (address.district) {
+      parts.push(`قطاع ${address.district}`);
     }
 
     // المدينة
     if (address.city) {
       parts.push(`مدينة ${address.city}`);
+    } else if (address.town) {
+      parts.push(`بلدة ${address.town}`);
+    } else if (address.village) {
+      parts.push(`قرية ${address.village}`);
     }
 
     // المحافظة
