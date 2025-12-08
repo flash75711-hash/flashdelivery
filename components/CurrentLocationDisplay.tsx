@@ -24,6 +24,41 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
       const address = data.address;
       const locationParts: string[] = [];
       
+      // أولوية: استخدام display_name إذا كان يحتوي على معلومات أكثر تفصيلاً
+      // ثم نستخدم address fields كبديل
+      let useDisplayName = false;
+      
+      // التحقق من وجود معلومات تفصيلية في display_name
+      if (data.display_name) {
+        const displayParts = data.display_name.split(',').map((p: string) => p.trim());
+        // إذا كان display_name يحتوي على أكثر من 3 أجزاء، نستخدمه
+        if (displayParts.length > 3) {
+          useDisplayName = true;
+        }
+      }
+      
+      if (useDisplayName && data.display_name) {
+        // تنظيف display_name وإزالة المعلومات غير المهمة
+        const cleaned = data.display_name
+          .split(',')
+          .map((part: string) => part.trim())
+          .filter((part: string) => {
+            // إزالة: مصر، الأرقام فقط، كلمات عامة
+            const lower = part.toLowerCase();
+            return part !== 'مصر' && 
+                   part !== 'Egypt' && 
+                   !/^\d+$/.test(part) &&
+                   part.length > 2 &&
+                   !part.includes('Governorate') &&
+                   !part.includes('محافظة');
+          })
+          .slice(0, 4) // أول 4 أجزاء للحصول على تفاصيل أكثر
+          .join('، ');
+        
+        if (cleaned) return cleaned;
+      }
+      
+      // إذا لم نستخدم display_name، نستخدم address fields
       // 1. رقم المبنى (إن وجد) - للموقع الدقيق جداً
       if (address.house_number) {
         locationParts.push(`مبنى ${address.house_number}`);
@@ -64,21 +99,19 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
         return locationParts.join('، ');
       }
       
-      // إذا لم نجد معلومات تفصيلية، نحاول استخدام display_name
+      // كحل أخير، نستخدم display_name
       if (data.display_name) {
-        // تنظيف display_name وإزالة المعلومات غير المهمة
         const cleaned = data.display_name
           .split(',')
           .map((part: string) => part.trim())
           .filter((part: string) => {
-            // إزالة: مصر، الأرقام فقط، كلمات عامة
             const lower = part.toLowerCase();
             return part !== 'مصر' && 
                    part !== 'Egypt' && 
                    !/^\d+$/.test(part) &&
                    part.length > 2;
           })
-          .slice(0, 5) // أول 5 أجزاء للحصول على تفاصيل أكثر
+          .slice(0, 4)
           .join('، ');
         
         if (cleaned) return cleaned;
@@ -243,6 +276,12 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
                   </Text>
                 </View>
               )}
+              <View style={styles.infoBox}>
+                <Ionicons name="information-circle" size={18} color="#666" />
+                <Text style={styles.infoText}>
+                  ملاحظة: العنوان قد يختلف قليلاً عن Google Maps لأننا نستخدم OpenStreetMap كمصدر للبيانات.
+                </Text>
+              </View>
             </ScrollView>
           </View>
         </TouchableOpacity>
@@ -403,6 +442,22 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#1a1a1a',
     lineHeight: 22,
+    textAlign: 'right',
+  },
+  infoBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#f5f5f5',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 8,
+    gap: 8,
+  },
+  infoText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#666',
+    lineHeight: 18,
     textAlign: 'right',
   },
 });
