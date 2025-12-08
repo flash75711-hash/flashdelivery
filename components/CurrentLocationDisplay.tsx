@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, Modal, ScrollView } from 'react-native';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { reverseGeocode } from '../lib/supabase';
@@ -12,114 +12,70 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
   const [location, setLocation] = useState<{ lat: number; lon: number; address: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showDetails, setShowDetails] = useState(false);
+  const [detailedAddress, setDetailedAddress] = useState<string | null>(null);
 
   const reverseGeocodeAddress = useCallback(async (lat: number, lon: number): Promise<string | null> => {
     try {
       const data = await reverseGeocode(lat, lon);
       
-      if (!data) return null;
+      if (!data || !data.address) return null;
 
-      if (data && data.address) {
-        const address = data.address;
+      const address = data.address;
+      const locationParts: string[] = [];
+      
+      // 1. الشارع/الطريق (إن وجد) - الأهم للموقع الدقيق
+      if (address.road) {
+        locationParts.push(`شارع ${address.road}`);
+      } else if (address.pedestrian) {
+        locationParts.push(`ممر ${address.pedestrian}`);
+      } else if (address.path) {
+        locationParts.push(`طريق ${address.path}`);
+      }
+      
+      // 2. الحي/المنطقة داخل المدينة - الأهم للموقع التفصيلي
+      if (address.neighbourhood) {
+        locationParts.push(`حي ${address.neighbourhood}`);
+      } else if (address.suburb) {
+        locationParts.push(`منطقة ${address.suburb}`);
+      } else if (address.quarter) {
+        locationParts.push(`حارة ${address.quarter}`);
+      } else if (address.district) {
+        locationParts.push(`قطاع ${address.district}`);
+      }
+      
+      // 3. المدينة
+      if (address.city) {
+        locationParts.push(`مدينة ${address.city}`);
+      } else if (address.town) {
+        locationParts.push(`بلدة ${address.town}`);
+      } else if (address.village) {
+        locationParts.push(`قرية ${address.village}`);
+      }
+      
+      // إذا وجدنا معلومات كافية، نرجعها
+      if (locationParts.length > 0) {
+        return locationParts.join('، ');
+      }
+      
+      // إذا لم نجد معلومات تفصيلية، نحاول استخدام display_name
+      if (data.display_name) {
+        // تنظيف display_name وإزالة المعلومات غير المهمة
+        const cleaned = data.display_name
+          .split(',')
+          .map((part: string) => part.trim())
+          .filter((part: string) => {
+            // إزالة: مصر، الأرقام فقط، كلمات عامة
+            const lower = part.toLowerCase();
+            return part !== 'مصر' && 
+                   part !== 'Egypt' && 
+                   !/^\d+$/.test(part) &&
+                   part.length > 2;
+          })
+          .slice(0, 4) // أول 4 أجزاء فقط
+          .join('، ');
         
-        // أولوية: اسم المنطقة/الحي داخل المدينة
-        // نحاول جلب اسم المنطقة من عدة مصادر
-        let areaName = '';
-        
-        // 1. الحي (neighbourhood) - الأفضل
-        if (address.neighbourhood) {
-          areaName = address.neighbourhood;
-        }
-        // 2. المنطقة السكنية (suburb)
-        else if (address.suburb) {
-          areaName = address.suburb;
-        }
-        // 3. الحارة/الزقاق (quarter)
-        else if (address.quarter) {
-          areaName = address.quarter;
-        }
-        // 4. القطاع/المنطقة الإدارية (district)
-        else if (address.district) {
-          areaName = address.district;
-        }
-        // 5. المدينة الصغيرة (town)
-        else if (address.town) {
-          areaName = address.town;
-        }
-        
-        // إذا وجدنا اسم المنطقة، نضيف المدينة
-        if (areaName) {
-          const cityName = address.city || address.state || '';
-          if (cityName && cityName !== areaName) {
-            return `${areaName}، ${cityName}`;
-          }
-          return areaName;
-        }
-        
-        // إذا لم نجد منطقة محددة، نعرض العنوان الكامل
-        const addressParts: string[] = [];
-        
-        // رقم المبنى/المنزل
-        if (address.house_number) {
-          addressParts.push(`مبنى رقم ${address.house_number}`);
-        }
-        
-        // الشارع/الطريق
-        if (address.road) {
-          addressParts.push(`شارع ${address.road}`);
-        } else if (address.pedestrian) {
-          addressParts.push(`ممر ${address.pedestrian}`);
-        } else if (address.path) {
-          addressParts.push(`طريق ${address.path}`);
-        }
-        
-        // الحي/المنطقة
-        if (address.neighbourhood) {
-          addressParts.push(`حي ${address.neighbourhood}`);
-        } else if (address.suburb) {
-          addressParts.push(`منطقة ${address.suburb}`);
-        }
-        
-        // الحارة/الزقاق
-        if (address.quarter) {
-          addressParts.push(`حارة ${address.quarter}`);
-        }
-        
-        // القطاع/المنطقة الإدارية
-        if (address.district) {
-          addressParts.push(`قطاع ${address.district}`);
-        }
-        
-        // المدينة/البلدة/القرية
-        if (address.city) {
-          addressParts.push(`مدينة ${address.city}`);
-        } else if (address.town) {
-          addressParts.push(`بلدة ${address.town}`);
-        } else if (address.village) {
-          addressParts.push(`قرية ${address.village}`);
-        }
-        
-        // المحافظة/الولاية
-        if (address.state) {
-          addressParts.push(`محافظة ${address.state}`);
-        }
-        
-        // إذا كان هناك أجزاء، نرجعها
-        if (addressParts.length > 0) {
-          return addressParts.join('، ');
-        }
-        
-        // إذا لم يكن هناك تفاصيل كافية، نستخدم display_name
-        if (data.display_name) {
-          return data.display_name
-            .split(',')
-            .filter((part: string) => {
-              const trimmed = part.trim();
-              return trimmed !== 'مصر' && !/^\d+$/.test(trimmed);
-            })
-            .map((part: string) => part.trim())
-            .join('، ');
-        }
+        if (cleaned) return cleaned;
       }
       
       return null;
@@ -216,18 +172,119 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
             </TouchableOpacity>
           </View>
         ) : (
-          <View style={styles.locationContainer}>
-            <Text style={styles.text} numberOfLines={4}>
+          <TouchableOpacity 
+            style={styles.locationContainer}
+            onPress={async () => {
+              if (location) {
+                // جلب العنوان التفصيلي عند الضغط
+                const detailed = await getDetailedAddress(location.lat, location.lon);
+                setDetailedAddress(detailed);
+                setShowDetails(true);
+              }
+            }}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.text} numberOfLines={2}>
               {location?.address || 'موقعي الحالي'}
             </Text>
-            <TouchableOpacity onPress={handleRefresh} style={styles.refreshButton}>
-              <Ionicons name="refresh" size={16} color="#007AFF" />
-            </TouchableOpacity>
-          </View>
+            <View style={styles.actionsContainer}>
+              <TouchableOpacity 
+                onPress={(e) => {
+                  e.stopPropagation();
+                  handleRefresh();
+                }} 
+                style={styles.refreshButton}
+              >
+                <Ionicons name="refresh" size={16} color="#007AFF" />
+              </TouchableOpacity>
+              <Ionicons name="chevron-down" size={16} color="#007AFF" style={styles.chevronIcon} />
+            </View>
+          </TouchableOpacity>
         )}
       </View>
+
+      {/* Modal للعرض التفصيلي */}
+      <Modal
+        visible={showDetails}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowDetails(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowDetails(false)}
+        >
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>موقعي الحالي</Text>
+              <TouchableOpacity onPress={() => setShowDetails(false)}>
+                <Ionicons name="close" size={24} color="#1a1a1a" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalBody}>
+              <View style={styles.detailRow}>
+                <Ionicons name="location" size={20} color="#007AFF" />
+                <Text style={styles.detailText}>
+                  {detailedAddress || location?.address || 'لا توجد معلومات متاحة'}
+                </Text>
+              </View>
+              {location && (
+                <View style={styles.detailRow}>
+                  <Ionicons name="navigate" size={20} color="#34C759" />
+                  <Text style={styles.detailText}>
+                    الإحداثيات: {location.lat.toFixed(6)}, {location.lon.toFixed(6)}
+                  </Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
+}
+
+// دالة للحصول على العنوان التفصيلي
+async function getDetailedAddress(lat: number, lon: number): Promise<string | null> {
+  try {
+    const data = await reverseGeocode(lat, lon);
+    if (!data || !data.address) return null;
+
+    const address = data.address;
+    const parts: string[] = [];
+
+    // رقم المبنى
+    if (address.house_number) {
+      parts.push(`مبنى رقم ${address.house_number}`);
+    }
+
+    // الشارع
+    if (address.road) {
+      parts.push(`شارع ${address.road}`);
+    }
+
+    // الحي
+    if (address.neighbourhood) {
+      parts.push(`حي ${address.neighbourhood}`);
+    } else if (address.suburb) {
+      parts.push(`منطقة ${address.suburb}`);
+    }
+
+    // المدينة
+    if (address.city) {
+      parts.push(`مدينة ${address.city}`);
+    }
+
+    // المحافظة
+    if (address.state) {
+      parts.push(`محافظة ${address.state}`);
+    }
+
+    return parts.length > 0 ? parts.join('، ') : null;
+  } catch (error) {
+    return null;
+  }
 }
 
 const styles = StyleSheet.create({
@@ -258,6 +315,14 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 8,
   },
+  actionsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  chevronIcon: {
+    marginLeft: 4,
+  },
   errorContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -280,6 +345,47 @@ const styles = StyleSheet.create({
   },
   refreshButton: {
     padding: 4,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '70%',
+    paddingBottom: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+  },
+  modalBody: {
+    padding: 16,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+    gap: 12,
+  },
+  detailText: {
+    flex: 1,
+    fontSize: 15,
+    color: '#1a1a1a',
+    lineHeight: 22,
+    textAlign: 'right',
   },
 });
 
