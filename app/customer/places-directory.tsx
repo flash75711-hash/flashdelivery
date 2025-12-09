@@ -79,12 +79,13 @@ const MapComponent = ({
     
     const placesMarkers = placesData.map(place => {
       const markerVar = `marker_${place.index}`;
-      const placeIdEscaped = place.id.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+      // استخدام JSON.stringify للتأكد من escaping صحيح
+      const placeIdJson = JSON.stringify(place.id);
       return `
       var ${markerVar} = L.marker([${place.lat}, ${place.lon}]).addTo(map)
-        .bindPopup('<b>${place.name}</b><br>${place.address}<br><button onclick="selectPlace(\\'${placeIdEscaped}\\')" style="margin-top:8px;padding:6px 12px;background:#007AFF;color:white;border:none;border-radius:6px;cursor:pointer;">اختر هذا المكان</button>');
+        .bindPopup('<b>${place.name}</b><br>${place.address}<br><button onclick="selectPlace(${placeIdJson})" style="margin-top:8px;padding:6px 12px;background:#007AFF;color:white;border:none;border-radius:6px;cursor:pointer;">اختر هذا المكان</button>');
       ${markerVar}.on('click', function() {
-        selectPlace('${placeIdEscaped}');
+        selectPlace(${placeIdJson});
       });`;
     }).join('\n    ');
     
@@ -119,9 +120,14 @@ const MapComponent = ({
     // دالة لاختيار المكان
     function selectPlace(placeId) {
       try {
+        console.log('selectPlace called with placeId:', placeId);
         // إرسال رسالة للـ parent window
         if (window.parent && window.parent !== window) {
-          window.parent.postMessage({ type: 'PLACE_SELECTED', placeId: placeId }, '*');
+          const message = { type: 'PLACE_SELECTED', placeId: placeId };
+          console.log('Sending message to parent:', message);
+          window.parent.postMessage(message, '*');
+        } else {
+          console.warn('window.parent is not available or same as window');
         }
       } catch (e) {
         console.error('Error sending message:', e);
@@ -135,11 +141,17 @@ const MapComponent = ({
     React.useEffect(() => {
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
         const handleMessage = (event: MessageEvent) => {
+          console.log('Message received from iframe:', event.data);
           if (event.data && event.data.type === 'PLACE_SELECTED') {
             const placeId = event.data.placeId;
+            console.log('Looking for place with id:', placeId);
             const selectedPlace = places.find(p => p.id === placeId);
+            console.log('Found place:', selectedPlace);
             if (selectedPlace) {
+              console.log('Calling onPlaceSelect with:', selectedPlace);
               onPlaceSelect(selectedPlace);
+            } else {
+              console.warn('Place not found with id:', placeId, 'Available places:', places.map(p => p.id));
             }
           }
         };
@@ -164,7 +176,8 @@ const MapComponent = ({
             display: 'block',
           }}
           title="Map"
-          sandbox="allow-scripts allow-same-origin allow-popups"
+          sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+          allow="geolocation"
         />
       </View>
     );
@@ -616,6 +629,7 @@ export default function PlacesDirectoryScreen() {
   };
 
   const handleSelectPlace = async (place: Place) => {
+    console.log('handleSelectPlace called with place:', place);
     // حفظ المكان المختار في AsyncStorage
     const currentPlaceId = placeId;
     if (currentPlaceId) {
@@ -624,8 +638,10 @@ export default function PlacesDirectoryScreen() {
     
     // التحقق من إمكانية الرجوع قبل استدعاء router.back()
     if (router.canGoBack()) {
+      console.log('Navigating back...');
       router.back();
     } else {
+      console.log('No back navigation available, going to outside-order');
       // إذا لم يكن هناك screen للرجوع إليه، نذهب إلى outside-order
       router.replace('/customer/outside-order');
     }
