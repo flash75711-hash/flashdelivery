@@ -43,12 +43,12 @@ export async function uploadImageToImgBB(imageUri: string): Promise<string> {
       }
     } else {
       // على الموبايل: استخدام FormData مع uri مباشرة
-      // React Native يضغط الصور تلقائياً عند استخدام FormData
-      formData.append('image', {
-        uri: imageUri,
-        type: mimeType,
-        name: fileName,
-      } as any);
+    // React Native يضغط الصور تلقائياً عند استخدام FormData
+    formData.append('image', {
+      uri: imageUri,
+      type: mimeType,
+      name: fileName,
+    } as any);
     }
 
     const uploadResponse = await fetch(functionUrl, {

@@ -129,11 +129,11 @@ export default function CompleteCustomerRegistration() {
       const lon = location.coords.longitude;
       
       const data = await reverseGeocode(lat, lon);
-      
+
       if (!data) {
         throw new Error('فشل جلب العنوان من الخدمة');
       }
-      
+
       console.log('Reverse geocode response:', data);
 
       if (data && data.address) {

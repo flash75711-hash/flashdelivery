@@ -150,17 +150,17 @@ export default function OutsideOrderScreen() {
       } else {
         // على الموبايل: ضغط الصورة وتحسينها باستخدام ImageManipulator
         try {
-          const manipulatedImage = await ImageManipulator.manipulateAsync(
-            imageUri,
-            [
-              // تقليل الحجم إذا كانت الصورة كبيرة (أقصى عرض 1200px)
-              { resize: { width: 1200 } },
-            ],
-            {
-              compress: 0.7, // ضغط بنسبة 70%
-              format: ImageManipulator.SaveFormat.JPEG,
-            }
-          );
+      const manipulatedImage = await ImageManipulator.manipulateAsync(
+        imageUri,
+        [
+          // تقليل الحجم إذا كانت الصورة كبيرة (أقصى عرض 1200px)
+          { resize: { width: 1200 } },
+        ],
+        {
+          compress: 0.7, // ضغط بنسبة 70%
+          format: ImageManipulator.SaveFormat.JPEG,
+        }
+      );
           finalImageUri = manipulatedImage.uri;
         } catch (manipulatorError: any) {
           console.warn('ImageManipulator failed, using original image:', manipulatorError);
@@ -318,8 +318,8 @@ export default function OutsideOrderScreen() {
             },
           ]
         );
-        return;
-      }
+      return;
+    }
     
       console.log('Launching image library...');
       // @ts-ignore - MediaTypeOptions deprecated but still works
@@ -336,7 +336,7 @@ export default function OutsideOrderScreen() {
       if (!result.canceled && result.assets && result.assets[0]) {
         console.log('Processing image from library...');
         await processSelectedImage(result.assets[0].uri, placeId, itemId);
-      } else {
+        } else {
         console.log('Image library was canceled or no image selected');
       }
     } catch (error: any) {
@@ -441,7 +441,7 @@ export default function OutsideOrderScreen() {
       }
       return null;
     } catch (error: any) {
-      console.error('Error getting city:', error);
+        console.error('Error getting city:', error);
       return null;
     }
   };

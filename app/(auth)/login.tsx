@@ -160,7 +160,7 @@ export default function LoginScreen() {
         return;
       }
 
-      console.log('Login: OTP verified successfully, session created');
+        console.log('Login: OTP verified successfully, session created');
       
       // تعيين flag للتحقق من OTP
       setOtpVerified(true);

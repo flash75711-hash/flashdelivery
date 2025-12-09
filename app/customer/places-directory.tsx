@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   FlatList,
   ActivityIndicator,
   ScrollView,
+  Platform,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase, reverseGeocode } from '@/lib/supabase';
@@ -16,6 +17,209 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { Linking } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// استيراد react-native-maps فقط على الموبايل
+let MapView: any = null;
+let Marker: any = null;
+
+if (Platform.OS === 'ios' || Platform.OS === 'android') {
+  try {
+    const maps = require('react-native-maps');
+    MapView = maps.default;
+    Marker = maps.Marker;
+  } catch (e) {
+    console.warn('react-native-maps not available:', e);
+  }
+}
+
+// Map Component - react-native-maps for mobile, iframe for web
+const MapComponent = ({ 
+  userLocation, 
+  places,
+  onPlaceSelect
+}: { 
+  userLocation: { lat: number; lon: number } | null;
+  places: Place[];
+  onPlaceSelect: (place: Place) => void;
+}) => {
+  const placesWithCoords = places.filter(p => p.latitude && p.longitude);
+  
+  console.log('MapComponent: places data', {
+    totalPlaces: places.length,
+    placesWithCoords: placesWithCoords.length,
+    samplePlace: places[0] ? {
+      id: places[0].id,
+      name: places[0].name,
+      hasLat: !!places[0].latitude,
+      hasLon: !!places[0].longitude
+    } : null
+  });
+  
+  if (!userLocation) {
+    return (
+      <View style={styles.mapPlaceholder}>
+        <Ionicons name="location-outline" size={64} color="#ccc" />
+        <Text style={styles.mapPlaceholderText}>جارٍ تحميل الخريطة...</Text>
+      </View>
+    );
+  }
+  
+  // على الويب، نستخدم iframe مع OpenStreetMap
+  // @ts-ignore - Platform.OS can be 'web' at runtime
+  if (Platform.OS === 'web') {
+    // إنشاء markers مع إمكانية النقر عليها
+    const placesData = placesWithCoords.map((place, index) => ({
+      index,
+      lat: place.latitude,
+      lon: place.longitude,
+      name: (place.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/\n/g, ' '),
+      address: (place.address || '').replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/\n/g, ' '),
+      id: place.id
+    }));
+    
+    const placesMarkers = placesData.map(place => {
+      const markerVar = `marker_${place.index}`;
+      const placeIdEscaped = place.id.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+      return `
+      var ${markerVar} = L.marker([${place.lat}, ${place.lon}]).addTo(map)
+        .bindPopup('<b>${place.name}</b><br>${place.address}<br><button onclick="selectPlace(\\'${placeIdEscaped}\\')" style="margin-top:8px;padding:6px 12px;background:#007AFF;color:white;border:none;border-radius:6px;cursor:pointer;">اختر هذا المكان</button>');
+      ${markerVar}.on('click', function() {
+        selectPlace('${placeIdEscaped}');
+      });`;
+    }).join('\n    ');
+    
+    const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>body { margin: 0; padding: 0; } #map { width: 100%; height: 100vh; }</style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+    var map = L.map('map').setView([${userLocation.lat}, ${userLocation.lon}], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors',
+      maxZoom: 19
+    }).addTo(map);
+    var userIcon = L.icon({
+      iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png',
+      iconSize: [25, 41],
+      iconAnchor: [12, 41],
+      popupAnchor: [1, -34]
+    });
+    L.marker([${userLocation.lat}, ${userLocation.lon}], {icon: userIcon}).addTo(map)
+      .bindPopup('موقعك الحالي').openPopup();
+    
+    ${placesMarkers}
+    
+    // دالة لاختيار المكان
+    function selectPlace(placeId) {
+      try {
+        // إرسال رسالة للـ parent window
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'PLACE_SELECTED', placeId: placeId }, '*');
+        }
+      } catch (e) {
+        console.error('Error sending message:', e);
+      }
+    }
+  </script>
+</body>
+</html>`;
+    
+    // إضافة event listener لاستقبال الرسائل من iframe
+    React.useEffect(() => {
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const handleMessage = (event: MessageEvent) => {
+          if (event.data && event.data.type === 'PLACE_SELECTED') {
+            const placeId = event.data.placeId;
+            const selectedPlace = places.find(p => p.id === placeId);
+            if (selectedPlace) {
+              onPlaceSelect(selectedPlace);
+            }
+          }
+        };
+        
+        window.addEventListener('message', handleMessage);
+        return () => {
+          window.removeEventListener('message', handleMessage);
+        };
+      }
+    }, [places, onPlaceSelect]);
+    
+    return (
+      <View style={styles.mapWebView}>
+        {/* @ts-ignore - iframe is valid on web, srcdoc is correct HTML attribute */}
+        <iframe
+          // @ts-ignore
+          srcdoc={html}
+          style={{
+            width: '100%',
+            height: '100%',
+            border: 'none',
+            display: 'block',
+          }}
+          title="Map"
+          sandbox="allow-scripts allow-same-origin allow-popups"
+        />
+      </View>
+    );
+  }
+  
+  // على الموبايل، نستخدم react-native-maps
+  const isMobile = Platform.OS === 'ios' || Platform.OS === 'android';
+  if (isMobile && MapView && Marker) {
+    return (
+      <MapView
+        style={styles.mapWebView}
+        initialRegion={{
+          latitude: userLocation.lat,
+          longitude: userLocation.lon,
+          latitudeDelta: 0.1,
+          longitudeDelta: 0.1,
+        }}
+        showsUserLocation={true}
+        showsMyLocationButton={true}
+      >
+        {/* User location marker */}
+        <Marker
+          coordinate={{
+            latitude: userLocation.lat,
+            longitude: userLocation.lon,
+          }}
+          title="موقعك الحالي"
+          pinColor="blue"
+        />
+        
+        {/* Places markers */}
+        {placesWithCoords.map((place) => (
+          <Marker
+            key={place.id}
+            coordinate={{
+              latitude: place.latitude!,
+              longitude: place.longitude!,
+            }}
+            title={place.name}
+            description={place.address}
+            onPress={() => onPlaceSelect(place)}
+          />
+        ))}
+      </MapView>
+    );
+  }
+  
+  // Fallback إذا لم يكن MapView متاحاً (على الويب أو منصات أخرى)
+  return (
+    <View style={styles.mapPlaceholder}>
+      <Ionicons name="location-outline" size={64} color="#ccc" />
+      <Text style={styles.mapPlaceholderText}>الخريطة غير متاحة على هذه المنصة</Text>
+    </View>
+  );
+};
 
 interface Place {
   id: string;
@@ -35,6 +239,7 @@ export default function PlacesDirectoryScreen() {
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number } | null>(null);
+  const [mapKey, setMapKey] = useState(0); // لإعادة تحميل الخريطة عند تغيير البيانات
 
   useEffect(() => {
     getUserLocation();
@@ -47,6 +252,13 @@ export default function PlacesDirectoryScreen() {
       loadPlaces();
     }
   }, [activeTab, userLocation]);
+
+  // تحديث الخريطة عند تغيير الأماكن أو الموقع
+  useEffect(() => {
+    if (activeTab === 'map') {
+      setMapKey(prev => prev + 1);
+    }
+  }, [places, userLocation, activeTab]);
 
   useEffect(() => {
     if (searchQuery.length > 2) {
@@ -419,15 +631,10 @@ export default function PlacesDirectoryScreen() {
     }
   };
 
+
   const handleMapSearch = () => {
-    // فتح الخريطة في تطبيق خارجي
-    if (userLocation) {
-      const url = `https://www.google.com/maps/search/?api=1&query=${userLocation.lat},${userLocation.lon}`;
-      Linking.openURL(url);
-    } else {
-      const url = 'https://www.google.com/maps';
-      Linking.openURL(url);
-    }
+    // لا نحتاج لفتح تطبيق خارجي - الخريطة ستكون داخل التطبيق
+    // فقط نغير التبويب للخريطة
   };
 
       // ترتيب الأماكن: يدوية أولاً، ثم حسب المسافة
@@ -541,7 +748,27 @@ export default function PlacesDirectoryScreen() {
 
       {activeTab === 'map' && (
         <View style={styles.mapContainer}>
-          <Text style={styles.mapText}>سيتم فتح الخريطة في تطبيق خارجي</Text>
+          {userLocation ? (
+            <MapComponent 
+              userLocation={userLocation} 
+              places={places}
+              onPlaceSelect={handleSelectPlace}
+            />
+          ) : (
+            <View style={styles.mapPlaceholder}>
+              <Ionicons name="location-outline" size={64} color="#ccc" />
+              <Text style={styles.mapPlaceholderText}>
+                يرجى السماح بالوصول للموقع لعرض الخريطة
+              </Text>
+              <TouchableOpacity
+                style={styles.enableLocationButton}
+                onPress={getUserLocation}
+              >
+                <Ionicons name="location" size={20} color="#fff" />
+                <Text style={styles.enableLocationText}>تفعيل الموقع</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       )}
     </SafeAreaView>
@@ -669,14 +896,54 @@ const styles = StyleSheet.create({
   },
   mapContainer: {
     flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  mapWebView: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+  },
+  mapLoadingContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+  },
+  mapLoadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#666',
+  },
+  mapPlaceholder: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 32,
   },
-  mapText: {
+  mapPlaceholderText: {
     fontSize: 16,
     color: '#666',
     textAlign: 'center',
+    marginTop: 16,
+    marginBottom: 24,
+  },
+  enableLocationButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#007AFF',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    gap: 8,
+  },
+  enableLocationText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 

@@ -351,7 +351,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = async () => {
     try {
       console.log('signOut: Starting sign out...');
-      const { error } = await supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut();
       if (error) {
         console.error('signOut: Error signing out:', error);
         throw error;
@@ -363,8 +363,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (error: any) {
       console.error('signOut: Error in signOut:', error);
       // حتى لو فشل signOut من Supabase، نمسح الحالة المحلية
-      setUser(null);
-      setSession(null);
+    setUser(null);
+    setSession(null);
       throw error;
     }
   };

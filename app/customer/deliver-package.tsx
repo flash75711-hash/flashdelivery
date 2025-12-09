@@ -95,7 +95,7 @@ export default function DeliverPackageScreen() {
       const lon = location.coords.longitude;
       
       const data = await reverseGeocode(lat, lon);
-      
+
       if (!data) {
         throw new Error('فشل جلب العنوان من الخدمة');
       }

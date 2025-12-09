@@ -95,13 +95,13 @@ export default function AdminPlacesScreen() {
       
       const data = await reverseGeocode(lat, lon);
       
-      if (data && data.display_name) {
-        setFormData({
-          ...formData,
-          latitude: lat.toString(),
-          longitude: lon.toString(),
-          address: data.display_name,
-        });
+        if (data && data.display_name) {
+          setFormData({
+            ...formData,
+            latitude: lat.toString(),
+            longitude: lon.toString(),
+            address: data.display_name,
+          });
       }
     } catch (error) {
       console.error('Error getting location:', error);

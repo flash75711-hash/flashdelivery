@@ -18,16 +18,16 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
   const reverseGeocodeAddress = useCallback(async (lat: number, lon: number): Promise<string | null> => {
     try {
       const data = await reverseGeocode(lat, lon);
-      
+
       if (!data || !data.address) return null;
 
-      const address = data.address;
+        const address = data.address;
       const locationParts: string[] = [];
-      
+        
       // أولوية: استخدام display_name إذا كان يحتوي على معلومات أكثر تفصيلاً
       // ثم نستخدم address fields كبديل
       let useDisplayName = false;
-      
+        
       // التحقق من وجود معلومات تفصيلية في display_name
       if (data.display_name) {
         const displayParts = data.display_name.split(',').map((p: string) => p.trim());
@@ -56,29 +56,29 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
           .join('، ');
         
         if (cleaned) return cleaned;
-      }
-      
+        }
+        
       // إذا لم نستخدم display_name، نستخدم address fields
       // 1. رقم المبنى (إن وجد) - للموقع الدقيق جداً
-      if (address.house_number) {
+        if (address.house_number) {
         locationParts.push(`مبنى ${address.house_number}`);
-      }
-      
+        }
+        
       // 2. الشارع/الطريق - الأهم للموقع الدقيق
-      if (address.road) {
+        if (address.road) {
         locationParts.push(`شارع ${address.road}`);
-      } else if (address.pedestrian) {
+        } else if (address.pedestrian) {
         locationParts.push(`ممر ${address.pedestrian}`);
-      } else if (address.path) {
+        } else if (address.path) {
         locationParts.push(`طريق ${address.path}`);
       } else if (address.footway) {
         locationParts.push(`ممر ${address.footway}`);
-      }
-      
+        }
+        
       // 3. الحي/المنطقة داخل المدينة - الأهم للموقع التفصيلي
-      if (address.neighbourhood) {
+        if (address.neighbourhood) {
         locationParts.push(`حي ${address.neighbourhood}`);
-      } else if (address.suburb) {
+        } else if (address.suburb) {
         locationParts.push(`منطقة ${address.suburb}`);
       } else if (address.quarter) {
         locationParts.push(`حارة ${address.quarter}`);
@@ -92,17 +92,17 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
       const cityName = address.city || address.town || address.village;
       if (cityName) {
         locationParts.push(cityName);
-      }
-      
+        }
+        
       // إذا وجدنا معلومات كافية، نرجعها
       if (locationParts.length > 0) {
         return locationParts.join('، ');
-      }
-      
+        }
+        
       // كحل أخير، نستخدم display_name
-      if (data.display_name) {
+        if (data.display_name) {
         const cleaned = data.display_name
-          .split(',')
+            .split(',')
           .map((part: string) => part.trim())
           .filter((part: string) => {
             const lower = part.toLowerCase();
@@ -112,14 +112,14 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
                    part.length > 2;
           })
           .slice(0, 4)
-          .join('، ');
+            .join('، ');
         
         if (cleaned) return cleaned;
       }
       
       return null;
     } catch (error: any) {
-      console.error('Reverse geocoding error:', error);
+        console.error('Reverse geocoding error:', error);
       return null;
     }
   }, []);
@@ -234,10 +234,10 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
                 }} 
                 style={styles.refreshButton}
               >
-                <Ionicons name="refresh" size={16} color="#007AFF" />
-              </TouchableOpacity>
+              <Ionicons name="refresh" size={16} color="#007AFF" />
+            </TouchableOpacity>
               <Ionicons name="chevron-down" size={16} color="#007AFF" style={styles.chevronIcon} />
-            </View>
+          </View>
           </TouchableOpacity>
         )}
       </View>

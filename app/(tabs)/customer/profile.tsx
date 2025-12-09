@@ -193,7 +193,7 @@ export default function CustomerProfileScreen() {
       const lon = location.coords.longitude;
       
       const data = await reverseGeocode(lat, lon);
-      
+
       if (!data) {
         throw new Error('فشل جلب العنوان من الخدمة');
       }
@@ -334,14 +334,14 @@ export default function CustomerProfileScreen() {
         performLogout();
       }
     } else {
-      Alert.alert('تسجيل الخروج', 'هل أنت متأكد من تسجيل الخروج؟', [
-        { text: 'إلغاء', style: 'cancel' },
-        {
-          text: 'تسجيل الخروج',
-          style: 'destructive',
+    Alert.alert('تسجيل الخروج', 'هل أنت متأكد من تسجيل الخروج؟', [
+      { text: 'إلغاء', style: 'cancel' },
+      {
+        text: 'تسجيل الخروج',
+        style: 'destructive',
           onPress: performLogout,
-        },
-      ]);
+      },
+    ]);
     }
   };
 
