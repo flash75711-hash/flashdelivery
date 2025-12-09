@@ -83,8 +83,13 @@ const MapComponent = ({
       const placeIdJson = JSON.stringify(place.id);
       return `
       var ${markerVar} = L.marker([${place.lat}, ${place.lon}]).addTo(map)
-        .bindPopup('<b>${place.name}</b><br>${place.address}<br><button onclick="selectPlace(${placeIdJson})" style="margin-top:8px;padding:6px 12px;background:#007AFF;color:white;border:none;border-radius:6px;cursor:pointer;">اختر هذا المكان</button>');
-      ${markerVar}.on('click', function() {
+        .bindPopup('<b>${place.name}</b><br>${place.address}<br><button onclick="selectPlace(${placeIdJson})" style="margin-top:8px;padding:6px 12px;background:#007AFF;color:white;border:none;border-radius:6px;cursor:pointer;">اختر هذا المكان</button>', {
+          closeOnClick: false,
+          autoClose: false,
+          closeOnEscapeKey: true
+        });
+      ${markerVar}.on('click', function(e) {
+        ${markerVar}.openPopup();
         selectPlace(${placeIdJson});
       });`;
     }).join('\n    ');
@@ -96,12 +101,71 @@ const MapComponent = ({
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <style>body { margin: 0; padding: 0; } #map { width: 100%; height: 100vh; }</style>
+  <style>
+    body { margin: 0; padding: 0; } 
+    #map { 
+      width: 100%; 
+      height: 100vh; 
+      cursor: grab;
+      touch-action: pan-x pan-y !important;
+      -ms-touch-action: pan-x pan-y !important;
+    }
+    #map:active {
+      cursor: grabbing;
+    }
+    .leaflet-marker-icon {
+      cursor: pointer !important;
+    }
+    .leaflet-container {
+      touch-action: pan-x pan-y !important;
+      -ms-touch-action: pan-x pan-y !important;
+    }
+    .leaflet-map-pane {
+      touch-action: pan-x pan-y !important;
+      -ms-touch-action: pan-x pan-y !important;
+    }
+  </style>
 </head>
 <body>
   <div id="map"></div>
   <script>
-    var map = L.map('map').setView([${userLocation.lat}, ${userLocation.lon}], 15);
+    var map = L.map('map', {
+      center: [${userLocation.lat}, ${userLocation.lon}],
+      zoom: 15,
+      dragging: true,
+      touchZoom: true,
+      doubleClickZoom: true,
+      scrollWheelZoom: true,
+      boxZoom: true,
+      keyboard: true,
+      tap: true,
+      zoomControl: true
+    });
+    
+    // التأكد من تفعيل التفاعل
+    map.dragging.enable();
+    map.touchZoom.enable();
+    map.doubleClickZoom.enable();
+    map.scrollWheelZoom.enable();
+    
+    // فرض touch-action بعد تحميل Leaflet
+    map.whenReady(function() {
+      var mapEl = document.getElementById('map');
+      if (mapEl) {
+        mapEl.style.setProperty('touch-action', 'pan-x pan-y', 'important');
+        mapEl.style.setProperty('-ms-touch-action', 'pan-x pan-y', 'important');
+      }
+      var container = document.querySelector('.leaflet-container');
+      if (container) {
+        container.style.setProperty('touch-action', 'pan-x pan-y', 'important');
+        container.style.setProperty('-ms-touch-action', 'pan-x pan-y', 'important');
+      }
+      var mapPane = document.querySelector('.leaflet-map-pane');
+      if (mapPane) {
+        mapPane.style.setProperty('touch-action', 'pan-x pan-y', 'important');
+        mapPane.style.setProperty('-ms-touch-action', 'pan-x pan-y', 'important');
+      }
+    });
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap contributors',
       maxZoom: 19
@@ -176,7 +240,7 @@ const MapComponent = ({
             display: 'block',
           }}
           title="Map"
-          sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+          sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-pointer-lock"
           allow="geolocation"
         />
       </View>
@@ -310,7 +374,7 @@ export default function PlacesDirectoryScreen() {
       }
       return null;
     } catch (error: any) {
-      console.error('Error getting city:', error);
+        console.error('Error getting city:', error);
       return null;
     }
   };
@@ -911,10 +975,12 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   mapContainer: {
+    pointerEvents: 'auto',
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
   mapWebView: {
+    pointerEvents: 'auto',
     flex: 1,
     width: '100%',
     height: '100%',
