@@ -1,25 +1,76 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, Modal, ScrollView } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, Modal, ScrollView, Platform } from 'react-native';
+import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
-import { reverseGeocode } from '../lib/supabase';
+import { reverseGeocode, supabase } from '../lib/supabase';
+import { findNearestPlaceInDirectory, getLocationWithHighAccuracy, getAddressFromCoordinates } from '../lib/locationUtils';
 
 interface CurrentLocationDisplayProps {
   onLocationUpdate?: (location: { lat: number; lon: number; address: string } | null) => void;
+  onOpenPlacesDirectory?: () => void; // دالة اختيارية لفتح دليل الأماكن
+  externalLocation?: { lat: number; lon: number; address: string } | null; // موقع خارجي لتحديث العرض
+  onManualRefresh?: () => void; // دالة يتم استدعاؤها عند التحديث اليدوي
 }
 
-export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLocationDisplayProps) {
-  const [location, setLocation] = useState<{ lat: number; lon: number; address: string } | null>(null);
+export default function CurrentLocationDisplay({ onLocationUpdate, onOpenPlacesDirectory, externalLocation, onManualRefresh }: CurrentLocationDisplayProps) {
+  const router = useRouter();
+  const [location, setLocation] = useState<{ lat: number; lon: number; address: string; accuracy?: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showDetails, setShowDetails] = useState(false);
   const [detailedAddress, setDetailedAddress] = useState<string | null>(null);
+  // استخدام ref لتتبع externalLocation الحالي في setInterval
+  const externalLocationRef = useRef(externalLocation);
+  // استخدام ref لتتبع location الحالي في setInterval
+  const locationRef = useRef(location);
+
+  // تحديث refs عند تغيير externalLocation أو location
+  useEffect(() => {
+    externalLocationRef.current = externalLocation;
+    console.log('externalLocationRef updated:', externalLocation);
+  }, [externalLocation]);
+
+  useEffect(() => {
+    locationRef.current = location;
+    console.log('locationRef updated:', location);
+  }, [location]);
+
+
+  // تحديث الموقع عند تغيير externalLocation
+  useEffect(() => {
+    if (externalLocation) {
+      // التحقق من أن الموقع مختلف عن الموقع الحالي لتجنب التحديثات غير الضرورية
+      if (!location || 
+          location.lat !== externalLocation.lat || 
+          location.lon !== externalLocation.lon ||
+          location.address !== externalLocation.address) {
+        console.log('Updating location from external source (manual selection):', externalLocation);
+        // عند تحديث الموقع من مصدر خارجي (اختيار يدوي)، نضيف accuracy: 0
+        // للإشارة إلى أن هذا موقع محدد يدوياً وليس GPS
+        setLocation({ ...externalLocation, accuracy: 0 });
+        setLoading(false);
+        setError(null);
+      }
+    }
+  }, [externalLocation, location]);
 
   const reverseGeocodeAddress = useCallback(async (lat: number, lon: number): Promise<string | null> => {
     try {
+      console.log('Calling reverseGeocode for:', { lat, lon });
       const data = await reverseGeocode(lat, lon);
 
-      if (!data || !data.address) return null;
+      if (!data || !data.address) {
+        console.log('No address data returned from reverseGeocode');
+        return null;
+      }
+
+      console.log('Reverse geocode response:', {
+        display_name: data.display_name,
+        address: data.address,
+        city: data.address.city || data.address.town || data.address.village,
+        state: data.address.state,
+      });
 
         const address = data.address;
       const locationParts: string[] = [];
@@ -125,27 +176,81 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
   }, []);
 
   const updateLocation = useCallback(async () => {
+    // إذا كان هناك externalLocation نشط، لا نحدث الموقع تلقائياً
+    // لأن externalLocation يعني أن المستخدم اختار موقعاً محدداً
+    // نستخدم ref للتحقق من القيمة الحالية
+    if (externalLocationRef.current) {
+      console.log('Skipping auto-update because externalLocation is set:', externalLocationRef.current);
+      return;
+    }
+    
+    // إذا كان الموقع الحالي محدد يدوياً (accuracy === 0)، لا نستبدله
+    // لأن هذا يعني أن المستخدم اختار موقعاً محدداً من الدليل
+    // نستخدم ref للتحقق من القيمة الحالية
+    const currentLocation = locationRef.current;
+    if (currentLocation && currentLocation.accuracy === 0) {
+      console.log('Skipping auto-update because location was manually selected (accuracy === 0)');
+      return;
+    }
+    
     try {
-      const currentLocation = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
+      // استخدام الدالة المشتركة لجلب الموقع مع WiFi
+      const currentLocation = await getLocationWithHighAccuracy();
       
       const lat = currentLocation.coords.latitude;
       const lon = currentLocation.coords.longitude;
-      const address = await reverseGeocodeAddress(lat, lon);
+      const accuracy = currentLocation.coords.accuracy; // دقة الموقع بالمتر
+      
+      // تسجيل الإحداثيات الفعلية مع معلومات عن مصدر الموقع
+      const locationSource = Platform.OS === 'web' 
+        ? (accuracy && accuracy < 100 ? 'GPS/WiFi' : accuracy && accuracy < 1000 ? 'Network (WiFi/Cellular)' : 'IP-based')
+        : 'GPS/WiFi/Cellular';
+      
+      console.log('Location Coordinates (using WiFi + GPS):', { 
+        lat, 
+        lon, 
+        accuracy: `${accuracy?.toFixed(0)}m` || 'unknown',
+        source: locationSource,
+        altitude: currentLocation.coords.altitude,
+        heading: currentLocation.coords.heading,
+        speed: currentLocation.coords.speed,
+      });
+      
+      // التحقق من دقة الموقع - إذا كانت الدقة سيئة جداً (أكثر من 5000 متر = 5 كم)
+      if (accuracy && accuracy > 5000) {
+        console.warn('GPS accuracy is very poor (IP-based geolocation):', accuracy, 'meters. Skipping auto-update to preserve manual selection.');
+        if (location) {
+          console.log('Keeping existing location instead of updating with inaccurate GPS data');
+          return;
+        }
+        console.warn('No existing location, using inaccurate GPS data as fallback');
+      } else if (accuracy && accuracy > 1000) {
+        console.warn('GPS accuracy is poor:', accuracy, 'meters. Location may be inaccurate.');
+      }
+      
+      // استخدام الدالة المشتركة للحصول على العنوان مع البحث في الدليل
+      const address = await getAddressFromCoordinates(lat, lon, 500);
       
       const locationData = {
         lat,
         lon,
         address: address || 'موقعي الحالي',
+        accuracy: accuracy ?? undefined, // حفظ دقة GPS (تحويل null إلى undefined)
       };
       
       setLocation(locationData);
       setLoading(false);
       setError(null);
       
-      if (onLocationUpdate) {
-        onLocationUpdate(locationData);
+      // لا نحدث onLocationUpdate إذا كان هناك externalLocation نشط
+      // لأن هذا سيستبدل الموقع المحدد يدوياً
+      if (onLocationUpdate && !externalLocationRef.current) {
+        // إزالة accuracy قبل إرساله لأن الواجهة لا تتوقعها
+        const { accuracy: _, ...locationWithoutAccuracy } = locationData;
+        console.log('Calling onLocationUpdate from updateLocation:', locationWithoutAccuracy);
+        onLocationUpdate(locationWithoutAccuracy);
+      } else {
+        console.log('Skipping onLocationUpdate because externalLocationRef.current =', externalLocationRef.current);
       }
     } catch (err: any) {
       console.error('Error updating location:', err);
@@ -157,10 +262,60 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
   }, [reverseGeocodeAddress, onLocationUpdate, location]);
 
   const handleRefresh = useCallback(async () => {
+    // عند الضغط على زر التحديث يدوياً، نسمح بالتحديث حتى لو كان هناك externalLocation
+    // لأن المستخدم يريد تحديث الموقع بنفسه
     setLoading(true);
     setError(null);
-    await updateLocation();
-  }, [updateLocation]);
+    
+    // إعلام الـ parent أن المستخدم قام بتحديث الموقع يدوياً
+    if (onManualRefresh) {
+      onManualRefresh();
+    }
+    
+    try {
+      // استخدام الدالة المشتركة لجلب الموقع مع WiFi
+      const currentLocation = await getLocationWithHighAccuracy();
+      
+      const lat = currentLocation.coords.latitude;
+      const lon = currentLocation.coords.longitude;
+      const accuracy = currentLocation.coords.accuracy;
+      
+      console.log('Manual refresh GPS Coordinates:', { 
+        lat, 
+        lon, 
+        accuracy: `${accuracy?.toFixed(0)}m` || 'unknown',
+      });
+      
+      // التحقق من دقة الموقع
+      if (accuracy && accuracy > 1000) {
+        console.warn('GPS accuracy is poor during manual refresh:', accuracy, 'meters');
+      }
+      
+      // استخدام الدالة المشتركة للحصول على العنوان مع البحث في الدليل
+      const address = await getAddressFromCoordinates(lat, lon, 500);
+      
+      const locationData = {
+        lat,
+        lon,
+        address: address || 'موقعي الحالي',
+        accuracy: accuracy ?? undefined, // حفظ دقة GPS (تحويل null إلى undefined)
+      };
+      
+      setLocation(locationData);
+      setLoading(false);
+      setError(null);
+      
+      if (onLocationUpdate) {
+        // إزالة accuracy قبل إرساله لأن الواجهة لا تتوقعها
+        const { accuracy: _, ...locationWithoutAccuracy } = locationData;
+        onLocationUpdate(locationWithoutAccuracy);
+      }
+    } catch (err: any) {
+      console.error('Error refreshing location:', err);
+      setError('فشل تحديث الموقع');
+      setLoading(false);
+    }
+  }, [reverseGeocodeAddress, onLocationUpdate, onManualRefresh]);
 
   useEffect(() => {
     const startLocationTracking = async () => {
@@ -173,8 +328,18 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
           return;
         }
 
-        // جلب الموقع الأولي
-        await updateLocation();
+        // جلب الموقع الأولي فقط إذا لم يكن هناك externalLocation
+        // إذا كان هناك externalLocation، نستخدمه مباشرة ولا نطلب GPS
+        // نستخدم ref للتحقق من القيمة الحالية
+        if (!externalLocationRef.current) {
+          await updateLocation();
+        } else {
+          // إذا كان هناك externalLocation، نستخدمه مباشرة
+          console.log('Using externalLocation on mount:', externalLocationRef.current);
+          setLocation({ ...externalLocationRef.current, accuracy: 0 });
+          setLoading(false);
+          setError(null);
+        }
       } catch (err: any) {
         console.error('Error starting location tracking:', err);
         setError('فشل جلب الموقع');
@@ -184,10 +349,18 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
 
     startLocationTracking();
     
-    // تحديث الموقع كل 30 ثانية (تقليل الاستدعاءات)
+    // تحديث الموقع كل 60 ثانية فقط إذا لم يكن هناك externalLocation
+    // (لأن externalLocation يعني أن الموقع يتم تحديثه من الخارج)
+    // نستخدم ref للتحقق من externalLocation الحالي في كل مرة
     const interval = setInterval(() => {
-      updateLocation();
-    }, 30000);
+      // التحقق من externalLocation الحالي باستخدام ref
+      if (!externalLocationRef.current) {
+        // استدعاء updateLocation الذي يتحقق من accuracy === 0 داخلياً
+        updateLocation();
+      } else {
+        console.log('Skipping interval update because externalLocation is set:', externalLocationRef.current);
+      }
+    }, 60000); // 60 ثانية بدلاً من 30
     
     return () => {
       clearInterval(interval);
@@ -214,6 +387,13 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
           <TouchableOpacity 
             style={styles.locationContainer}
             onPress={async () => {
+              // إذا كانت هناك دالة لفتح دليل الأماكن، نستخدمها
+              if (onOpenPlacesDirectory) {
+                onOpenPlacesDirectory();
+                return;
+              }
+              
+              // وإلا نعرض التفاصيل كما كان
               if (location) {
                 // جلب العنوان التفصيلي عند الضغط
                 const detailed = await getDetailedAddress(location.lat, location.lon);
@@ -223,10 +403,20 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
             }}
             activeOpacity={0.7}
           >
-            <Text style={styles.text} numberOfLines={2}>
-              {location?.address || 'موقعي الحالي'}
-            </Text>
+            <View style={styles.textContainer}>
+              <Text style={styles.text} numberOfLines={2}>
+                {location?.address || 'موقعي الحالي'}
+              </Text>
+              {location && (
+                <Text style={styles.accuracyHint} numberOfLines={1}>
+                  {location.accuracy && location.accuracy > 500 ? '⚠️ قد يكون الموقع غير دقيق' : ''}
+                </Text>
+              )}
+            </View>
             <View style={styles.actionsContainer}>
+              {onOpenPlacesDirectory && (
+                <Ionicons name="list" size={16} color="#007AFF" style={styles.directoryIcon} />
+              )}
               <TouchableOpacity 
                 onPress={(e) => {
                   e.stopPropagation();
@@ -236,7 +426,7 @@ export default function CurrentLocationDisplay({ onLocationUpdate }: CurrentLoca
               >
               <Ionicons name="refresh" size={16} color="#007AFF" />
             </TouchableOpacity>
-              <Ionicons name="chevron-down" size={16} color="#007AFF" style={styles.chevronIcon} />
+              <Ionicons name={onOpenPlacesDirectory ? "chevron-forward" : "chevron-down"} size={16} color="#007AFF" style={styles.chevronIcon} />
           </View>
           </TouchableOpacity>
         )}
@@ -377,6 +567,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
+  directoryIcon: {
+    marginLeft: 4,
+  },
   chevronIcon: {
     marginLeft: 4,
   },
@@ -386,13 +579,21 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 8,
   },
-  text: {
+  textContainer: {
     flex: 1,
+  },
+  text: {
     fontSize: 13,
     color: '#1976D2',
     fontWeight: '500',
     textAlign: 'right',
     lineHeight: 20,
+  },
+  accuracyHint: {
+    fontSize: 10,
+    color: '#FF9500',
+    textAlign: 'right',
+    marginTop: 2,
   },
   errorText: {
     flex: 1,

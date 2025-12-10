@@ -57,6 +57,8 @@ export default function OutsideOrderScreen() {
   const [loading, setLoading] = useState(false);
   const [maxDeliveryDistance, setMaxDeliveryDistance] = useState<number>(3);
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number } | null>(null);
+  const [currentLocationDisplay, setCurrentLocationDisplay] = useState<{ lat: number; lon: number; address: string } | null>(null);
+  const [isManualLocation, setIsManualLocation] = useState(false); // للتحقق من أن الموقع تم اختياره يدوياً
   const [findingPlace, setFindingPlace] = useState<string | null>(null);
   const [uploadingImageForItem, setUploadingImageForItem] = useState<string | null>(null); // itemId الذي يتم رفع صورته
   const [showImageSourceModal, setShowImageSourceModal] = useState(false);
@@ -70,11 +72,34 @@ export default function OutsideOrderScreen() {
 
   // استقبال الموقع من CurrentLocationDisplay
   const handleLocationUpdate = (location: { lat: number; lon: number; address: string } | null) => {
+    // إذا كان الموقع تم اختياره يدوياً، لا نسمح بتحديثه تلقائياً من GPS
+    if (isManualLocation) {
+      console.log('Skipping location update because location was manually selected (isManualLocation = true)', {
+        isManualLocation,
+        currentLocationDisplay,
+        incomingLocation: location
+      });
+      return;
+    }
+    
+    // إذا كان هناك currentLocationDisplay موجود بالفعل، نتحقق من أنه ليس محدد يدوياً
+    // (عن طريق التحقق من أن العنوان يطابق مكاناً محدداً يدوياً)
+    if (currentLocationDisplay && location) {
+      // إذا كان العنوان مختلفاً بشكل كبير، قد يكون هذا تحديث GPS غير مرغوب فيه
+      // لكننا نسمح به لأن isManualLocation = false
+      console.log('Updating location from GPS:', {
+        current: currentLocationDisplay.address,
+        incoming: location.address,
+        isManualLocation
+      });
+    }
+    
     if (location) {
       setUserLocation({
         lat: location.lat,
         lon: location.lon,
       });
+      setCurrentLocationDisplay(location);
     }
   };
 
@@ -558,10 +583,45 @@ export default function OutsideOrderScreen() {
   // التحقق من اختيار مكان عند العودة من الدليل
   useFocusEffect(
     useCallback(() => {
+      let isMounted = true;
+      
       const checkSelectedPlaces = async () => {
+        if (!isMounted) return;
+        
         const updatedPlaces = [...placesWithItems];
         let hasChanges = false;
         
+        // أولاً: التحقق من المكان المختار لتحديث الموقع (من CurrentLocationDisplay)
+        const locationPlace = await AsyncStorage.getItem('selected_place_for_location');
+        if (locationPlace) {
+          const place = JSON.parse(locationPlace);
+          console.log('Found selected_place_for_location:', place);
+          // تحديث الموقع الحالي بالإحداثيات من المكان المختار
+          if (place.latitude && place.longitude) {
+            console.log('Updating location to:', place.latitude, place.longitude);
+            if (isMounted) {
+              const newLocation = {
+                lat: place.latitude,
+                lon: place.longitude,
+              };
+              const newLocationDisplay = {
+                lat: place.latitude,
+                lon: place.longitude,
+                address: place.name || place.address,
+              };
+              setUserLocation(newLocation);
+              setCurrentLocationDisplay(newLocationDisplay);
+              setIsManualLocation(true); // تحديد أن الموقع تم اختياره يدوياً
+              console.log('Set isManualLocation = true and currentLocationDisplay =', newLocationDisplay);
+              // لا نستدعي handleLocationUpdate هنا لأننا لا نريد أن يتم استبداله لاحقاً
+            }
+          }
+          await AsyncStorage.removeItem('selected_place_for_location');
+        }
+        
+        if (!isMounted) return;
+        
+        // ثانياً: التحقق من الأماكن المحددة لكل placeId
         for (let i = 0; i < updatedPlaces.length; i++) {
           const placeWithItems = updatedPlaces[i];
           const storedPlace = await AsyncStorage.getItem(`selected_place_${placeWithItems.id}`);
@@ -573,12 +633,38 @@ export default function OutsideOrderScreen() {
           }
         }
         
-        if (hasChanges) {
+        // ثالثاً: التحقق من الاختيار العام (من أزرار اختيار المكان في القائمة)
+        const generalPlace = await AsyncStorage.getItem('selected_place_general');
+        if (generalPlace) {
+          const place = JSON.parse(generalPlace);
+          // إضافة المكان إلى أول مكان فارغ
+          const firstEmptyIndex = updatedPlaces.findIndex(p => !p.place);
+          if (firstEmptyIndex !== -1) {
+            updatedPlaces[firstEmptyIndex] = { ...updatedPlaces[firstEmptyIndex], place };
+            hasChanges = true;
+          } else {
+            // إذا لم يكن هناك مكان فارغ، نضيف مكان جديد
+            updatedPlaces.push({ 
+              id: Date.now().toString(), 
+              place, 
+              items: [] 
+            });
+            hasChanges = true;
+          }
+          await AsyncStorage.removeItem('selected_place_general');
+        }
+        
+        if (hasChanges && isMounted) {
           setPlacesWithItems(updatedPlaces);
         }
       };
+      
       checkSelectedPlaces();
-    }, [placesWithItems.length])
+      
+      return () => {
+        isMounted = false;
+      };
+    }, [placesWithItems.length]) // نستخدم length فقط لتجنب re-render غير ضروري
   );
 
   const handleSubmit = async () => {
@@ -834,7 +920,37 @@ export default function OutsideOrderScreen() {
         <Text style={styles.title}>{t('customer.outsideOrder')}</Text>
       </View>
 
-      <CurrentLocationDisplay onLocationUpdate={handleLocationUpdate} />
+      <CurrentLocationDisplay 
+        onLocationUpdate={(location) => {
+          // إذا كان الموقع تم اختياره يدوياً، لا نحدثه تلقائياً
+          console.log('onLocationUpdate called in outside-order:', {
+            isManualLocation,
+            currentLocationDisplay,
+            incomingLocation: location
+          });
+          if (!isManualLocation) {
+            handleLocationUpdate(location);
+          } else {
+            console.log('Skipping handleLocationUpdate because isManualLocation = true');
+          }
+        }}
+        externalLocation={currentLocationDisplay}
+        onOpenPlacesDirectory={() => {
+          // فتح دليل الأماكن لتحديث الموقع الحالي
+          router.push({
+            pathname: '/customer/places-directory',
+            params: { 
+              returnPath: '/customer/outside-order',
+              fromLocationDisplay: 'true' // معرف خاص للتمييز
+            },
+          });
+        }}
+        onManualRefresh={() => {
+          // عند التحديث اليدوي، نعيد تعيين isManualLocation إلى false
+          // حتى يتم السماح بالتحديثات التلقائية مرة أخرى
+          setIsManualLocation(false);
+        }}
+      />
 
       <ScrollView style={styles.content} keyboardShouldPersistTaps="handled">
         {placesWithItems.map((placeWithItems, placeIndex) => (

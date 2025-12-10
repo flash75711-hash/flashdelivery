@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -14,10 +14,12 @@ import {
 } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, reverseGeocode } from '@/lib/supabase';
+import { getLocationWithAddress } from '@/lib/locationUtils';
 import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface Address {
   id?: string;
@@ -40,6 +42,7 @@ export default function CustomerProfileScreen() {
   const [loadingData, setLoadingData] = useState(true);
   const [gettingLocation, setGettingLocation] = useState<number | null>(null);
   const [editingName, setEditingName] = useState(false);
+  const [selectedAddressIndex, setSelectedAddressIndex] = useState<number | null>(null);
 
   // جلب بيانات المستخدم والعناوين
   useEffect(() => {
@@ -175,69 +178,64 @@ export default function CustomerProfileScreen() {
     setAddresses(newAddresses);
   };
 
+  // فتح دليل الأماكن لاختيار مكان
+  const openPlacesDirectory = (index: number) => {
+    setSelectedAddressIndex(index);
+    router.push({
+      pathname: '/customer/places-directory',
+      params: { 
+        addressIndex: index.toString(),
+        returnPath: '/(tabs)/customer/profile'
+      },
+    });
+  };
+
+  // التحقق من اختيار مكان عند العودة من الدليل
+  useFocusEffect(
+    useCallback(() => {
+      const checkSelectedPlace = async () => {
+        if (selectedAddressIndex !== null) {
+          const storedPlace = await AsyncStorage.getItem(`selected_place_address_${selectedAddressIndex}`);
+          if (storedPlace) {
+            const place = JSON.parse(storedPlace);
+            // تحديث العنوان مباشرة
+            setAddresses(prevAddresses => {
+              const newAddresses = [...prevAddresses];
+              if (newAddresses[selectedAddressIndex]) {
+                newAddresses[selectedAddressIndex] = {
+                  ...newAddresses[selectedAddressIndex],
+                  place_name: place.name
+                };
+              }
+              return newAddresses;
+            });
+            await AsyncStorage.removeItem(`selected_place_address_${selectedAddressIndex}`);
+            setSelectedAddressIndex(null);
+          }
+        }
+      };
+      checkSelectedPlace();
+    }, [selectedAddressIndex])
+  );
+
   const getCurrentLocation = async (index: number) => {
     setGettingLocation(index);
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('تنبيه', 'يجب السماح بالوصول للموقع لاستخدام هذه الميزة');
-        setGettingLocation(null);
-        return;
+      // استخدام الدالة المشتركة التي تستخدم WiFi والبحث في الدليل
+      const locationData = await getLocationWithAddress(500);
+
+      if (!locationData) {
+        throw new Error('فشل جلب الموقع');
       }
 
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-
-      const lat = location.coords.latitude;
-      const lon = location.coords.longitude;
+      const { lat, lon, address } = locationData;
       
-      const data = await reverseGeocode(lat, lon);
+      // استخدام العنوان المسترجع (من الدليل أو reverse geocoding)
+      const placeName = address;
 
-      if (!data) {
-        throw new Error('فشل جلب العنوان من الخدمة');
-      }
-
-      if (data && data.address) {
-        const address = data.address;
-        const placeNameParts: string[] = [];
-        
-        if (address.road) placeNameParts.push(address.road);
-        if (address.house_number) placeNameParts.push(`مبنى ${address.house_number}`);
-        if (address.neighbourhood) placeNameParts.push(address.neighbourhood);
-        if (address.suburb) placeNameParts.push(address.suburb);
-        if (address.quarter || address.district) placeNameParts.push(address.quarter || address.district);
-        if (address.city || address.town || address.village) {
-          placeNameParts.push(address.city || address.town || address.village);
-        }
-        if (address.state) placeNameParts.push(address.state);
-        
-        let placeName: string;
-        if (address.road || placeNameParts.length >= 2) {
-          placeName = placeNameParts.join('، ');
-        } else if (data.display_name) {
-          placeName = data.display_name
-            .split(',')
-            .filter(part => {
-              const trimmed = part.trim();
-              return trimmed !== 'مصر' && !/^\d+$/.test(trimmed);
-            })
-            .map(part => part.trim())
-            .join('، ');
-        } else {
-          placeName = 'موقعي الحالي';
-        }
-
-        updateAddress(index, 'place_name', placeName);
-        
-        if (address.house_number) {
-          updateAddress(index, 'building_number', address.house_number);
-        }
-
-        Alert.alert('نجح', 'تم جلب العنوان بنجاح');
-      } else {
-        Alert.alert('تنبيه', 'لم يتم العثور على عنوان لهذا الموقع');
-      }
+      updateAddress(index, 'place_name', placeName);
+      
+      Alert.alert('نجح', 'تم جلب العنوان بنجاح');
     } catch (error: any) {
       console.error('Error getting location:', error);
       Alert.alert('خطأ', error.message || 'فشل جلب الموقع');
@@ -476,17 +474,25 @@ export default function CustomerProfileScreen() {
                     placeholderTextColor="#999"
                     textAlign="right"
                   />
-                  <TouchableOpacity
-                    style={[styles.locationButton, gettingLocation === index && styles.locationButtonLoading]}
-                    onPress={() => getCurrentLocation(index)}
-                    disabled={gettingLocation === index}
-                  >
-                    {gettingLocation === index ? (
-                      <ActivityIndicator size="small" color="#007AFF" />
-                    ) : (
-                      <Ionicons name="location" size={20} color="#007AFF" />
-                    )}
-                  </TouchableOpacity>
+                  <View style={styles.locationButtonsContainer}>
+                    <TouchableOpacity
+                      style={[styles.locationButton, styles.directoryButton]}
+                      onPress={() => openPlacesDirectory(index)}
+                    >
+                      <Ionicons name="list" size={20} color="#34C759" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.locationButton, gettingLocation === index && styles.locationButtonLoading]}
+                      onPress={() => getCurrentLocation(index)}
+                      disabled={gettingLocation === index}
+                    >
+                      {gettingLocation === index ? (
+                        <ActivityIndicator size="small" color="#007AFF" />
+                      ) : (
+                        <Ionicons name="location" size={20} color="#007AFF" />
+                      )}
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
                 <View style={styles.row}>
@@ -730,6 +736,10 @@ const styles = StyleSheet.create({
     flex: 1,
     marginBottom: 0,
   },
+  locationButtonsContainer: {
+    flexDirection: 'row',
+    gap: 8,
+  },
   locationButton: {
     width: 48,
     height: 48,
@@ -739,6 +749,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#007AFF',
+  },
+  directoryButton: {
+    backgroundColor: '#e8f5e9',
+    borderColor: '#34C759',
   },
   locationButtonLoading: {
     opacity: 0.6,

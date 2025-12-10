@@ -11,11 +11,28 @@ import {
   Alert,
   Modal,
   ScrollView,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase, reverseGeocode } from '@/lib/supabase';
+import { getLocationWithAddress } from '@/lib/locationUtils';
+import { useAuth } from '@/contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+
+// استيراد react-native-maps فقط على الموبايل
+let MapView: any = null;
+let Marker: any = null;
+
+if (Platform.OS === 'ios' || Platform.OS === 'android') {
+  try {
+    const maps = require('react-native-maps');
+    MapView = maps.default;
+    Marker = maps.Marker;
+  } catch (e) {
+    console.warn('react-native-maps not available:', e);
+  }
+}
 
 interface Place {
   id: string;
@@ -31,6 +48,7 @@ interface Place {
 
 export default function AdminPlacesScreen() {
   const router = useRouter();
+  const { user } = useAuth();
   const [places, setPlaces] = useState<Place[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'mall' | 'market' | 'area'>('mall');
@@ -47,10 +65,30 @@ export default function AdminPlacesScreen() {
   });
   const [saving, setSaving] = useState(false);
   const [gettingLocation, setGettingLocation] = useState(false);
+  const [showMapModal, setShowMapModal] = useState(false);
+  const [mapLocation, setMapLocation] = useState<{ lat: number; lon: number } | null>(null);
+  const [userLocation, setUserLocation] = useState<{ lat: number; lon: number } | null>(null);
 
   useEffect(() => {
     loadPlaces();
   }, [activeTab]);
+
+  // استقبال الرسائل من iframe الخريطة (على الويب)
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const handleMessage = (event: MessageEvent) => {
+        if (event.data && event.data.type === 'MAP_CLICK') {
+          const { lat, lon } = event.data;
+          handleMapPress({ nativeEvent: { coordinate: { latitude: lat, longitude: lon } } });
+        }
+      };
+      
+      window.addEventListener('message', handleMessage);
+      return () => {
+        window.removeEventListener('message', handleMessage);
+      };
+    }
+  }, []);
 
   const loadPlaces = async () => {
     setLoading(true);
@@ -74,9 +112,35 @@ export default function AdminPlacesScreen() {
   const handleGetCurrentLocation = async () => {
     setGettingLocation(true);
     try {
+      // استخدام الدالة المشتركة التي تستخدم WiFi والبحث في الدليل
+      const locationData = await getLocationWithAddress(500);
+
+      if (!locationData) {
+        throw new Error('فشل جلب الموقع');
+      }
+
+      const { lat, lon, address } = locationData;
+
+      setFormData({
+        ...formData,
+        latitude: lat.toString(),
+        longitude: lon.toString(),
+        address: address,
+      });
+    } catch (error: any) {
+      console.error('Error getting location:', error);
+      Alert.alert('خطأ', error.message || 'فشل جلب الموقع');
+    } finally {
+      setGettingLocation(false);
+    }
+  };
+
+  const handleOpenMap = async () => {
+    try {
+      // جلب الموقع الحالي للخريطة
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('تنبيه', 'يجب السماح بالوصول للموقع');
+        Alert.alert('تنبيه', 'يجب السماح بالوصول للموقع لاستخدام الخريطة');
         return;
       }
 
@@ -84,31 +148,73 @@ export default function AdminPlacesScreen() {
         accuracy: Location.Accuracy.Balanced,
       });
 
-      setFormData({
-        ...formData,
-        latitude: location.coords.latitude.toString(),
-        longitude: location.coords.longitude.toString(),
-      });
-
-      // جلب العنوان من الإحداثيات
       const lat = location.coords.latitude;
       const lon = location.coords.longitude;
-      
+
+      // إذا كان هناك إحداثيات موجودة في النموذج، نستخدمها
+      if (formData.latitude && formData.longitude) {
+        setMapLocation({
+          lat: parseFloat(formData.latitude),
+          lon: parseFloat(formData.longitude),
+        });
+      } else {
+        // وإلا نستخدم الموقع الحالي
+        setMapLocation({ lat, lon });
+      }
+
+      setUserLocation({ lat, lon });
+      setShowMapModal(true);
+    } catch (error) {
+      console.error('Error opening map:', error);
+      Alert.alert('خطأ', 'فشل فتح الخريطة');
+    }
+  };
+
+  const handleMapPress = async (event: any) => {
+    let lat: number, lon: number;
+    
+    // على الموبايل، الإحداثيات في event.nativeEvent.coordinate
+    // على الويب، تأتي من postMessage من iframe
+    const coordinate = event.nativeEvent?.coordinate || event.nativeEvent;
+    if (!coordinate || !coordinate.latitude || !coordinate.longitude) {
+      return;
+    }
+    lat = typeof coordinate.latitude === 'number' ? coordinate.latitude : parseFloat(coordinate.latitude);
+    lon = typeof coordinate.longitude === 'number' ? coordinate.longitude : parseFloat(coordinate.longitude);
+    
+    setMapLocation({ lat, lon });
+    
+    // تحديث النموذج بالإحداثيات
+    setFormData(prev => ({
+      ...prev,
+      latitude: lat.toString(),
+      longitude: lon.toString(),
+    }));
+
+    // جلب العنوان من الإحداثيات
+    try {
       const data = await reverseGeocode(lat, lon);
-      
-        if (data && data.display_name) {
-          setFormData({
-            ...formData,
-            latitude: lat.toString(),
-            longitude: lon.toString(),
-            address: data.display_name,
-          });
+      if (data && data.display_name) {
+        setFormData(prev => ({
+          ...prev,
+          latitude: lat.toString(),
+          longitude: lon.toString(),
+          address: data.display_name,
+        }));
       }
     } catch (error) {
-      console.error('Error getting location:', error);
-      Alert.alert('خطأ', 'فشل جلب الموقع');
-    } finally {
-      setGettingLocation(false);
+      console.error('Error reverse geocoding:', error);
+    }
+  };
+
+  const handleConfirmMapLocation = () => {
+    if (mapLocation) {
+      setFormData({
+        ...formData,
+        latitude: mapLocation.lat.toString(),
+        longitude: mapLocation.lon.toString(),
+      });
+      setShowMapModal(false);
     }
   };
 
@@ -187,6 +293,16 @@ export default function AdminPlacesScreen() {
   };
 
   const handleDelete = (place: Place) => {
+    // على الويب، نستخدم window.confirm
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const confirmed = window.confirm(`هل أنت متأكد من حذف "${place.name}"؟`);
+      if (confirmed) {
+        performDelete(place);
+      }
+      return;
+    }
+    
+    // على الموبايل، نستخدم Alert.alert
     Alert.alert(
       'تأكيد الحذف',
       `هل أنت متأكد من حذف "${place.name}"؟`,
@@ -195,23 +311,94 @@ export default function AdminPlacesScreen() {
         {
           text: 'حذف',
           style: 'destructive',
-          onPress: async () => {
-            try {
-              const { error } = await supabase
-                .from('places')
-                .delete()
-                .eq('id', place.id);
-
-              if (error) throw error;
-              Alert.alert('نجح', 'تم حذف المكان بنجاح');
-              loadPlaces();
-            } catch (error: any) {
-              Alert.alert('خطأ', error.message || 'فشل حذف المكان');
-            }
-          },
+          onPress: () => performDelete(place),
         },
       ]
     );
+  };
+
+  const performDelete = async (place: Place) => {
+    try {
+      console.log('Deleting place:', place.id, place.name);
+      
+      // التحقق من الجلسة أولاً
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session) {
+        throw new Error('يجب تسجيل الدخول أولاً');
+      }
+      
+      console.log('Session exists, user:', session.user.id);
+      
+      // التحقق من أن المستخدم هو admin
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', session.user.id)
+        .single();
+      
+      console.log('Profile check:', { profile, profileError });
+      
+      if (profileError) {
+        console.error('Error checking profile:', profileError);
+        throw new Error('فشل التحقق من الصلاحيات');
+      }
+      
+      if (!profile || profile.role !== 'admin') {
+        console.error('User is not admin. Role:', profile?.role);
+        throw new Error('ليس لديك صلاحية للحذف. يجب أن تكون مسؤولاً');
+      }
+      
+      console.log('User is admin, proceeding with delete...');
+      
+      // التحقق الإضافي من useAuth
+      if (!user || user.role !== 'admin') {
+        console.error('User from useAuth is not admin. Role:', user?.role);
+        throw new Error('ليس لديك صلاحية للحذف. يجب أن تكون مسؤولاً');
+      }
+      
+      // محاولة الحذف
+      const { data, error } = await supabase
+        .from('places')
+        .delete()
+        .eq('id', place.id)
+        .select();
+
+      console.log('Delete result:', { data, error });
+
+      if (error) {
+        console.error('Delete error:', error);
+        // عرض رسالة خطأ أوضح
+        let errorMessage = 'فشل حذف المكان';
+        if (error.code === '42501') {
+          errorMessage = 'ليس لديك صلاحية للحذف. تأكد من أنك مسؤول';
+        } else if (error.message) {
+          errorMessage = error.message;
+        }
+        throw new Error(errorMessage);
+      }
+      
+      if (!data || data.length === 0) {
+        throw new Error('لم يتم العثور على المكان للحذف');
+      }
+      
+      // عرض رسالة نجاح
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert('تم حذف المكان بنجاح');
+      } else {
+        Alert.alert('نجح', 'تم حذف المكان بنجاح');
+      }
+      
+      loadPlaces();
+    } catch (error: any) {
+      console.error('Error deleting place:', error);
+      const errorMessage = error.message || error.code || 'فشل حذف المكان';
+      
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert(`خطأ: ${errorMessage}`);
+      } else {
+        Alert.alert('خطأ', errorMessage);
+      }
+    }
   };
 
   const resetForm = () => {
@@ -428,18 +615,28 @@ export default function AdminPlacesScreen() {
                 </View>
               </View>
 
-              <TouchableOpacity
-                style={styles.locationButton}
-                onPress={handleGetCurrentLocation}
-                disabled={gettingLocation}
-              >
-                {gettingLocation ? (
-                  <ActivityIndicator size="small" color="#007AFF" />
-                ) : (
-                  <Ionicons name="location" size={20} color="#007AFF" />
-                )}
-                <Text style={styles.locationButtonText}>جلب الموقع الحالي</Text>
-              </TouchableOpacity>
+              <View style={styles.locationButtonsRow}>
+                <TouchableOpacity
+                  style={[styles.locationButton, styles.locationButtonHalf]}
+                  onPress={handleGetCurrentLocation}
+                  disabled={gettingLocation}
+                >
+                  {gettingLocation ? (
+                    <ActivityIndicator size="small" color="#007AFF" />
+                  ) : (
+                    <Ionicons name="location" size={20} color="#007AFF" />
+                  )}
+                  <Text style={styles.locationButtonText}>الموقع الحالي</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.locationButton, styles.locationButtonHalf, styles.mapButton]}
+                  onPress={handleOpenMap}
+                >
+                  <Ionicons name="map" size={20} color="#007AFF" />
+                  <Text style={styles.locationButtonText}>اختيار من الخريطة</Text>
+                </TouchableOpacity>
+              </View>
 
               <Text style={styles.label}>رقم الهاتف (اختياري)</Text>
               <TextInput
@@ -482,6 +679,170 @@ export default function AdminPlacesScreen() {
                 ) : (
                   <Text style={styles.saveButtonText}>حفظ</Text>
                 )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal الخريطة */}
+      <Modal
+        visible={showMapModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowMapModal(false)}
+      >
+        <View style={styles.mapModalOverlay}>
+          <View style={styles.mapModalContent}>
+            <View style={styles.mapModalHeader}>
+              <Text style={styles.mapModalTitle}>اختر الموقع من الخريطة</Text>
+              <TouchableOpacity onPress={() => setShowMapModal(false)}>
+                <Ionicons name="close" size={24} color="#1a1a1a" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.mapContainer}>
+              {Platform.OS === 'web' ? (
+                // على الويب، نستخدم Leaflet في iframe للتفاعل
+                <View style={styles.mapWebView}>
+                  {mapLocation && (
+                    <iframe
+                      // @ts-ignore - srcdoc is valid HTML attribute
+                      srcdoc={`
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                          <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+                          <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+                          <style>
+                            body { margin: 0; padding: 0; overflow: hidden; }
+                            #map { width: 100vw; height: 100vh; }
+                          </style>
+                        </head>
+                        <body>
+                          <div id="map"></div>
+                          <script>
+                            const map = L.map('map').setView([${mapLocation.lat}, ${mapLocation.lon}], 15);
+                            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                              attribution: '© OpenStreetMap contributors',
+                              maxZoom: 19
+                            }).addTo(map);
+                            
+                            let marker = L.marker([${mapLocation.lat}, ${mapLocation.lon}], {draggable: true}).addTo(map);
+                            
+                            map.on('click', function(e) {
+                              const lat = e.latlng.lat;
+                              const lon = e.latlng.lng;
+                              marker.setLatLng([lat, lon]);
+                              if (window.parent) {
+                                window.parent.postMessage({
+                                  type: 'MAP_CLICK',
+                                  lat: lat,
+                                  lon: lon
+                                }, '*');
+                              }
+                            });
+                            
+                            marker.on('dragend', function(e) {
+                              const lat = e.target.getLatLng().lat;
+                              const lon = e.target.getLatLng().lng;
+                              if (window.parent) {
+                                window.parent.postMessage({
+                                  type: 'MAP_CLICK',
+                                  lat: lat,
+                                  lon: lon
+                                }, '*');
+                              }
+                            });
+                          </script>
+                        </body>
+                        </html>
+                      `}
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        border: 'none',
+                      }}
+                      title="Map"
+                      sandbox="allow-scripts allow-same-origin allow-popups"
+                    />
+                  )}
+                </View>
+              ) : Platform.OS === 'ios' || Platform.OS === 'android' ? (
+                // على الموبايل، نستخدم react-native-maps
+                MapView && mapLocation ? (
+                  <MapView
+                    style={styles.mapNative}
+                    initialRegion={{
+                      latitude: mapLocation.lat,
+                      longitude: mapLocation.lon,
+                      latitudeDelta: 0.01,
+                      longitudeDelta: 0.01,
+                    }}
+                    onPress={handleMapPress}
+                    showsUserLocation={!!userLocation}
+                    showsMyLocationButton={true}
+                  >
+                    {mapLocation && (
+                      <Marker
+                        coordinate={{
+                          latitude: mapLocation.lat,
+                          longitude: mapLocation.lon,
+                        }}
+                        title="الموقع المحدد"
+                        draggable
+                        onDragEnd={handleMapPress}
+                      />
+                    )}
+                    {userLocation && (
+                      <Marker
+                        coordinate={{
+                          latitude: userLocation.lat,
+                          longitude: userLocation.lon,
+                        }}
+                        title="موقعك الحالي"
+                        pinColor="blue"
+                      />
+                    )}
+                  </MapView>
+                ) : (
+                  <View style={styles.mapPlaceholder}>
+                    <ActivityIndicator size="large" color="#007AFF" />
+                    <Text style={styles.mapPlaceholderText}>جارٍ تحميل الخريطة...</Text>
+                  </View>
+                )
+              ) : (
+                <View style={styles.mapPlaceholder}>
+                  <Ionicons name="map-outline" size={64} color="#ccc" />
+                  <Text style={styles.mapPlaceholderText}>الخريطة غير متاحة على هذه المنصة</Text>
+                </View>
+              )}
+            </View>
+
+            {mapLocation && (
+              <View style={styles.mapCoordinatesDisplay}>
+                <Text style={styles.mapCoordinatesText}>
+                  خط العرض: {mapLocation.lat.toFixed(6)}
+                </Text>
+                <Text style={styles.mapCoordinatesText}>
+                  خط الطول: {mapLocation.lon.toFixed(6)}
+                </Text>
+              </View>
+            )}
+
+            <View style={styles.mapModalFooter}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={() => setShowMapModal(false)}
+              >
+                <Text style={styles.cancelButtonText}>إلغاء</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.saveButton]}
+                onPress={handleConfirmMapLocation}
+                disabled={!mapLocation}
+              >
+                <Text style={styles.saveButtonText}>تأكيد الموقع</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -726,6 +1087,11 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     textAlign: 'right',
   },
+  locationButtonsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+  },
   locationButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -733,13 +1099,116 @@ const styles = StyleSheet.create({
     backgroundColor: '#e3f2fd',
     padding: 12,
     borderRadius: 12,
-    marginTop: 8,
     gap: 8,
+  },
+  locationButtonHalf: {
+    flex: 1,
+  },
+  mapButton: {
+    backgroundColor: '#e8f5e9',
   },
   locationButtonText: {
     color: '#007AFF',
     fontSize: 14,
     fontWeight: '600',
+  },
+  mapModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  mapModalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    height: '90%',
+  },
+  mapModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  mapModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+  },
+  mapContainer: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  mapWebView: {
+    flex: 1,
+    width: '100%',
+    position: 'relative' as any,
+  },
+  webMapInstructions: {
+    position: 'absolute' as any,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  webMapInstructionsText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center' as any,
+    marginBottom: 12,
+  },
+  webMapLinkButton: {
+    flexDirection: 'row' as any,
+    alignItems: 'center' as any,
+    justifyContent: 'center' as any,
+    backgroundColor: '#e3f2fd',
+    padding: 12,
+    borderRadius: 12,
+    gap: 8,
+  },
+  webMapLinkText: {
+    color: '#007AFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  mapNative: {
+    flex: 1,
+    width: '100%',
+  },
+  mapPlaceholder: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+  },
+  mapPlaceholderText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#999',
+    textAlign: 'center',
+  },
+  mapCoordinatesDisplay: {
+    padding: 16,
+    backgroundColor: '#f5f5f5',
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  mapCoordinatesText: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+    textAlign: 'right',
+  },
+  mapModalFooter: {
+    flexDirection: 'row',
+    gap: 12,
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
   },
   modalFooter: {
     flexDirection: 'row',

@@ -13,6 +13,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase, reverseGeocode } from '@/lib/supabase';
+import { getLocationWithAddress } from '@/lib/locationUtils';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
@@ -80,70 +81,29 @@ export default function DeliverPackageScreen() {
   const getCurrentLocation = async (target: 'pickup' | 'delivery' | string) => {
     setGettingLocation(target);
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('تنبيه', 'يجب السماح بالوصول للموقع لاستخدام هذه الميزة');
-        setGettingLocation(null);
-        return;
+      // استخدام الدالة المشتركة التي تستخدم WiFi والبحث في الدليل
+      const locationData = await getLocationWithAddress(500);
+
+      if (!locationData) {
+        throw new Error('فشل جلب الموقع');
       }
 
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-
-      const lat = location.coords.latitude;
-      const lon = location.coords.longitude;
+      const { lat, lon, address } = locationData;
       
-      const data = await reverseGeocode(lat, lon);
+      // استخدام العنوان المسترجع (من الدليل أو reverse geocoding)
+      const placeName = address;
 
-      if (!data) {
-        throw new Error('فشل جلب العنوان من الخدمة');
-      }
-      
-      if (data && data.address) {
-        const address = data.address;
-        const placeNameParts: string[] = [];
-        
-        if (address.road) placeNameParts.push(address.road);
-        if (address.house_number) placeNameParts.push(`مبنى ${address.house_number}`);
-        if (address.neighbourhood) placeNameParts.push(address.neighbourhood);
-        if (address.suburb) placeNameParts.push(address.suburb);
-        if (address.quarter || address.district) placeNameParts.push(address.quarter || address.district);
-        if (address.city || address.town || address.village) {
-          placeNameParts.push(address.city || address.town || address.village);
-        }
-        if (address.state) placeNameParts.push(address.state);
-        
-        let placeName: string;
-        if (address.road || placeNameParts.length >= 2) {
-          placeName = placeNameParts.join('، ');
-        } else if (data.display_name) {
-          placeName = data.display_name
-            .split(',')
-            .filter(part => {
-              const trimmed = part.trim();
-              return trimmed !== 'مصر' && !/^\d+$/.test(trimmed);
-            })
-            .map(part => part.trim())
-            .join('، ');
-        } else {
-          placeName = 'موقعي الحالي';
-        }
-
-        // تحديث العنوان حسب الهدف
-        if (target === 'pickup') {
-          setPickupAddress(placeName);
-        } else if (target === 'delivery') {
-          setDeliveryAddress(placeName);
-        } else {
-          // نقطة في الوضع المتعدد
-          updateDeliveryPoint(target, 'address', placeName);
-        }
-
-        Alert.alert('نجح', 'تم جلب العنوان بنجاح');
+      // تحديث العنوان حسب الهدف
+      if (target === 'pickup') {
+        setPickupAddress(placeName);
+      } else if (target === 'delivery') {
+        setDeliveryAddress(placeName);
       } else {
-        Alert.alert('تنبيه', 'لم يتم العثور على عنوان لهذا الموقع');
+        // نقطة في الوضع المتعدد
+        updateDeliveryPoint(target, 'address', placeName);
       }
+
+      Alert.alert('نجح', 'تم جلب العنوان بنجاح');
     } catch (error: any) {
       console.error('Error getting location:', error);
       Alert.alert('خطأ', error.message || 'فشل جلب الموقع');

@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase, reverseGeocode } from '@/lib/supabase';
+import { getLocationWithHighAccuracy } from '@/lib/locationUtils';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { Linking } from 'react-native';
@@ -312,6 +313,8 @@ export default function PlacesDirectoryScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const placeId = (params.placeId || params.itemId) as string; // دعم كلا الاسمين للتوافق
+  const addressIndex = params.addressIndex as string | undefined; // معرف العنوان من صفحة الملف الشخصي
+  const fromLocationDisplay = params.fromLocationDisplay === 'true'; // فتح من CurrentLocationDisplay
   const [activeTab, setActiveTab] = useState<'malls' | 'markets' | 'areas' | 'map'>('malls');
   const [places, setPlaces] = useState<Place[]>([]);
   const [loading, setLoading] = useState(false);
@@ -353,9 +356,8 @@ export default function PlacesDirectoryScreen() {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') return;
 
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
+      // استخدام الدالة المشتركة التي تستخدم WiFi
+      const location = await getLocationWithHighAccuracy();
 
       setUserLocation({
         lat: location.coords.latitude,
@@ -413,8 +415,13 @@ export default function PlacesDirectoryScreen() {
       
       if (!dbError && dbPlaces && dbPlaces.length > 0) {
         // فلترة الأماكن حسب المدينة
+        // ملاحظة: الأماكن اليدوية تظهر دائماً بغض النظر عن المدينة
         if (cityName) {
           cityPlaces = dbPlaces.filter((place: any) => {
+            // الأماكن اليدوية تظهر دائماً
+            if (place.is_manual) return true;
+            
+            // الأماكن العادية تُفلتر حسب المدينة
             const address = (place.address || '').toLowerCase();
             const placeCity = (place.city || '').toLowerCase();
             const cityLower = cityName.toLowerCase();
@@ -457,8 +464,19 @@ export default function PlacesDirectoryScreen() {
 
       // إذا كانت الأماكن موجودة ولا تحتاج تحديث، نستخدمها
       if (!needsApiUpdate && cityPlaces.length > 0) {
-        // ترتيب: يدوية أولاً، ثم حسب المسافة
-        const sortedPlaces = sortPlacesByDistance(cityPlaces, userLocation);
+        // فصل الأماكن اليدوية عن العادية
+        const manualPlaces = cityPlaces.filter((p: any) => p.is_manual);
+        const regularPlaces = cityPlaces.filter((p: any) => !p.is_manual);
+
+        // ترتيب الأماكن اليدوية حسب المسافة
+        const sortedManualPlaces = sortPlacesByDistance(manualPlaces, userLocation);
+        
+        // ترتيب الأماكن العادية حسب المسافة
+        const sortedRegularPlaces = sortPlacesByDistance(regularPlaces, userLocation);
+
+        // دمج: يدوية أولاً، ثم عادية
+        const sortedPlaces = [...sortedManualPlaces, ...sortedRegularPlaces];
+        
         setPlaces(sortedPlaces.map((p: any) => ({
           id: p.id,
           name: p.name,
@@ -475,7 +493,19 @@ export default function PlacesDirectoryScreen() {
       // إذا لم نجد أماكن في المدينة، نبحث في API
       if (!cityName) {
         if (cityPlaces.length > 0) {
-          const sortedPlaces = sortPlacesByDistance(cityPlaces, userLocation);
+          // فصل الأماكن اليدوية عن العادية
+          const manualPlaces = cityPlaces.filter((p: any) => p.is_manual);
+          const regularPlaces = cityPlaces.filter((p: any) => !p.is_manual);
+
+          // ترتيب الأماكن اليدوية حسب المسافة
+          const sortedManualPlaces = sortPlacesByDistance(manualPlaces, userLocation);
+          
+          // ترتيب الأماكن العادية حسب المسافة
+          const sortedRegularPlaces = sortPlacesByDistance(regularPlaces, userLocation);
+
+          // دمج: يدوية أولاً، ثم عادية
+          const sortedPlaces = [...sortedManualPlaces, ...sortedRegularPlaces];
+          
           setPlaces(sortedPlaces.map((p: any) => ({
             id: p.id,
             name: p.name,
@@ -633,10 +663,41 @@ export default function PlacesDirectoryScreen() {
         query = query.eq('type', 'area');
       }
 
-      const { data, error } = await query.order('name');
+      const { data, error } = await query;
 
       if (error) throw error;
-      setPlaces(data || []);
+
+      // ترتيب النتائج: الأماكن اليدوية أولاً، ثم حسب المسافة
+      let sortedPlaces = data || [];
+      
+      // فصل الأماكن اليدوية عن العادية
+      const manualPlaces = sortedPlaces.filter((p: any) => p.is_manual);
+      const regularPlaces = sortedPlaces.filter((p: any) => !p.is_manual);
+
+      // ترتيب الأماكن اليدوية حسب المسافة إذا كان هناك موقع
+      let sortedManualPlaces = manualPlaces;
+      if (userLocation && manualPlaces.length > 0) {
+        sortedManualPlaces = sortPlacesByDistance(manualPlaces, userLocation);
+      } else {
+        // إذا لم يكن هناك موقع، نرتب حسب الاسم
+        sortedManualPlaces = manualPlaces.sort((a: any, b: any) => 
+          (a.name || '').localeCompare(b.name || '')
+        );
+      }
+
+      // ترتيب الأماكن العادية حسب المسافة إذا كان هناك موقع
+      let sortedRegularPlaces = regularPlaces;
+      if (userLocation && regularPlaces.length > 0) {
+        sortedRegularPlaces = sortPlacesByDistance(regularPlaces, userLocation);
+      } else {
+        // إذا لم يكن هناك موقع، نرتب حسب الاسم
+        sortedRegularPlaces = regularPlaces.sort((a: any, b: any) => 
+          (a.name || '').localeCompare(b.name || '')
+        );
+      }
+
+      // دمج: يدوية أولاً، ثم عادية
+      setPlaces([...sortedManualPlaces, ...sortedRegularPlaces]);
     } catch (error) {
       console.error('Error loading places:', error);
       setPlaces([]);
@@ -648,8 +709,15 @@ export default function PlacesDirectoryScreen() {
   const searchPlaces = async () => {
     setLoading(true);
     try {
-      let query = supabase.from('places').select('*').ilike('name', `%${searchQuery}%`);
+      // البحث في الاسم والعنوان للأماكن اليدوية والعادية
+      // ملاحظة: البحث يشمل جميع الأماكن بغض النظر عن المدينة
+      // لأن الأماكن اليدوية قد تكون في مدن مختلفة
+      let query = supabase
+        .from('places')
+        .select('*')
+        .or(`name.ilike.%${searchQuery}%,address.ilike.%${searchQuery}%`);
 
+      // فلترة حسب النوع إذا كان محدداً
       if (activeTab === 'malls') {
         query = query.eq('type', 'mall');
       } else if (activeTab === 'markets') {
@@ -658,12 +726,44 @@ export default function PlacesDirectoryScreen() {
         query = query.eq('type', 'area');
       }
 
-      const { data, error } = await query.order('name');
+      const { data, error } = await query;
 
       if (error) throw error;
-      setPlaces(data || []);
+
+      // ترتيب النتائج: الأماكن اليدوية أولاً، ثم حسب المسافة
+      let sortedPlaces = data || [];
+      
+      // فصل الأماكن اليدوية عن العادية
+      const manualPlaces = sortedPlaces.filter((p: any) => p.is_manual);
+      const regularPlaces = sortedPlaces.filter((p: any) => !p.is_manual);
+
+      // ترتيب الأماكن اليدوية حسب المسافة إذا كان هناك موقع
+      let sortedManualPlaces = manualPlaces;
+      if (userLocation && manualPlaces.length > 0) {
+        sortedManualPlaces = sortPlacesByDistance(manualPlaces, userLocation);
+      } else {
+        // إذا لم يكن هناك موقع، نرتب حسب الاسم
+        sortedManualPlaces = manualPlaces.sort((a: any, b: any) => 
+          (a.name || '').localeCompare(b.name || '')
+        );
+      }
+
+      // ترتيب الأماكن العادية حسب المسافة إذا كان هناك موقع
+      let sortedRegularPlaces = regularPlaces;
+      if (userLocation && regularPlaces.length > 0) {
+        sortedRegularPlaces = sortPlacesByDistance(regularPlaces, userLocation);
+      } else {
+        // إذا لم يكن هناك موقع، نرتب حسب الاسم
+        sortedRegularPlaces = regularPlaces.sort((a: any, b: any) => 
+          (a.name || '').localeCompare(b.name || '')
+        );
+      }
+
+      // دمج: يدوية أولاً، ثم عادية
+      setPlaces([...sortedManualPlaces, ...sortedRegularPlaces]);
     } catch (error) {
       console.error('Error searching places:', error);
+      setPlaces([]);
     } finally {
       setLoading(false);
     }
@@ -705,6 +805,16 @@ export default function PlacesDirectoryScreen() {
     const currentPlaceId = placeId;
     if (currentPlaceId) {
       await AsyncStorage.setItem(`selected_place_${currentPlaceId}`, JSON.stringify(place));
+    } else if (addressIndex !== undefined) {
+      // إذا كان هناك addressIndex، نحفظ المكان للعنوان المحدد
+      await AsyncStorage.setItem(`selected_place_address_${addressIndex}`, JSON.stringify(place));
+    } else if (fromLocationDisplay) {
+      // إذا تم فتح الدليل من CurrentLocationDisplay، نحفظ المكان لتحديث الموقع
+      await AsyncStorage.setItem('selected_place_for_location', JSON.stringify(place));
+    } else {
+      // إذا لم يكن هناك placeId محدد، نحفظ المكان كـ "general_selection"
+      // لاستخدامه في outside-order عند أول مكان فارغ
+      await AsyncStorage.setItem('selected_place_general', JSON.stringify(place));
     }
     
     // التحقق من إمكانية الرجوع قبل استدعاء router.back()

@@ -30,49 +30,36 @@ CREATE POLICY "Anyone can read places"
   ON places FOR SELECT
   USING (true);
 
+-- إنشاء دالة is_admin لتجنب مشاكل recursion
+CREATE OR REPLACE FUNCTION public.is_admin(user_id UUID)
+RETURNS BOOLEAN AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = user_id AND role = 'admin'
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
 -- فقط الـ admins يمكنهم إضافة/تعديل/حذف الأماكن
 -- سياسة منفصلة للـ INSERT (الإضافة)
 DROP POLICY IF EXISTS "Admins can insert places" ON places;
 CREATE POLICY "Admins can insert places"
   ON places FOR INSERT
-  WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM profiles
-      WHERE profiles.id = auth.uid()
-      AND profiles.role = 'admin'
-    )
-  );
+  WITH CHECK (public.is_admin(auth.uid()));
 
 -- سياسة منفصلة للـ UPDATE (التحديث)
 DROP POLICY IF EXISTS "Admins can update places" ON places;
 CREATE POLICY "Admins can update places"
   ON places FOR UPDATE
-  USING (
-    EXISTS (
-      SELECT 1 FROM profiles
-      WHERE profiles.id = auth.uid()
-      AND profiles.role = 'admin'
-    )
-  )
-  WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM profiles
-      WHERE profiles.id = auth.uid()
-      AND profiles.role = 'admin'
-    )
-  );
+  USING (public.is_admin(auth.uid()))
+  WITH CHECK (public.is_admin(auth.uid()));
 
 -- سياسة منفصلة للـ DELETE (الحذف)
 DROP POLICY IF EXISTS "Admins can delete places" ON places;
 CREATE POLICY "Admins can delete places"
   ON places FOR DELETE
-  USING (
-    EXISTS (
-      SELECT 1 FROM profiles
-      WHERE profiles.id = auth.uid()
-      AND profiles.role = 'admin'
-    )
-  );
+  USING (public.is_admin(auth.uid()));
 
 -- Trigger لتحديث updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()
