@@ -66,7 +66,8 @@ export default function AdminPlacesScreen() {
   const [saving, setSaving] = useState(false);
   const [gettingLocation, setGettingLocation] = useState(false);
   const [showMapModal, setShowMapModal] = useState(false);
-  const [mapLocation, setMapLocation] = useState<{ lat: number; lon: number } | null>(null);
+  const [mapLocation, setMapLocation] = useState<{ lat: number; lon: number; address?: string } | null>(null);
+  const [loadingMapAddress, setLoadingMapAddress] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number } | null>(null);
 
   useEffect(() => {
@@ -183,6 +184,7 @@ export default function AdminPlacesScreen() {
     lon = typeof coordinate.longitude === 'number' ? coordinate.longitude : parseFloat(coordinate.longitude);
     
     setMapLocation({ lat, lon });
+    setLoadingMapAddress(true);
     
     // تحديث النموذج بالإحداثيات
     setFormData(prev => ({
@@ -195,15 +197,21 @@ export default function AdminPlacesScreen() {
     try {
       const data = await reverseGeocode(lat, lon);
       if (data && data.display_name) {
+        setMapLocation(prev => prev ? { ...prev, address: data.display_name } : { lat, lon, address: data.display_name });
         setFormData(prev => ({
           ...prev,
           latitude: lat.toString(),
           longitude: lon.toString(),
           address: data.display_name,
         }));
+      } else {
+        setMapLocation(prev => prev ? { ...prev, address: undefined } : { lat, lon });
       }
     } catch (error) {
       console.error('Error reverse geocoding:', error);
+      setMapLocation(prev => prev ? { ...prev, address: undefined } : { lat, lon });
+    } finally {
+      setLoadingMapAddress(false);
     }
   };
 
@@ -821,6 +829,11 @@ export default function AdminPlacesScreen() {
 
             {mapLocation && (
               <View style={styles.mapCoordinatesDisplay}>
+                {loadingMapAddress ? (
+                  <Text style={styles.mapCoordinatesText}>جارٍ جلب العنوان...</Text>
+                ) : mapLocation.address ? (
+                  <Text style={styles.mapAddressText}>{mapLocation.address}</Text>
+                ) : null}
                 <Text style={styles.mapCoordinatesText}>
                   خط العرض: {mapLocation.lat.toFixed(6)}
                 </Text>
@@ -1202,6 +1215,14 @@ const styles = StyleSheet.create({
     color: '#666',
     marginBottom: 4,
     textAlign: 'right',
+  },
+  mapAddressText: {
+    fontSize: 15,
+    color: '#1a1a1a',
+    marginBottom: 12,
+    textAlign: 'right',
+    fontWeight: '500',
+    lineHeight: 20,
   },
   mapModalFooter: {
     flexDirection: 'row',

@@ -37,13 +37,33 @@ if (Platform.OS === 'ios' || Platform.OS === 'android') {
 const MapComponent = ({ 
   userLocation, 
   places,
-  onPlaceSelect
+  onPlaceSelect,
+  onMapLocationSelect
 }: { 
   userLocation: { lat: number; lon: number } | null;
   places: Place[];
   onPlaceSelect: (place: Place) => void;
+  onMapLocationSelect?: (location: { lat: number; lon: number; address: string }) => void;
 }) => {
   const placesWithCoords = places.filter(p => p.latitude && p.longitude);
+  const [selectedMapLocation, setSelectedMapLocation] = React.useState<{ lat: number; lon: number; address?: string } | null>(null);
+  const [loadingAddress, setLoadingAddress] = React.useState(false);
+  
+  // دالة لجلب العنوان عند اختيار موقع جديد
+  const fetchAddressForLocation = async (lat: number, lon: number) => {
+    setLoadingAddress(true);
+    try {
+      const data = await reverseGeocode(lat, lon);
+      const address = data?.display_name || `خط العرض: ${lat.toFixed(6)}, خط الطول: ${lon.toFixed(6)}`;
+      setSelectedMapLocation(prev => prev ? { ...prev, address } : { lat, lon, address });
+    } catch (error) {
+      console.error('Error getting address:', error);
+      const address = `خط العرض: ${lat.toFixed(6)}, خط الطول: ${lon.toFixed(6)}`;
+      setSelectedMapLocation(prev => prev ? { ...prev, address } : { lat, lon, address });
+    } finally {
+      setLoadingAddress(false);
+    }
+  };
   
   console.log('MapComponent: places data', {
     totalPlaces: places.length,
@@ -95,6 +115,9 @@ const MapComponent = ({
       });`;
     }).join('\n    ');
     
+    // Marker للموقع المختار من الخريطة
+    let selectedMarker: any = null;
+    
     const html = `
 <!DOCTYPE html>
 <html>
@@ -107,12 +130,12 @@ const MapComponent = ({
     #map { 
       width: 100%; 
       height: 100vh; 
-      cursor: grab;
+      cursor: crosshair;
       touch-action: pan-x pan-y !important;
       -ms-touch-action: pan-x pan-y !important;
     }
     #map:active {
-      cursor: grabbing;
+      cursor: crosshair;
     }
     .leaflet-marker-icon {
       cursor: pointer !important;
@@ -180,6 +203,46 @@ const MapComponent = ({
     L.marker([${userLocation.lat}, ${userLocation.lon}], {icon: userIcon}).addTo(map)
       .bindPopup('موقعك الحالي').openPopup();
     
+    // Marker للموقع المختار (أخضر)
+    var selectedIcon = L.icon({
+      iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png',
+      iconSize: [25, 41],
+      iconAnchor: [12, 41],
+      popupAnchor: [1, -34]
+    });
+    var selectedMarker = null;
+    
+    // إضافة event listener للنقر على الخريطة
+    map.on('click', function(e) {
+      var lat = e.latlng.lat;
+      var lon = e.latlng.lng;
+      
+      // إزالة الـ marker السابق إذا كان موجوداً
+      if (selectedMarker) {
+        map.removeLayer(selectedMarker);
+      }
+      
+      // إضافة marker جديد في الموقع المختار
+      selectedMarker = L.marker([lat, lon], {icon: selectedIcon, draggable: true}).addTo(map)
+        .bindPopup('الموقع المختار<br>انقر على Marker لسحبه').openPopup();
+      
+      // إرسال الإحداثيات للـ parent
+      if (window.parent && window.parent !== window) {
+        const message = { type: 'MAP_CLICK', lat: lat, lon: lon };
+        window.parent.postMessage(message, '*');
+      }
+      
+      // عند سحب الـ marker، تحديث الإحداثيات
+      selectedMarker.on('dragend', function(e) {
+        var marker = e.target;
+        var position = marker.getLatLng();
+        if (window.parent && window.parent !== window) {
+          const message = { type: 'MAP_CLICK', lat: position.lat, lon: position.lng };
+          window.parent.postMessage(message, '*');
+        }
+      });
+    });
+    
     ${placesMarkers}
     
     // دالة لاختيار المكان
@@ -218,6 +281,25 @@ const MapComponent = ({
             } else {
               console.warn('Place not found with id:', placeId, 'Available places:', places.map(p => p.id));
             }
+          } else if (event.data && event.data.type === 'MAP_CLICK') {
+            const { lat, lon } = event.data;
+            console.log('Map clicked at:', lat, lon);
+            setSelectedMapLocation({ lat, lon });
+            // جلب العنوان مباشرة عند النقر على الخريطة
+            (async () => {
+              setLoadingAddress(true);
+              try {
+                const data = await reverseGeocode(lat, lon);
+                const address = data?.display_name || `خط العرض: ${lat.toFixed(6)}, خط الطول: ${lon.toFixed(6)}`;
+                setSelectedMapLocation(prev => prev ? { ...prev, address } : { lat, lon, address });
+              } catch (error) {
+                console.error('Error getting address:', error);
+                const address = `خط العرض: ${lat.toFixed(6)}, خط الطول: ${lon.toFixed(6)}`;
+                setSelectedMapLocation(prev => prev ? { ...prev, address } : { lat, lon, address });
+              } finally {
+                setLoadingAddress(false);
+              }
+            })();
           }
         };
         
@@ -227,6 +309,33 @@ const MapComponent = ({
         };
       }
     }, [places, onPlaceSelect]);
+    
+    const handleConfirmMapLocation = async () => {
+      if (!selectedMapLocation || !onMapLocationSelect) return;
+      
+      try {
+        // جلب العنوان من الإحداثيات
+        const data = await reverseGeocode(selectedMapLocation.lat, selectedMapLocation.lon);
+        const address = data?.display_name || `خط العرض: ${selectedMapLocation.lat}, خط الطول: ${selectedMapLocation.lon}`;
+        
+        onMapLocationSelect({
+          lat: selectedMapLocation.lat,
+          lon: selectedMapLocation.lon,
+          address: address
+        });
+        
+        setSelectedMapLocation(null);
+      } catch (error) {
+        console.error('Error getting address:', error);
+        // حتى لو فشل reverse geocoding، نستخدم الإحداثيات
+        onMapLocationSelect({
+          lat: selectedMapLocation.lat,
+          lon: selectedMapLocation.lon,
+          address: `خط العرض: ${selectedMapLocation.lat}, خط الطول: ${selectedMapLocation.lon}`
+        });
+        setSelectedMapLocation(null);
+      }
+    };
     
     return (
       <View style={styles.mapWebView}>
@@ -244,6 +353,40 @@ const MapComponent = ({
           sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-pointer-lock"
           allow="geolocation"
         />
+        {selectedMapLocation && onMapLocationSelect && (
+          <View style={styles.mapLocationOverlay}>
+            <View style={styles.mapLocationCard}>
+              <Text style={styles.mapLocationTitle}>الموقع المختار</Text>
+              {loadingAddress ? (
+                <Text style={styles.mapLocationText}>جارٍ جلب العنوان...</Text>
+              ) : selectedMapLocation.address ? (
+                <Text style={styles.mapLocationAddress}>{selectedMapLocation.address}</Text>
+              ) : null}
+              <Text style={styles.mapLocationText}>
+                خط العرض: {selectedMapLocation.lat.toFixed(6)}
+              </Text>
+              <Text style={styles.mapLocationText}>
+                خط الطول: {selectedMapLocation.lon.toFixed(6)}
+              </Text>
+              <View style={styles.mapLocationButtons}>
+                <TouchableOpacity
+                  style={[styles.mapLocationButton, styles.mapLocationButtonCancel]}
+                  onPress={() => setSelectedMapLocation(null)}
+                >
+                  <Text style={styles.mapLocationButtonText}>إلغاء</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.mapLocationButton, styles.mapLocationButtonConfirm]}
+                  onPress={handleConfirmMapLocation}
+                >
+                  <Text style={[styles.mapLocationButtonText, styles.mapLocationButtonTextConfirm]}>
+                    تأكيد الموقع
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        )}
       </View>
     );
   }
@@ -251,42 +394,142 @@ const MapComponent = ({
   // على الموبايل، نستخدم react-native-maps
   const isMobile = Platform.OS === 'ios' || Platform.OS === 'android';
   if (isMobile && MapView && Marker) {
+    const handleMapPress = (event: any) => {
+      if (!onMapLocationSelect) return;
+      
+      const coordinate = event.nativeEvent?.coordinate;
+      if (!coordinate) return;
+      
+      setSelectedMapLocation({
+        lat: coordinate.latitude,
+        lon: coordinate.longitude
+      });
+      // جلب العنوان مباشرة عند النقر على الخريطة
+      fetchAddressForLocation(coordinate.latitude, coordinate.longitude);
+    };
+    
+    const handleConfirmMapLocation = async () => {
+      if (!selectedMapLocation || !onMapLocationSelect) return;
+      
+      try {
+        // جلب العنوان من الإحداثيات
+        const data = await reverseGeocode(selectedMapLocation.lat, selectedMapLocation.lon);
+        const address = data?.display_name || `خط العرض: ${selectedMapLocation.lat}, خط الطول: ${selectedMapLocation.lon}`;
+        
+        onMapLocationSelect({
+          lat: selectedMapLocation.lat,
+          lon: selectedMapLocation.lon,
+          address: address
+        });
+        
+        setSelectedMapLocation(null);
+      } catch (error) {
+        console.error('Error getting address:', error);
+        // حتى لو فشل reverse geocoding، نستخدم الإحداثيات
+        onMapLocationSelect({
+          lat: selectedMapLocation.lat,
+          lon: selectedMapLocation.lon,
+          address: `خط العرض: ${selectedMapLocation.lat}, خط الطول: ${selectedMapLocation.lon}`
+        });
+        setSelectedMapLocation(null);
+      }
+    };
+    
     return (
-      <MapView
-        style={styles.mapWebView}
-        initialRegion={{
-          latitude: userLocation.lat,
-          longitude: userLocation.lon,
-          latitudeDelta: 0.1,
-          longitudeDelta: 0.1,
-        }}
-        showsUserLocation={true}
-        showsMyLocationButton={true}
-      >
-        {/* User location marker */}
-        <Marker
-          coordinate={{
+      <View style={styles.mapWebView}>
+        <MapView
+          style={styles.mapWebView}
+          initialRegion={{
             latitude: userLocation.lat,
             longitude: userLocation.lon,
+            latitudeDelta: 0.1,
+            longitudeDelta: 0.1,
           }}
-          title="موقعك الحالي"
-          pinColor="blue"
-        />
-        
-        {/* Places markers */}
-        {placesWithCoords.map((place) => (
+          showsUserLocation={true}
+          showsMyLocationButton={true}
+          onPress={handleMapPress}
+        >
+          {/* User location marker */}
           <Marker
-            key={place.id}
             coordinate={{
-              latitude: place.latitude!,
-              longitude: place.longitude!,
+              latitude: userLocation.lat,
+              longitude: userLocation.lon,
             }}
-            title={place.name}
-            description={place.address}
-            onPress={() => onPlaceSelect(place)}
+            title="موقعك الحالي"
+            pinColor="blue"
           />
-        ))}
-      </MapView>
+          
+          {/* Selected location marker */}
+          {selectedMapLocation && (
+            <Marker
+              coordinate={{
+                latitude: selectedMapLocation.lat,
+                longitude: selectedMapLocation.lon,
+              }}
+              title="الموقع المختار"
+              pinColor="green"
+              draggable
+              onDragEnd={(e: any) => {
+                const coordinate = e.nativeEvent.coordinate;
+                setSelectedMapLocation({
+                  lat: coordinate.latitude,
+                  lon: coordinate.longitude
+                });
+                // جلب العنوان عند سحب الـ marker
+                fetchAddressForLocation(coordinate.latitude, coordinate.longitude);
+              }}
+            />
+          )}
+          
+          {/* Places markers */}
+          {placesWithCoords.map((place) => (
+            <Marker
+              key={place.id}
+              coordinate={{
+                latitude: place.latitude!,
+                longitude: place.longitude!,
+              }}
+              title={place.name}
+              description={place.address}
+              onPress={() => onPlaceSelect(place)}
+            />
+          ))}
+        </MapView>
+        {selectedMapLocation && onMapLocationSelect && (
+          <View style={styles.mapLocationOverlay}>
+            <View style={styles.mapLocationCard}>
+              <Text style={styles.mapLocationTitle}>الموقع المختار</Text>
+              {loadingAddress ? (
+                <Text style={styles.mapLocationText}>جارٍ جلب العنوان...</Text>
+              ) : selectedMapLocation.address ? (
+                <Text style={styles.mapLocationAddress}>{selectedMapLocation.address}</Text>
+              ) : null}
+              <Text style={styles.mapLocationText}>
+                خط العرض: {selectedMapLocation.lat.toFixed(6)}
+              </Text>
+              <Text style={styles.mapLocationText}>
+                خط الطول: {selectedMapLocation.lon.toFixed(6)}
+              </Text>
+              <View style={styles.mapLocationButtons}>
+                <TouchableOpacity
+                  style={[styles.mapLocationButton, styles.mapLocationButtonCancel]}
+                  onPress={() => setSelectedMapLocation(null)}
+                >
+                  <Text style={styles.mapLocationButtonText}>إلغاء</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.mapLocationButton, styles.mapLocationButtonConfirm]}
+                  onPress={handleConfirmMapLocation}
+                >
+                  <Text style={[styles.mapLocationButtonText, styles.mapLocationButtonTextConfirm]}>
+                    تأكيد الموقع
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        )}
+      </View>
     );
   }
   
@@ -828,6 +1071,42 @@ export default function PlacesDirectoryScreen() {
     }
   };
 
+  const handleMapLocationSelect = async (location: { lat: number; lon: number; address: string }) => {
+    console.log('handleMapLocationSelect called with location:', location);
+    
+    // إنشاء كائن Place مؤقت من الموقع المختار
+    const selectedPlace: Place = {
+      id: `map_location_${Date.now()}`,
+      name: location.address,
+      address: location.address,
+      type: 'area',
+      latitude: location.lat,
+      longitude: location.lon,
+      is_manual: false,
+    };
+    
+    // حفظ الموقع المختار في AsyncStorage
+    const currentPlaceId = placeId;
+    if (currentPlaceId) {
+      await AsyncStorage.setItem(`selected_place_${currentPlaceId}`, JSON.stringify(selectedPlace));
+    } else if (addressIndex !== undefined) {
+      await AsyncStorage.setItem(`selected_place_address_${addressIndex}`, JSON.stringify(selectedPlace));
+    } else if (fromLocationDisplay) {
+      await AsyncStorage.setItem('selected_place_for_location', JSON.stringify(selectedPlace));
+    } else {
+      await AsyncStorage.setItem('selected_place_general', JSON.stringify(selectedPlace));
+    }
+    
+    // التحقق من إمكانية الرجوع قبل استدعاء router.back()
+    if (router.canGoBack()) {
+      console.log('Navigating back...');
+      router.back();
+    } else {
+      console.log('No back navigation available, going to outside-order');
+      router.replace('/customer/outside-order');
+    }
+  };
+
 
   const handleMapSearch = () => {
     // لا نحتاج لفتح تطبيق خارجي - الخريطة ستكون داخل التطبيق
@@ -957,6 +1236,7 @@ export default function PlacesDirectoryScreen() {
               userLocation={userLocation} 
               places={places}
               onPlaceSelect={handleSelectPlace}
+              onMapLocationSelect={handleMapLocationSelect}
             />
           ) : (
             <View style={styles.mapPlaceholder}>
@@ -1173,6 +1453,74 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  mapLocationOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    padding: 16,
+    zIndex: 1000,
+  },
+  mapLocationCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  mapLocationTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+    marginBottom: 12,
+    textAlign: 'right',
+  },
+  mapLocationText: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 8,
+    textAlign: 'right',
+  },
+  mapLocationAddress: {
+    fontSize: 15,
+    color: '#1a1a1a',
+    marginBottom: 12,
+    textAlign: 'right',
+    fontWeight: '500',
+    lineHeight: 20,
+  },
+  mapLocationButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 16,
+    gap: 12,
+  },
+  mapLocationButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mapLocationButtonCancel: {
+    backgroundColor: '#f0f0f0',
+  },
+  mapLocationButtonConfirm: {
+    backgroundColor: '#007AFF',
+  },
+  mapLocationButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+  },
+  mapLocationButtonTextConfirm: {
+    color: '#fff',
   },
 });
 
