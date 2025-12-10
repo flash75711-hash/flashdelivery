@@ -8,6 +8,9 @@ CREATE TABLE IF NOT EXISTS places (
   longitude DOUBLE PRECISION,
   phone TEXT,
   description TEXT,
+  is_manual BOOLEAN DEFAULT false,
+  city TEXT,
+  last_api_update TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -15,6 +18,8 @@ CREATE TABLE IF NOT EXISTS places (
 -- إنشاء Indexes
 CREATE INDEX IF NOT EXISTS idx_places_type ON places(type);
 CREATE INDEX IF NOT EXISTS idx_places_location ON places(latitude, longitude) WHERE latitude IS NOT NULL AND longitude IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_places_is_manual ON places(is_manual);
+CREATE INDEX IF NOT EXISTS idx_places_city ON places(city) WHERE city IS NOT NULL;
 
 -- تفعيل RLS
 ALTER TABLE places ENABLE ROW LEVEL SECURITY;
@@ -26,9 +31,41 @@ CREATE POLICY "Anyone can read places"
   USING (true);
 
 -- فقط الـ admins يمكنهم إضافة/تعديل/حذف الأماكن
-DROP POLICY IF EXISTS "Admins can manage places" ON places;
-CREATE POLICY "Admins can manage places"
-  ON places FOR ALL
+-- سياسة منفصلة للـ INSERT (الإضافة)
+DROP POLICY IF EXISTS "Admins can insert places" ON places;
+CREATE POLICY "Admins can insert places"
+  ON places FOR INSERT
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM profiles
+      WHERE profiles.id = auth.uid()
+      AND profiles.role = 'admin'
+    )
+  );
+
+-- سياسة منفصلة للـ UPDATE (التحديث)
+DROP POLICY IF EXISTS "Admins can update places" ON places;
+CREATE POLICY "Admins can update places"
+  ON places FOR UPDATE
+  USING (
+    EXISTS (
+      SELECT 1 FROM profiles
+      WHERE profiles.id = auth.uid()
+      AND profiles.role = 'admin'
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM profiles
+      WHERE profiles.id = auth.uid()
+      AND profiles.role = 'admin'
+    )
+  );
+
+-- سياسة منفصلة للـ DELETE (الحذف)
+DROP POLICY IF EXISTS "Admins can delete places" ON places;
+CREATE POLICY "Admins can delete places"
+  ON places FOR DELETE
   USING (
     EXISTS (
       SELECT 1 FROM profiles

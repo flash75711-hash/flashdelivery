@@ -10,15 +10,16 @@ https://supabase.com/dashboard/project/tnwrmybyvimlsamnputn/auth/providers?provi
 
 ### 2. في صفحة Phone settings:
 - ابحث عن حقل **"Test Phone Numbers and OTPs"**
-- أدخل:
+- أدخل (بدون علامة +):
   ```
-  +201200006637=123456
+  201200006637=123456
   ```
-- هذا يعني: رقم الهاتف `+201200006637` مع OTP `123456`
+- هذا يعني: رقم الهاتف `201200006637` (بدون +) مع OTP `123456`
+- **مهم:** يجب أن تكون الأرقام بدون علامة `+` وبدون مسافات أو شرطات
 
 ### 3. يمكنك إضافة أكثر من رقم:
 ```
-+201200006637=123456,+201234567890=654321
+201200006637=123456,201234567890=654321
 ```
 
 ### 4. اضغط **"Save"** ✅
@@ -40,6 +41,8 @@ https://supabase.com/dashboard/project/tnwrmybyvimlsamnputn/auth/providers?provi
 - Test Phone Numbers تعمل فقط في Development
 - في Production، سيتم إرسال SMS حقيقي
 - يمكنك إضافة أي رقم هاتف مع أي OTP للاختبار
+
+
 
 
 

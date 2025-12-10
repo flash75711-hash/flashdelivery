@@ -167,6 +167,16 @@ export default function TabsLayout() {
                 headerShown: false,
               }}
             />
+            <Tabs.Screen
+              name="admin/places"
+              options={{
+                title: t('admin.places') || 'الأماكن',
+                tabBarIcon: ({ color, size }) => (
+                  <Ionicons name="location" size={size} color={color} />
+                ),
+                headerShown: false,
+              }}
+            />
           </>
         );
       default:
