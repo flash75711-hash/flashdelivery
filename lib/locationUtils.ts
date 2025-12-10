@@ -81,20 +81,54 @@ export async function findNearestPlaceInDirectory(
  * جلب الموقع مع تفعيل WiFi و Cellular networks لزيادة الدقة
  */
 export async function getLocationWithHighAccuracy(): Promise<Location.LocationObject> {
-  // تفعيل استخدام WiFi و Cellular networks لزيادة الدقة (Android فقط)
+  // تفعيل استخدام WiFi و Cellular networks لزيادة الدقة
+  // على Android: نستخدم enableNetworkProviderAsync() لتفعيل WiFi/Cellular صراحة
+  // على iOS: Location.Accuracy.Highest يستخدم GPS + WiFi + Cellular تلقائياً
+  // على الويب: Location.Accuracy.Highest يترجم إلى enableHighAccuracy: true في Geolocation API
+  //   والذي يستخدم GPS + WiFi تلقائياً إذا كان المتصفح يدعمه
   if (Platform.OS === 'android') {
     try {
       await Location.enableNetworkProviderAsync();
-      console.log('Network provider (WiFi/Cellular) enabled for better accuracy');
+      console.log('✅ Network provider (WiFi/Cellular) enabled for better accuracy on Android');
     } catch (err) {
-      console.log('Could not enable network provider (may already be enabled):', err);
+      console.log('⚠️ Could not enable network provider (may already be enabled):', err);
     }
+  } else if (Platform.OS === 'web') {
+    // على الويب، Location.Accuracy.Highest يترجم إلى enableHighAccuracy: true في Geolocation API
+    // هذا يطلب من المتصفح استخدام GPS + WiFi تلقائياً
+    // ملاحظة: على الويب، WiFi positioning يعمل تلقائياً مع enableHighAccuracy: true
+    console.log('✅ Using Highest accuracy on web - Geolocation API will use GPS + WiFi automatically');
+  } else if (Platform.OS === 'ios') {
+    // على iOS، Location.Accuracy.Highest يستخدم GPS + WiFi + Cellular تلقائياً
+    console.log('✅ Using Highest accuracy on iOS (GPS + WiFi + Cellular enabled automatically)');
   }
   
   // استخدام أقصى دقة ممكنة (GPS + WiFi + Cellular + Sensors)
-  return await Location.getCurrentPositionAsync({
+  // على جميع المنصات، هذا يطلب أفضل دقة متاحة
+  // Location.Accuracy.Highest يستخدم:
+  // - Android: GPS + WiFi + Cellular (بعد enableNetworkProviderAsync)
+  // - iOS: GPS + WiFi + Cellular (تلقائياً)
+  // - Web: GPS + WiFi (عبر Geolocation API مع enableHighAccuracy: true)
+  const location = await Location.getCurrentPositionAsync({
     accuracy: Location.Accuracy.Highest, // أفضل دقة ممكنة (GPS + WiFi + Cellular)
   });
+  
+  // تسجيل معلومات عن الدقة لتأكيد استخدام WiFi
+  const accuracy = location.coords.accuracy;
+  if (Platform.OS === 'web') {
+    // على الويب، الدقة الجيدة (< 100m) تعني استخدام GPS/WiFi
+    // الدقة المتوسطة (100-1000m) تعني استخدام Network (WiFi/Cellular)
+    // الدقة السيئة (> 1000m) تعني استخدام IP-based فقط
+    if (accuracy && accuracy < 100) {
+      console.log('✅ High accuracy detected on web - GPS + WiFi is being used');
+    } else if (accuracy && accuracy < 1000) {
+      console.log('⚠️ Medium accuracy on web - Network (WiFi/Cellular) positioning');
+    } else {
+      console.log('❌ Low accuracy on web - IP-based geolocation only (WiFi/GPS not available)');
+    }
+  }
+  
+  return location;
 }
 
 /**
@@ -144,15 +178,27 @@ export async function getLocationWithAddress(
     const accuracy = location.coords.accuracy;
 
     // تسجيل الإحداثيات مع معلومات عن مصدر الموقع
+    // Location.Accuracy.Highest يستخدم:
+    // - على Android: GPS + WiFi + Cellular (بعد enableNetworkProviderAsync)
+    // - على iOS: GPS + WiFi + Cellular (تلقائياً)
+    // - على الويب: GPS + WiFi (عبر Geolocation API مع enableHighAccuracy: true)
     const locationSource = Platform.OS === 'web' 
-      ? (accuracy && accuracy < 100 ? 'GPS/WiFi' : accuracy && accuracy < 1000 ? 'Network (WiFi/Cellular)' : 'IP-based')
-      : 'GPS/WiFi/Cellular';
+      ? (accuracy && accuracy < 100 ? 'GPS/WiFi (High Accuracy)' : accuracy && accuracy < 1000 ? 'Network (WiFi/Cellular)' : 'IP-based (Low Accuracy)')
+      : Platform.OS === 'android'
+      ? 'GPS/WiFi/Cellular (Network Provider Enabled)'
+      : 'GPS/WiFi/Cellular (iOS High Accuracy)';
     
     console.log('Location Coordinates (using WiFi + GPS):', { 
       lat, 
       lon, 
       accuracy: `${accuracy?.toFixed(0)}m` || 'unknown',
       source: locationSource,
+      platform: Platform.OS,
+      note: Platform.OS === 'web' 
+        ? 'Web uses Geolocation API with enableHighAccuracy: true (GPS + WiFi)'
+        : Platform.OS === 'android'
+        ? 'Android uses GPS + WiFi + Cellular (Network Provider enabled)'
+        : 'iOS uses GPS + WiFi + Cellular (Highest accuracy)',
     });
 
     // جلب العنوان مع البحث في الدليل
