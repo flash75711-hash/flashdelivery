@@ -305,6 +305,7 @@ interface Place {
   type: 'mall' | 'market' | 'area';
   latitude?: number;
   longitude?: number;
+  is_manual?: boolean;
 }
 
 export default function PlacesDirectoryScreen() {
@@ -445,6 +446,7 @@ export default function PlacesDirectoryScreen() {
             type: p.type,
             latitude: p.latitude,
             longitude: p.longitude,
+            is_manual: p.is_manual || false,
           })));
           setLoading(false);
           return;
@@ -464,6 +466,7 @@ export default function PlacesDirectoryScreen() {
           type: p.type,
           latitude: p.latitude,
           longitude: p.longitude,
+          is_manual: p.is_manual || false,
         })));
         setLoading(false);
         return;
@@ -480,6 +483,7 @@ export default function PlacesDirectoryScreen() {
             type: p.type,
             latitude: p.latitude,
             longitude: p.longitude,
+            is_manual: p.is_manual || false,
           })));
           setLoading(false);
           return;
@@ -522,6 +526,7 @@ export default function PlacesDirectoryScreen() {
                   type: p.type,
                   latitude: p.latitude,
                   longitude: p.longitude,
+                  is_manual: false,
                 }));
                 console.log(`Synced ${apiPlaces.length} places via Edge Function`);
               }
@@ -588,6 +593,7 @@ export default function PlacesDirectoryScreen() {
             type: p.type,
             latitude: p.latitude,
             longitude: p.longitude,
+            is_manual: p.is_manual || false,
           })));
           setLoading(false);
           return;
@@ -603,6 +609,7 @@ export default function PlacesDirectoryScreen() {
         type: p.type,
         latitude: p.latitude,
         longitude: p.longitude,
+        is_manual: p.is_manual || false,
       })));
     } catch (error) {
       console.error('Error loading places from city:', error);
@@ -806,11 +813,18 @@ export default function PlacesDirectoryScreen() {
               keyExtractor={(item) => item.id}
               renderItem={({ item }) => (
                 <TouchableOpacity
-                  style={styles.placeCard}
+                  style={[styles.placeCard, item.is_manual && styles.placeCardManual]}
                   onPress={() => handleSelectPlace(item)}
                 >
                   <View style={styles.placeInfo}>
-                    <Text style={styles.placeName}>{item.name}</Text>
+                    <View style={styles.placeNameRow}>
+                      <Text style={styles.placeName}>{item.name}</Text>
+                      {item.is_manual && (
+                        <View style={styles.manualBadge}>
+                          <Ionicons name="star" size={14} color="#FFA500" />
+                        </View>
+                      )}
+                    </View>
                     <Text style={styles.placeAddress}>{item.address}</Text>
                     {userLocation && item.latitude && item.longitude && (
                       <Text style={styles.placeDistance}>
@@ -952,6 +966,29 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#e0e0e0',
+  },
+  placeCardManual: {
+    backgroundColor: '#FFF9E6',
+    borderColor: '#FFE082',
+    borderWidth: 1.5,
+  },
+  placeNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    marginBottom: 4,
+    gap: 8,
+  },
+  manualBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFF3CD',
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    borderRadius: 8,
+    minWidth: 24,
+    minHeight: 24,
   },
   placeInfo: {
     flex: 1,
