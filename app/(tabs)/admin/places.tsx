@@ -151,7 +151,7 @@ export default function AdminPlacesScreen() {
 
       const lat = location.coords.latitude;
       const lon = location.coords.longitude;
-
+      
       // إذا كان هناك إحداثيات موجودة في النموذج، نستخدمها
       if (formData.latitude && formData.longitude) {
         setMapLocation({
@@ -196,13 +196,13 @@ export default function AdminPlacesScreen() {
     // جلب العنوان من الإحداثيات
     try {
       const data = await reverseGeocode(lat, lon);
-      if (data && data.display_name) {
+        if (data && data.display_name) {
         setMapLocation(prev => prev ? { ...prev, address: data.display_name } : { lat, lon, address: data.display_name });
         setFormData(prev => ({
           ...prev,
-          latitude: lat.toString(),
-          longitude: lon.toString(),
-          address: data.display_name,
+            latitude: lat.toString(),
+            longitude: lon.toString(),
+            address: data.display_name,
         }));
       } else {
         setMapLocation(prev => prev ? { ...prev, address: undefined } : { lat, lon });
@@ -326,17 +326,17 @@ export default function AdminPlacesScreen() {
   };
 
   const performDelete = async (place: Place) => {
-    try {
-      console.log('Deleting place:', place.id, place.name);
-      
-      // التحقق من الجلسة أولاً
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError || !session) {
-        throw new Error('يجب تسجيل الدخول أولاً');
-      }
-      
-      console.log('Session exists, user:', session.user.id);
-      
+            try {
+              console.log('Deleting place:', place.id, place.name);
+              
+              // التحقق من الجلسة أولاً
+              const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+              if (sessionError || !session) {
+                throw new Error('يجب تسجيل الدخول أولاً');
+              }
+              
+              console.log('Session exists, user:', session.user.id);
+              
       // التحقق من أن المستخدم هو admin
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
@@ -365,16 +365,16 @@ export default function AdminPlacesScreen() {
       }
       
       // محاولة الحذف
-      const { data, error } = await supabase
-        .from('places')
-        .delete()
-        .eq('id', place.id)
-        .select();
+              const { data, error } = await supabase
+                .from('places')
+                .delete()
+                .eq('id', place.id)
+                .select();
 
-      console.log('Delete result:', { data, error });
+              console.log('Delete result:', { data, error });
 
-      if (error) {
-        console.error('Delete error:', error);
+              if (error) {
+                console.error('Delete error:', error);
         // عرض رسالة خطأ أوضح
         let errorMessage = 'فشل حذف المكان';
         if (error.code === '42501') {
@@ -387,25 +387,25 @@ export default function AdminPlacesScreen() {
       
       if (!data || data.length === 0) {
         throw new Error('لم يتم العثور على المكان للحذف');
-      }
-      
+              }
+              
       // عرض رسالة نجاح
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
         window.alert('تم حذف المكان بنجاح');
       } else {
-        Alert.alert('نجح', 'تم حذف المكان بنجاح');
+              Alert.alert('نجح', 'تم حذف المكان بنجاح');
       }
       
-      loadPlaces();
-    } catch (error: any) {
-      console.error('Error deleting place:', error);
+              loadPlaces();
+            } catch (error: any) {
+              console.error('Error deleting place:', error);
       const errorMessage = error.message || error.code || 'فشل حذف المكان';
       
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
         window.alert(`خطأ: ${errorMessage}`);
       } else {
         Alert.alert('خطأ', errorMessage);
-      }
+            }
     }
   };
 
@@ -624,18 +624,18 @@ export default function AdminPlacesScreen() {
               </View>
 
               <View style={styles.locationButtonsRow}>
-                <TouchableOpacity
+              <TouchableOpacity
                   style={[styles.locationButton, styles.locationButtonHalf]}
-                  onPress={handleGetCurrentLocation}
-                  disabled={gettingLocation}
-                >
-                  {gettingLocation ? (
-                    <ActivityIndicator size="small" color="#007AFF" />
-                  ) : (
-                    <Ionicons name="location" size={20} color="#007AFF" />
-                  )}
+                onPress={handleGetCurrentLocation}
+                disabled={gettingLocation}
+              >
+                {gettingLocation ? (
+                  <ActivityIndicator size="small" color="#007AFF" />
+                ) : (
+                  <Ionicons name="location" size={20} color="#007AFF" />
+                )}
                   <Text style={styles.locationButtonText}>الموقع الحالي</Text>
-                </TouchableOpacity>
+              </TouchableOpacity>
 
                 <TouchableOpacity
                   style={[styles.locationButton, styles.locationButtonHalf, styles.mapButton]}

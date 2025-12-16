@@ -233,9 +233,9 @@ export default function CustomerProfileScreen() {
       // استخدام العنوان المسترجع (من الدليل أو reverse geocoding)
       const placeName = address;
 
-      updateAddress(index, 'place_name', placeName);
-      
-      Alert.alert('نجح', 'تم جلب العنوان بنجاح');
+        updateAddress(index, 'place_name', placeName);
+
+        Alert.alert('نجح', 'تم جلب العنوان بنجاح');
     } catch (error: any) {
       console.error('Error getting location:', error);
       Alert.alert('خطأ', error.message || 'فشل جلب الموقع');
@@ -481,17 +481,17 @@ export default function CustomerProfileScreen() {
                     >
                       <Ionicons name="list" size={20} color="#34C759" />
                     </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.locationButton, gettingLocation === index && styles.locationButtonLoading]}
-                      onPress={() => getCurrentLocation(index)}
-                      disabled={gettingLocation === index}
-                    >
-                      {gettingLocation === index ? (
-                        <ActivityIndicator size="small" color="#007AFF" />
-                      ) : (
-                        <Ionicons name="location" size={20} color="#007AFF" />
-                      )}
-                    </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.locationButton, gettingLocation === index && styles.locationButtonLoading]}
+                    onPress={() => getCurrentLocation(index)}
+                    disabled={gettingLocation === index}
+                  >
+                    {gettingLocation === index ? (
+                      <ActivityIndicator size="small" color="#007AFF" />
+                    ) : (
+                      <Ionicons name="location" size={20} color="#007AFF" />
+                    )}
+                  </TouchableOpacity>
                   </View>
                 </View>
 

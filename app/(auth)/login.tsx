@@ -40,9 +40,22 @@ export default function LoginScreen() {
   // بعد التحقق من OTP، نستمع لتحديث حالة المستخدم
   useEffect(() => {
     if (otpVerified && !authLoading && user) {
-      console.log('Login: OTP verified and user loaded, navigating...');
+      console.log('Login: OTP verified and user loaded, navigating...', {
+        otpVerified,
+        authLoading,
+        userId: user?.id,
+        userRole: user?.role
+      });
       setOtpVerified(false);
-      router.replace('/(tabs)');
+      // استخدام setTimeout لضمان تحديث state
+      setTimeout(() => {
+        router.replace('/(tabs)');
+      }, 100);
+    } else if (otpVerified && !authLoading && !user) {
+      console.warn('Login: OTP verified but user is still null, waiting...', {
+        otpVerified,
+        authLoading
+      });
     }
   }, [otpVerified, user, authLoading, router]);
 
@@ -167,21 +180,27 @@ export default function LoginScreen() {
       
       // استدعاء loadUser مباشرة لتحديث حالة المستخدم
       try {
+        console.log('Login: Calling loadUser...');
         await loadUser();
         console.log('Login: User loaded successfully');
+        
+        // الانتظار قليلاً لضمان تحديث state
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // محاولة جلب user مرة أخرى من AuthContext
+        // (نستخدم setTimeout لضمان تحديث state)
+        setTimeout(() => {
+          if (user) {
+            console.log('Login: User found, navigating to tabs...');
+            router.replace('/(tabs)');
+          } else {
+            console.warn('Login: User still null after loadUser, waiting for useEffect...');
+          }
+        }, 1000);
       } catch (loadError) {
         console.error('Login: Error loading user:', loadError);
         // نتابع حتى لو فشل loadUser لأن الجلسة موجودة
-      }
-
-      // الانتظار لوقت كافٍ لضمان تحديث AuthContext
-      // useEffect سيتعامل مع التوجيه عندما يصبح user موجوداً
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      // إذا لم يتم التوجيه تلقائياً، ننقل يدوياً
-      if (user) {
-        console.log('Login: Navigating to tabs (manual)...');
-        router.replace('/(tabs)');
+        // useEffect سيتعامل مع التوجيه عندما يصبح user موجوداً
       }
       
     } catch (error: any) {

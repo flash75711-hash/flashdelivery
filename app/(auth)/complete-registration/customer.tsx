@@ -118,16 +118,16 @@ export default function CompleteCustomerRegistration() {
       }
 
       const { lat, lon, address } = locationData;
-      
+        
       // استخدام العنوان المسترجع (من الدليل أو reverse geocoding)
       const placeName = address;
 
-      console.log('Generated place name:', placeName);
+        console.log('Generated place name:', placeName);
 
-      // تحديث العنوان
-      updateAddress(index, 'place_name', placeName);
+        // تحديث العنوان
+        updateAddress(index, 'place_name', placeName);
 
-      Alert.alert('نجح', 'تم جلب العنوان بنجاح');
+        Alert.alert('نجح', 'تم جلب العنوان بنجاح');
     } catch (error: any) {
       console.error('Error getting location:', error);
       Alert.alert('خطأ', error.message || 'فشل جلب الموقع');

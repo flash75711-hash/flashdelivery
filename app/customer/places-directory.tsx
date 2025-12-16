@@ -437,27 +437,27 @@ const MapComponent = ({
     
     return (
       <View style={styles.mapWebView}>
-        <MapView
-          style={styles.mapWebView}
-          initialRegion={{
+      <MapView
+        style={styles.mapWebView}
+        initialRegion={{
+          latitude: userLocation.lat,
+          longitude: userLocation.lon,
+          latitudeDelta: 0.1,
+          longitudeDelta: 0.1,
+        }}
+        showsUserLocation={true}
+        showsMyLocationButton={true}
+          onPress={handleMapPress}
+      >
+        {/* User location marker */}
+        <Marker
+          coordinate={{
             latitude: userLocation.lat,
             longitude: userLocation.lon,
-            latitudeDelta: 0.1,
-            longitudeDelta: 0.1,
           }}
-          showsUserLocation={true}
-          showsMyLocationButton={true}
-          onPress={handleMapPress}
-        >
-          {/* User location marker */}
-          <Marker
-            coordinate={{
-              latitude: userLocation.lat,
-              longitude: userLocation.lon,
-            }}
-            title="موقعك الحالي"
-            pinColor="blue"
-          />
+          title="موقعك الحالي"
+          pinColor="blue"
+        />
           
           {/* Selected location marker */}
           {selectedMapLocation && (
@@ -480,21 +480,21 @@ const MapComponent = ({
               }}
             />
           )}
-          
-          {/* Places markers */}
-          {placesWithCoords.map((place) => (
-            <Marker
-              key={place.id}
-              coordinate={{
-                latitude: place.latitude!,
-                longitude: place.longitude!,
-              }}
-              title={place.name}
-              description={place.address}
-              onPress={() => onPlaceSelect(place)}
-            />
-          ))}
-        </MapView>
+        
+        {/* Places markers */}
+        {placesWithCoords.map((place) => (
+          <Marker
+            key={place.id}
+            coordinate={{
+              latitude: place.latitude!,
+              longitude: place.longitude!,
+            }}
+            title={place.name}
+            description={place.address}
+            onPress={() => onPlaceSelect(place)}
+          />
+        ))}
+      </MapView>
         {selectedMapLocation && onMapLocationSelect && (
           <View style={styles.mapLocationOverlay}>
             <View style={styles.mapLocationCard}>

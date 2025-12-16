@@ -24,6 +24,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { uploadImageToImgBB } from '@/lib/imgbb';
+import {
+  calculateDeliveryPrice,
+  calculateTotalDistance,
+  generatePriceSuggestions,
+  findFarthestPlaceFromCustomer,
+  orderPlacesByDistance,
+} from '@/lib/priceCalculation';
 
 interface Place {
   id: string;
@@ -65,6 +72,10 @@ export default function OutsideOrderScreen() {
   const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<{ uri: string; placeId: string; itemId: string } | null>(null);
+  const [calculatedPrice, setCalculatedPrice] = useState<number | null>(null);
+  const [priceSuggestions, setPriceSuggestions] = useState<number[]>([]);
+  const [selectedPrice, setSelectedPrice] = useState<number | null>(null);
+  const [showPriceModal, setShowPriceModal] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -730,47 +741,20 @@ export default function OutsideOrderScreen() {
         p.place && p.items.length > 0 && p.items.some(item => item.name.trim())
       );
 
-      // 1. جلب عنوان العميل الافتراضي
-      let customerAddress: any = null;
+      // 1. استخدام الموقع من أعلى الصفحة (CurrentLocationDisplay)
+      // إذا لم يكن متاحاً، نستخدم userLocation
+      const customerLocation = currentLocationDisplay 
+        ? { lat: currentLocationDisplay.lat, lon: currentLocationDisplay.lon, address: currentLocationDisplay.address }
+        : userLocation 
+        ? { lat: userLocation.lat, lon: userLocation.lon, address: 'موقعي الحالي' }
+        : null;
       
-      try {
-        const { data: defaultAddresses, error: addressError } = await supabase
-          .from('customer_addresses')
-          .select('*')
-          .eq('customer_id', user?.id)
-          .eq('is_default', true)
-          .limit(1);
-
-        if (addressError) {
-          console.warn('Error fetching default address:', addressError);
-        } else if (defaultAddresses && defaultAddresses.length > 0) {
-          customerAddress = defaultAddresses[0];
-        }
-        
-        if (!customerAddress) {
-          const { data: anyAddresses, error: anyAddressError } = await supabase
-            .from('customer_addresses')
-            .select('*')
-            .eq('customer_id', user?.id)
-            .order('created_at', { ascending: false })
-            .limit(1);
-          
-          if (anyAddressError) {
-            throw new Error('الرجاء إضافة عنوان توصيل في ملفك الشخصي أولاً');
-          }
-          
-          if (anyAddresses && anyAddresses.length > 0) {
-            customerAddress = anyAddresses[0];
-          } else {
-            throw new Error('الرجاء إضافة عنوان توصيل في ملفك الشخصي أولاً');
-          }
-        }
-      } catch (error: any) {
-        if (error.message?.includes('عنوان')) {
-          throw error;
-        }
-        console.warn('Could not fetch address, continuing without it:', error);
+      if (!customerLocation) {
+        throw new Error('الرجاء السماح بالوصول للموقع أولاً');
       }
+      
+      // جلب عنوان نصي للعميل (لحفظه في قاعدة البيانات)
+      const customerAddressText = customerLocation.address || 'موقع العميل';
 
       // 2. تجميع العناصر حسب مكان الالتقاط (مع الصور)
       const itemsByPlace: { [placeId: string]: { place: Place; items: { name: string; imageUrl?: string }[] } } = {};
@@ -827,12 +811,181 @@ export default function OutsideOrderScreen() {
         }
       }
 
-      // 4. اختيار السائق المناسب لكل مكان وإنشاء الطلبات
+      // 4. ترتيب الأماكن من الأبعد للأقرب (من أبعد مكان لمكان العميل)
+      const placesArray = Object.values(itemsByPlace).map(({ place }) => place);
+      console.log(`📍 عدد الأماكن المختارة: ${placesArray.length}`);
+      console.log(`🚗 عدد السائقين المتاحين: ${driversData.length}`);
+      
+      // ترتيب الأماكن من الأبعد للأقرب
+      const placesOrdered = orderPlacesByDistance(placesArray, customerLocation);
+      console.log(`📍 الأماكن مرتبة من الأبعد للأقرب: ${placesOrdered.length} مكان`);
+      
+      // إيجاد أبعد مكان (للبحث عن السائق الأقرب منه)
+      const farthestPlace = findFarthestPlaceFromCustomer(placesArray, customerLocation);
+      
+      if (farthestPlace) {
+        console.log(`📍 أبعد مكان تم إيجاده: (${farthestPlace.lat.toFixed(6)}, ${farthestPlace.lon.toFixed(6)})`);
+      } else {
+        console.log('⚠️ لم يتم إيجاد أبعد مكان');
+      }
+      
+      // إيجاد أقرب سائق لأبعد مكان
+      interface DriverLocationType {
+        driver_id: string;
+        latitude: number;
+        longitude: number;
+      }
+      let nearestDriver: DriverLocationType | null = null;
+      let nearestDriverLocation: { lat: number; lon: number } | null = null;
+      
+      if (farthestPlace && driversData.length > 0) {
+        let minDistance = Infinity;
+        for (const driver of driversData) {
+          if (driver.latitude && driver.longitude) {
+            const distance = calculateDistance(
+              driver.latitude,
+              driver.longitude,
+              farthestPlace.lat,
+              farthestPlace.lon
+            );
+            if (distance <= maxDeliveryDistance * 1000 && distance < minDistance) {
+              minDistance = distance;
+              nearestDriver = driver;
+              nearestDriverLocation = { lat: driver.latitude, lon: driver.longitude };
+            }
+          }
+        }
+        
+        if (nearestDriver) {
+          console.log(`🚗 أقرب سائق لأبعد مكان: ${nearestDriver.driver_id} (${(minDistance / 1000).toFixed(2)} كم)`);
+        } else {
+          console.log('⚠️ لم يتم إيجاد سائق قريب من أبعد مكان');
+        }
+      }
+      
+      // حساب السعر بناءً على القواعد الجديدة
+      // المسافة = من أبعد مكان → المكان التالي → ... → مكان العميل
+      // حساب إجمالي عدد العناصر (كل عنصر = طلب واحد)
+      const totalItemsCount = Object.values(itemsByPlace).reduce(
+        (total, { items }) => total + items.length,
+        0
+      );
+      console.log(`📦 إجمالي عدد العناصر (الطلبات): ${totalItemsCount}`);
+      
+      let basePrice = 0;
+      if (placesOrdered.length > 0 && customerLocation) {
+        const totalDistance = calculateTotalDistance(
+          placesOrdered,
+          { lat: customerLocation.lat, lon: customerLocation.lon }
+        );
+        basePrice = calculateDeliveryPrice(totalItemsCount, totalDistance);
+      } else {
+        // إذا لم تكن هناك إحداثيات، نستخدم سعر افتراضي
+        basePrice = calculateDeliveryPrice(totalItemsCount, 3);
+      }
+      
+      // إنشاء اقتراحات الأسعار
+      const suggestions = generatePriceSuggestions(basePrice);
+      setCalculatedPrice(basePrice);
+      setPriceSuggestions(suggestions);
+      setSelectedPrice(basePrice);
+      
+      // عرض modal للتفاوض في السعر
+      setShowPriceModal(true);
+      return; // إيقاف التنفيذ حتى يختار المستخدم السعر
+    } catch (error: any) {
+      console.error('Error in handleSubmit:', error);
+      Alert.alert('خطأ', error.message || 'فشل إرسال الطلب');
+      setLoading(false);
+    }
+  };
+
+  // دالة لإرسال الطلبات بعد اختيار السعر
+  const handleConfirmPriceAndSubmit = async () => {
+    if (!selectedPrice) {
+      Alert.alert('خطأ', 'الرجاء اختيار سعر');
+      return;
+    }
+
+    setLoading(true);
+    setShowPriceModal(false);
+    
+    try {
+      // إعادة حساب كل شيء (نفس الكود من handleSubmit)
+      const updatedPlacesWithItems = placesWithItems.filter(p => 
+        p.place && p.items.length > 0 && p.items.some(item => item.name.trim())
+      );
+
+      // استخدام الموقع من أعلى الصفحة (CurrentLocationDisplay)
+      const customerLocation = currentLocationDisplay 
+        ? { lat: currentLocationDisplay.lat, lon: currentLocationDisplay.lon, address: currentLocationDisplay.address }
+        : userLocation 
+        ? { lat: userLocation.lat, lon: userLocation.lon, address: 'موقعي الحالي' }
+        : null;
+      
+      if (!customerLocation) {
+        throw new Error('الرجاء السماح بالوصول للموقع أولاً');
+      }
+      
+      const customerAddressText = customerLocation.address || 'موقع العميل';
+
+      const itemsByPlace: { [placeId: string]: { place: Place; items: { name: string; imageUrl?: string }[] } } = {};
+      updatedPlacesWithItems.forEach(placeWithItems => {
+        if (placeWithItems.place) {
+          const placeId = placeWithItems.place.id;
+          const validItems = placeWithItems.items
+            .filter(item => item.name.trim())
+            .map(item => ({
+              name: item.name.trim(),
+              imageUrl: item.imageUrl || undefined,
+            }));
+          
+          if (validItems.length > 0) {
+            itemsByPlace[placeId] = {
+              place: placeWithItems.place,
+              items: validItems,
+            };
+          }
+        }
+      });
+
+      const { data: allDrivers } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('role', 'driver')
+        .eq('status', 'active');
+
+      let driversData: { driver_id: string; latitude: number; longitude: number }[] = [];
+      
+      if (allDrivers && allDrivers.length > 0) {
+        const driverIds = allDrivers.map(d => d.id);
+        const { data: locationsData } = await supabase
+          .from('driver_locations')
+          .select('driver_id, latitude, longitude')
+          .in('driver_id', driverIds)
+          .order('updated_at', { ascending: false });
+
+        if (locationsData) {
+          const latestLocations = new Map<string, { driver_id: string; latitude: number; longitude: number }>();
+          locationsData.forEach(loc => {
+            if (loc.latitude && loc.longitude && !latestLocations.has(loc.driver_id)) {
+              latestLocations.set(loc.driver_id, {
+                driver_id: loc.driver_id,
+                latitude: loc.latitude,
+                longitude: loc.longitude,
+              });
+            }
+          });
+          driversData = Array.from(latestLocations.values());
+        }
+      }
+
+      // إنشاء الطلبات مع السعر المختار
       const orders: any[] = [];
       
       Object.values(itemsByPlace).forEach(({ place, items: placeItems }) => {
-      let selectedDriverId: string | null = null;
-      
+        let selectedDriverId: string | null = null;
+        
         if (driversData.length > 0 && place.latitude && place.longitude) {
           let minDistance = Infinity;
           driversData.forEach(driver => {
@@ -843,7 +996,7 @@ export default function OutsideOrderScreen() {
                 place.latitude!,
                 place.longitude!
               );
-              if (distance <= maxDeliveryDistance && distance < minDistance) {
+              if (distance <= maxDeliveryDistance * 1000 && distance < minDistance) {
                 minDistance = distance;
                 selectedDriverId = driver.driver_id;
               }
@@ -851,9 +1004,7 @@ export default function OutsideOrderScreen() {
           });
         }
 
-        const deliveryAddr = customerAddress?.full_address || customerAddress?.place_name || 'موقع العميل';
-        
-        // استخراج أسماء العناصر وروابط الصور
+        const deliveryAddr = customerAddressText;
         const itemNames = placeItems.map(item => item.name);
         const itemImages = placeItems
           .map(item => item.imageUrl)
@@ -867,7 +1018,7 @@ export default function OutsideOrderScreen() {
           status: selectedDriverId ? 'accepted' : 'pending',
           pickup_address: place.name + (place.address ? ` - ${place.address}` : ''),
           delivery_address: deliveryAddr,
-          total_fee: 0,
+          total_fee: selectedPrice, // استخدام السعر المختار
           images: itemImages.length > 0 ? itemImages : null,
         });
       });
@@ -898,7 +1049,7 @@ export default function OutsideOrderScreen() {
         Alert.alert('✅ نجح', message);
       }, 300);
     } catch (error: any) {
-      console.error('Error in handleSubmit:', error);
+      console.error('Error in handleConfirmPriceAndSubmit:', error);
       Alert.alert('خطأ', error.message || 'فشل إرسال الطلب');
     } finally {
       setLoading(false);
@@ -1226,6 +1377,69 @@ export default function OutsideOrderScreen() {
               </View>
             </>
           )}
+        </View>
+      </Modal>
+
+      {/* Modal للتفاوض في السعر */}
+      <Modal
+        visible={showPriceModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowPriceModal(false)}
+      >
+        <View style={styles.priceModalOverlay}>
+          <View style={styles.priceModalContent}>
+            <Text style={styles.priceModalTitle}>اختر سعر التوصيل</Text>
+            
+            {calculatedPrice && (
+              <View style={styles.priceInfoContainer}>
+                <Text style={styles.priceInfoLabel}>السعر المقترح:</Text>
+                <Text style={styles.priceInfoValue}>{calculatedPrice} جنيه</Text>
+              </View>
+            )}
+
+            <Text style={styles.priceSuggestionsTitle}>اقتراحات إضافية:</Text>
+            <View style={styles.priceSuggestionsContainer}>
+              {priceSuggestions.map((price, index) => (
+                <TouchableOpacity
+                  key={index}
+                  style={[
+                    styles.priceSuggestionButton,
+                    selectedPrice === price && styles.priceSuggestionButtonSelected
+                  ]}
+                  onPress={() => setSelectedPrice(price)}
+                >
+                  <Text style={[
+                    styles.priceSuggestionText,
+                    selectedPrice === price && styles.priceSuggestionTextSelected
+                  ]}>
+                    {price} جنيه
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={styles.priceModalButtons}>
+              <TouchableOpacity
+                style={[styles.priceModalButton, styles.priceModalButtonCancel]}
+                onPress={() => {
+                  setShowPriceModal(false);
+                  setLoading(false);
+                }}
+              >
+                <Text style={styles.priceModalButtonTextCancel}>إلغاء</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.priceModalButton, styles.priceModalButtonConfirm]}
+                onPress={handleConfirmPriceAndSubmit}
+                disabled={!selectedPrice}
+              >
+                <Text style={styles.priceModalButtonTextConfirm}>
+                  تأكيد ({selectedPrice} جنيه)
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
       </Modal>
     </SafeAreaView>
@@ -1583,5 +1797,109 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '600',
+  },
+  priceModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  priceModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 24,
+    width: '90%',
+    maxWidth: 400,
+  },
+  priceModalTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  priceInfoContainer: {
+    backgroundColor: '#f0f0f0',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 20,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  priceInfoLabel: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'right',
+  },
+  priceInfoValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#007AFF',
+    textAlign: 'left',
+  },
+  priceSuggestionsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 12,
+    textAlign: 'right',
+  },
+  priceSuggestionsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 24,
+  },
+  priceSuggestionButton: {
+    flex: 1,
+    minWidth: '45%',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: '#f5f5f5',
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  priceSuggestionButtonSelected: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  priceSuggestionText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+  },
+  priceSuggestionTextSelected: {
+    color: '#fff',
+  },
+  priceModalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  priceModalButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  priceModalButtonCancel: {
+    backgroundColor: '#f5f5f5',
+  },
+  priceModalButtonConfirm: {
+    backgroundColor: '#007AFF',
+  },
+  priceModalButtonTextCancel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+  },
+  priceModalButtonTextConfirm: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
 });

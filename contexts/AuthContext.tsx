@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { Session, User as SupabaseUser } from '@supabase/supabase-js';
-import { supabase, getUserWithRole, isRegistrationComplete, User, UserRole } from '@/lib/supabase';
+import { supabase, getUserWithRole, getUserWithRoleFromSession, isRegistrationComplete, User, UserRole } from '@/lib/supabase';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
@@ -27,24 +27,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const loadUser = useCallback(async () => {
     // تجنب استدعاء loadUser عدة مرات في نفس الوقت
     if (loadingUser) {
-      console.log('loadUser already in progress, skipping...');
+      console.log('⏭️ loadUser already in progress, skipping...');
       return;
     }
     
-    console.log('Loading user...');
+    console.log('🔄 Loading user...');
     setLoadingUser(true);
     try {
       const userData = await getUserWithRole();
-      console.log('User loaded:', userData ? `User ID: ${userData.id}` : 'No user');
-      setUser(userData);
+      console.log('✅ User loaded:', userData ? `User ID: ${userData.id}, Role: ${userData.role}` : 'No user');
+      if (userData) {
+        setUser(userData);
+        console.log('✅ User state updated in AuthContext');
+      } else {
+        console.warn('⚠️ No user data returned from getUserWithRole');
+        setUser(null);
+      }
       // لا نضع setLoading(false) هنا لأن getSession قد يكون لم يكمل بعد
       // setLoading(false) سيتم استدعاؤه في onAuthStateChange أو getSession
     } catch (error) {
-      console.error('Error loading user:', error);
+      console.error('❌ Error loading user:', error);
       // في حالة الخطأ، نرجع null للمستخدم
       setUser(null);
     } finally {
       setLoadingUser(false);
+      console.log('✅ loadUser completed');
     }
   }, []);
 
@@ -59,21 +66,66 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log('Auth state changed:', event, session ? 'has session' : 'no session');
       setSession(session);
       if (session) {
+        // استخدام session.user مباشرة (أسرع وأكثر موثوقية)
+        console.log('📞 About to load user from session directly...');
+        try {
+          console.log('📞 Loading user from session.user...');
+          const userDataPromise = getUserWithRoleFromSession(session);
+          // إضافة timeout للتحقق من أن العملية لا تتوقف
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('getUserWithRoleFromSession timeout after 5 seconds')), 5000)
+          );
+          const userData = await Promise.race([userDataPromise, timeoutPromise]) as User | null;
+          console.log('✅ User loaded from session:', userData ? `User ID: ${userData.id}, Role: ${userData.role}` : 'No user');
+          if (userData) {
+            setUser(userData);
+            console.log('✅ User state updated in AuthContext from session');
+          } else {
+            console.warn('⚠️ No user data from session, trying loadUser()...');
+            // إذا فشل، نجرب loadUser كحل بديل
+            await loadUser();
+            console.log('✅ loadUser completed in onAuthStateChange');
+          }
+        } catch (error) {
+          console.error('❌ Error loading user from session:', error);
+          // إذا فشل، نجرب loadUser كحل بديل
+          try {
+            await loadUser();
+            console.log('✅ loadUser completed in onAuthStateChange (fallback)');
+          } catch (loadError) {
+            console.error('❌ Error in loadUser from onAuthStateChange:', loadError);
+          }
+        }
+        
         // عند تسجيل الدخول (خاصة بجوجل)، نتأكد من وجود ملف المستخدم
+        // نفعل هذا بعد loadUser لأن loadUser قد يكون أسرع
         if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
           console.log('SIGNED_IN event, checking/creating profile...');
+          // استخدام Promise.race لإضافة timeout
+          const getUserPromise = supabase.auth.getUser();
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('getUser timeout after 5 seconds')), 5000)
+          );
+          
           try {
-            const { data: { user }, error: getUserError } = await supabase.auth.getUser();
+            console.log('📞 Calling supabase.auth.getUser() for profile check...');
+            const result = await Promise.race([getUserPromise, timeoutPromise]) as any;
+            console.log('✅ supabase.auth.getUser() completed for profile check');
+            
+            const { data: { user }, error: getUserError } = result || { data: { user: null }, error: null };
+            
             if (getUserError) {
               console.error('Error getting user:', getUserError);
             } else if (user) {
-              console.log('Got user from auth:', user.id);
+              console.log('Got user from auth for profile check:', user.id);
               try {
+                console.log('📞 Checking profile in database...');
                 const { data: existingProfile, error: profileError } = await supabase
                   .from('profiles')
                   .select('id, role')
                   .eq('id', user.id)
                   .single();
+                console.log('✅ Profile check completed');
 
                 if (profileError && profileError.code !== 'PGRST116') { // PGRST116 = no rows returned
                   console.error('Error checking profile:', profileError);
@@ -104,16 +156,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           } catch (error) {
             console.error('Error in SIGNED_IN handler:', error);
+            // حتى لو فشل getUser، loadUser تم استدعاؤه بالفعل
+          } finally {
+            console.log('✅ SIGNED_IN handler completed (finally block)');
           }
         }
-        console.log('Calling loadUser from onAuthStateChange...');
-        try {
-          await loadUser();
-          console.log('loadUser completed in onAuthStateChange');
-        } catch (error) {
-          console.error('Error in loadUser from onAuthStateChange:', error);
-        }
+        
         setLoading(false);
+        console.log('✅ Loading set to false in onAuthStateChange');
       } else {
         setUser(null);
         setLoading(false);

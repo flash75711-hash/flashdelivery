@@ -87,23 +87,23 @@ export default function DeliverPackageScreen() {
       if (!locationData) {
         throw new Error('فشل جلب الموقع');
       }
-
+      
       const { lat, lon, address } = locationData;
       
       // استخدام العنوان المسترجع (من الدليل أو reverse geocoding)
       const placeName = address;
 
-      // تحديث العنوان حسب الهدف
-      if (target === 'pickup') {
-        setPickupAddress(placeName);
-      } else if (target === 'delivery') {
-        setDeliveryAddress(placeName);
-      } else {
-        // نقطة في الوضع المتعدد
-        updateDeliveryPoint(target, 'address', placeName);
-      }
+        // تحديث العنوان حسب الهدف
+        if (target === 'pickup') {
+          setPickupAddress(placeName);
+        } else if (target === 'delivery') {
+          setDeliveryAddress(placeName);
+        } else {
+          // نقطة في الوضع المتعدد
+          updateDeliveryPoint(target, 'address', placeName);
+        }
 
-      Alert.alert('نجح', 'تم جلب العنوان بنجاح');
+        Alert.alert('نجح', 'تم جلب العنوان بنجاح');
     } catch (error: any) {
       console.error('Error getting location:', error);
       Alert.alert('خطأ', error.message || 'فشل جلب الموقع');
