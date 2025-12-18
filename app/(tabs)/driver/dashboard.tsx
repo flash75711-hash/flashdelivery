@@ -41,6 +41,7 @@ export default function DriverDashboardScreen() {
   const [registrationComplete, setRegistrationComplete] = useState(false);
   const [checkingRegistration, setCheckingRegistration] = useState(true);
   const [showApprovalAlert, setShowApprovalAlert] = useState(false);
+  const previousApprovalStatusRef = useRef<'pending' | 'approved' | 'rejected' | undefined>(undefined);
 
   useEffect(() => {
     console.log('DriverDashboard: useEffect triggered, user:', user?.id);
@@ -68,37 +69,58 @@ export default function DriverDashboardScreen() {
     }, [user])
   );
 
-  // فحص دوري لحالة الموافقة (كل 10 ثواني) إذا كان في انتظار المراجعة
+  // فحص دوري لحالة الموافقة (كل 5 ثواني) إذا كان في انتظار المراجعة
   useEffect(() => {
-    if (!user || driverProfile?.approval_status !== 'pending') return;
+    if (!user || driverProfile?.approval_status !== 'pending') {
+      // إذا لم يكن في انتظار المراجعة، لا نحتاج للفحص الدوري
+      return;
+    }
 
+    console.log('DriverDashboard: Starting approval polling for pending status...');
+    
     const checkApprovalInterval = setInterval(async () => {
       try {
-        const { data: profile } = await supabase
+        console.log('DriverDashboard: Polling - Checking approval status...');
+        const { data: profile, error } = await supabase
           .from('profiles')
           .select('approval_status, registration_complete')
           .eq('id', user.id)
           .single();
 
-        if (profile && profile.approval_status === 'approved' && profile.registration_complete) {
+        if (error) {
+          console.error('DriverDashboard: Error checking approval:', error);
+          return;
+        }
+
+        console.log('DriverDashboard: Polling - Current status:', profile?.approval_status, 'Previous ref:', previousApprovalStatusRef.current);
+
+        // إذا تغيرت الحالة من pending إلى approved
+        if (
+          profile?.approval_status === 'approved' &&
+          profile?.registration_complete
+        ) {
           // تمت الموافقة!
+          console.log('DriverDashboard: ✅ Approval detected in polling!');
           clearInterval(checkApprovalInterval);
-          Alert.alert(
-            '🎉 تهانينا!',
-            'تمت الموافقة على تسجيلك بنجاح!\n\nابدأ رحلاتك الآن واستقبل الطلبات.',
-            [{ text: 'ابدأ الآن', onPress: () => loadDriverProfile() }]
-          );
-        } else if (profile && profile.approval_status === 'rejected') {
+          
+          // إعادة تحميل البيانات (سيظهر الإشعار في loadDriverProfile)
+          await loadDriverProfile();
+        } else if (profile?.approval_status === 'rejected') {
           // تم الرفض
+          console.log('DriverDashboard: ❌ Rejection detected in polling!');
           clearInterval(checkApprovalInterval);
-          loadDriverProfile();
+          // إعادة تحميل البيانات (سيظهر الإشعار في loadDriverProfile)
+          await loadDriverProfile();
         }
       } catch (error) {
-        console.error('Error checking approval status:', error);
+        console.error('DriverDashboard: Error checking approval status:', error);
       }
-    }, 10000); // كل 10 ثواني
+    }, 5000); // كل 5 ثواني (أسرع)
 
-    return () => clearInterval(checkApprovalInterval);
+    return () => {
+      console.log('DriverDashboard: Stopping approval polling');
+      clearInterval(checkApprovalInterval);
+    };
   }, [user, driverProfile?.approval_status]);
 
   const loadDriverStatus = async () => {
@@ -199,8 +221,44 @@ export default function DriverDashboardScreen() {
           hasIdCard: !!profile.id_card_image_url,
           hasSelfie: !!profile.selfie_image_url,
           approvalStatus: profile.approval_status,
+          previousStatus: previousApprovalStatusRef.current,
           profile: profile,
         });
+        
+        // التحقق من تغيير الحالة من pending إلى approved
+        const previousStatus = previousApprovalStatusRef.current;
+        const currentStatus = profile.approval_status;
+        
+        // فقط إذا كانت الحالة السابقة pending والحالة الحالية مختلفة
+        if (
+          previousStatus === 'pending' &&
+          currentStatus === 'approved' &&
+          profile.registration_complete
+        ) {
+          console.log('DriverDashboard: ✅ Approval detected in loadDriverProfile!');
+          // تمت الموافقة!
+          if (Platform.OS === 'web') {
+            window.alert('🎉 تهانينا!\n\nتمت الموافقة على تسجيلك بنجاح!\n\nابدأ رحلاتك الآن واستقبل الطلبات.');
+          } else {
+            Alert.alert(
+              '🎉 تهانينا!',
+              'تمت الموافقة على تسجيلك بنجاح!\n\nابدأ رحلاتك الآن واستقبل الطلبات.',
+              [{ text: 'ابدأ الآن' }]
+            );
+          }
+        } else if (previousStatus === 'pending' && currentStatus === 'rejected') {
+          console.log('DriverDashboard: ❌ Rejection detected in loadDriverProfile!');
+          if (Platform.OS === 'web') {
+            window.alert('تم رفض طلبك\n\nيرجى التواصل مع الإدارة');
+          } else {
+            Alert.alert('تم رفض طلبك', 'يرجى التواصل مع الإدارة');
+          }
+        }
+        
+        // حفظ الحالة الحالية للمقارنة في المرة القادمة (فقط إذا كانت موجودة)
+        if (currentStatus) {
+          previousApprovalStatusRef.current = currentStatus;
+        }
         setDriverProfile(profile);
         
         // التحقق من الموافقة الجديدة

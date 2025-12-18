@@ -11,6 +11,8 @@ import {
   Modal,
   Image,
   ScrollView,
+  ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '@/lib/supabase';
@@ -34,90 +36,219 @@ export default function AdminDriversScreen() {
   const [loading, setLoading] = useState(true);
   const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
   const [showDocumentsModal, setShowDocumentsModal] = useState(false);
+  const [processingDriverId, setProcessingDriverId] = useState<string | null>(null);
 
   useEffect(() => {
     loadDrivers();
+    // التحقق من أن المستخدم الحالي هو admin
+    checkAdminStatus();
   }, []);
+
+  const checkAdminStatus = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .single();
+        console.log('AdminDrivers: Current user role:', profile?.role);
+        if (profile?.role !== 'admin') {
+          console.warn('AdminDrivers: ⚠️ Current user is not an admin!');
+        }
+      }
+    } catch (error) {
+      console.error('AdminDrivers: Error checking admin status:', error);
+    }
+  };
 
   const loadDrivers = async () => {
     setLoading(true);
     try {
+      console.log('AdminDrivers: Loading drivers...');
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('role', 'driver')
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.error('AdminDrivers: Error loading drivers:', error);
+        throw error;
+      }
+      
+      console.log('AdminDrivers: Loaded drivers:', data?.length || 0);
       setDrivers(data || []);
-    } catch (error) {
-      console.error('Error loading drivers:', error);
+    } catch (error: any) {
+      console.error('AdminDrivers: Error loading drivers:', error);
+      Alert.alert('خطأ', `فشل تحميل السائقين: ${error.message || error.code || 'خطأ غير معروف'}`);
     } finally {
       setLoading(false);
     }
   };
 
   const approveDriver = async (driverId: string) => {
-    Alert.alert(
-      'موافقة على التسجيل',
-      'هل أنت متأكد من الموافقة على تسجيل هذا السائق؟',
-      [
-        { text: 'إلغاء', style: 'cancel' },
-        {
-          text: 'موافقة',
-          style: 'default',
-          onPress: async () => {
-            try {
-              const { error } = await supabase
-                .from('profiles')
-                .update({ 
-                  approval_status: 'approved',
-                  registration_complete: true,
-                  status: 'active'
-                })
-                .eq('id', driverId);
+    console.log('AdminDrivers: approveDriver called for:', driverId);
+    
+    const performApproval = async () => {
+      console.log('AdminDrivers: Approving driver:', driverId);
+      setProcessingDriverId(driverId);
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        console.log('AdminDrivers: Current user:', user?.id);
+        
+        const { data, error } = await supabase
+          .from('profiles')
+          .update({ 
+            approval_status: 'approved',
+            registration_complete: true,
+            status: 'active'
+          })
+          .eq('id', driverId)
+          .select();
 
-              if (error) throw error;
-              Alert.alert('✅ نجح', 'تم الموافقة على تسجيل السائق بنجاح!\nسيتم إشعار السائق بالموافقة.');
-              loadDrivers();
-            } catch (error: any) {
-              Alert.alert('خطأ', error.message || 'فشل الموافقة على التسجيل');
-            }
+        console.log('AdminDrivers: Update result:', { data, error, driverId });
+
+        if (error) {
+          console.error('AdminDrivers: Update error details:', {
+            message: error.message,
+            code: error.code,
+            details: error.details,
+            hint: error.hint
+          });
+          throw error;
+        }
+        
+        if (!data || data.length === 0) {
+          console.warn('AdminDrivers: No rows updated - check RLS policies');
+          throw new Error('لم يتم تحديث أي صفوف. يرجى التحقق من الصلاحيات.');
+        }
+        
+        console.log('AdminDrivers: Driver approved successfully, updated rows:', data.length);
+        
+        if (Platform.OS === 'web') {
+          window.alert('✅ نجح\nتم الموافقة على تسجيل السائق بنجاح!\nسيتم إشعار السائق بالموافقة.');
+        } else {
+          Alert.alert('✅ نجح', 'تم الموافقة على تسجيل السائق بنجاح!\nسيتم إشعار السائق بالموافقة.');
+        }
+        
+        await loadDrivers();
+      } catch (error: any) {
+        console.error('AdminDrivers: Error approving driver:', error);
+        const errorMessage = error.message || error.code || 'فشل الموافقة على التسجيل';
+        
+        if (Platform.OS === 'web') {
+          window.alert(`خطأ\n${errorMessage}`);
+        } else {
+          Alert.alert('خطأ', errorMessage, [{ text: 'حسناً' }]);
+        }
+      } finally {
+        setProcessingDriverId(null);
+      }
+    };
+
+    // استخدام window.confirm على الويب
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm('موافقة على التسجيل\n\nهل أنت متأكد من الموافقة على تسجيل هذا السائق؟');
+      if (confirmed) {
+        performApproval();
+      }
+    } else {
+      Alert.alert(
+        'موافقة على التسجيل',
+        'هل أنت متأكد من الموافقة على تسجيل هذا السائق؟',
+        [
+          { text: 'إلغاء', style: 'cancel' },
+          {
+            text: 'موافقة',
+            style: 'default',
+            onPress: performApproval,
           },
-        },
-      ]
-    );
+        ]
+      );
+    }
   };
 
   const rejectDriver = async (driverId: string) => {
-    Alert.alert(
-      'رفض التسجيل',
-      'هل أنت متأكد من رفض تسجيل هذا السائق؟',
-      [
-        { text: 'إلغاء', style: 'cancel' },
-        {
-          text: 'رفض',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { error } = await supabase
-                .from('profiles')
-                .update({ 
-                  approval_status: 'rejected',
-                  registration_complete: false
-                })
-                .eq('id', driverId);
+    console.log('AdminDrivers: rejectDriver called for:', driverId);
+    
+    const performRejection = async () => {
+      console.log('AdminDrivers: Rejecting driver:', driverId);
+      setProcessingDriverId(driverId);
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        console.log('AdminDrivers: Current user:', user?.id);
+        
+        const { data, error } = await supabase
+          .from('profiles')
+          .update({ 
+            approval_status: 'rejected',
+            registration_complete: false
+          })
+          .eq('id', driverId)
+          .select();
 
-              if (error) throw error;
-              Alert.alert('تم الرفض', 'تم رفض تسجيل السائق');
-              loadDrivers();
-            } catch (error: any) {
-              Alert.alert('خطأ', error.message || 'فشل رفض التسجيل');
-            }
+        console.log('AdminDrivers: Reject result:', { data, error, driverId });
+
+        if (error) {
+          console.error('AdminDrivers: Reject error details:', {
+            message: error.message,
+            code: error.code,
+            details: error.details,
+            hint: error.hint
+          });
+          throw error;
+        }
+        
+        if (!data || data.length === 0) {
+          console.warn('AdminDrivers: No rows updated - check RLS policies');
+          throw new Error('لم يتم تحديث أي صفوف. يرجى التحقق من الصلاحيات.');
+        }
+        
+        console.log('AdminDrivers: Driver rejected successfully, updated rows:', data.length);
+        
+        if (Platform.OS === 'web') {
+          window.alert('تم الرفض\nتم رفض تسجيل السائق');
+        } else {
+          Alert.alert('تم الرفض', 'تم رفض تسجيل السائق');
+        }
+        
+        await loadDrivers();
+      } catch (error: any) {
+        console.error('AdminDrivers: Error rejecting driver:', error);
+        const errorMessage = error.message || error.code || 'فشل رفض التسجيل';
+        
+        if (Platform.OS === 'web') {
+          window.alert(`خطأ\n${errorMessage}`);
+        } else {
+          Alert.alert('خطأ', errorMessage, [{ text: 'حسناً' }]);
+        }
+      } finally {
+        setProcessingDriverId(null);
+      }
+    };
+
+    // استخدام window.confirm على الويب
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm('رفض التسجيل\n\nهل أنت متأكد من رفض تسجيل هذا السائق؟');
+      if (confirmed) {
+        performRejection();
+      }
+    } else {
+      Alert.alert(
+        'رفض التسجيل',
+        'هل أنت متأكد من رفض تسجيل هذا السائق؟',
+        [
+          { text: 'إلغاء', style: 'cancel' },
+          {
+            text: 'رفض',
+            style: 'destructive',
+            onPress: performRejection,
           },
-        },
-      ]
-    );
+        ]
+      );
+    }
   };
 
   const suspendDriver = async (driverId: string) => {
@@ -215,18 +346,56 @@ export default function AdminDriversScreen() {
               {item.approval_status === 'pending' && (
                 <>
                   <TouchableOpacity
-                    style={[styles.actionButton, styles.approveButton]}
-                    onPress={() => approveDriver(item.id)}
+                    style={[
+                      styles.actionButton, 
+                      styles.approveButton,
+                      (processingDriverId === item.id || loading) && styles.actionButtonDisabled
+                    ]}
+                    onPress={() => {
+                      console.log('AdminDrivers: Approve button pressed for:', item.id, 'item:', item);
+                      if (!item.id) {
+                        console.error('AdminDrivers: No driver ID!');
+                        Alert.alert('خطأ', 'معرف السائق غير موجود');
+                        return;
+                      }
+                      approveDriver(item.id);
+                    }}
+                    disabled={processingDriverId === item.id || loading}
                   >
-                    <Ionicons name="checkmark-circle" size={20} color="#34C759" />
-                    <Text style={styles.approveButtonText}>موافقة</Text>
+                    {processingDriverId === item.id ? (
+                      <ActivityIndicator size="small" color="#34C759" />
+                    ) : (
+                      <>
+                        <Ionicons name="checkmark-circle" size={20} color="#34C759" />
+                        <Text style={styles.approveButtonText}>موافقة</Text>
+                      </>
+                    )}
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[styles.actionButton, styles.rejectButton]}
-                    onPress={() => rejectDriver(item.id)}
+                    style={[
+                      styles.actionButton, 
+                      styles.rejectButton,
+                      (processingDriverId === item.id || loading) && styles.actionButtonDisabled
+                    ]}
+                    onPress={() => {
+                      console.log('AdminDrivers: Reject button pressed for:', item.id, 'item:', item);
+                      if (!item.id) {
+                        console.error('AdminDrivers: No driver ID!');
+                        Alert.alert('خطأ', 'معرف السائق غير موجود');
+                        return;
+                      }
+                      rejectDriver(item.id);
+                    }}
+                    disabled={processingDriverId === item.id || loading}
                   >
-                    <Ionicons name="close-circle" size={20} color="#FF3B30" />
-                    <Text style={styles.rejectButtonText}>رفض</Text>
+                    {processingDriverId === item.id ? (
+                      <ActivityIndicator size="small" color="#FF3B30" />
+                    ) : (
+                      <>
+                        <Ionicons name="close-circle" size={20} color="#FF3B30" />
+                        <Text style={styles.rejectButtonText}>رفض</Text>
+                      </>
+                    )}
                   </TouchableOpacity>
                   {/* عرض المستندات */}
                   {(item.id_card_image_url || item.selfie_image_url) && (
@@ -316,24 +485,48 @@ export default function AdminDriversScreen() {
             {selectedDriver?.approval_status === 'pending' && (
               <View style={styles.modalActions}>
                 <TouchableOpacity
-                  style={[styles.modalActionButton, styles.modalRejectButton]}
+                  style={[
+                    styles.modalActionButton, 
+                    styles.modalRejectButton,
+                    processingDriverId === selectedDriver.id && styles.actionButtonDisabled
+                  ]}
                   onPress={() => {
+                    console.log('AdminDrivers: Modal reject button pressed for:', selectedDriver.id);
                     setShowDocumentsModal(false);
                     rejectDriver(selectedDriver.id);
                   }}
+                  disabled={processingDriverId === selectedDriver.id}
                 >
-                  <Ionicons name="close-circle" size={20} color="#FF3B30" />
-                  <Text style={styles.modalRejectButtonText}>رفض</Text>
+                  {processingDriverId === selectedDriver.id ? (
+                    <ActivityIndicator size="small" color="#FF3B30" />
+                  ) : (
+                    <>
+                      <Ionicons name="close-circle" size={20} color="#FF3B30" />
+                      <Text style={styles.modalRejectButtonText}>رفض</Text>
+                    </>
+                  )}
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.modalActionButton, styles.modalApproveButton]}
+                  style={[
+                    styles.modalActionButton, 
+                    styles.modalApproveButton,
+                    processingDriverId === selectedDriver.id && styles.actionButtonDisabled
+                  ]}
                   onPress={() => {
+                    console.log('AdminDrivers: Modal approve button pressed for:', selectedDriver.id);
                     setShowDocumentsModal(false);
                     approveDriver(selectedDriver.id);
                   }}
+                  disabled={processingDriverId === selectedDriver.id}
                 >
-                  <Ionicons name="checkmark-circle" size={20} color="#34C759" />
-                  <Text style={styles.modalApproveButtonText}>موافقة</Text>
+                  {processingDriverId === selectedDriver.id ? (
+                    <ActivityIndicator size="small" color="#34C759" />
+                  ) : (
+                    <>
+                      <Ionicons name="checkmark-circle" size={20} color="#34C759" />
+                      <Text style={styles.modalApproveButtonText}>موافقة</Text>
+                    </>
+                  )}
                 </TouchableOpacity>
               </View>
             )}
@@ -461,6 +654,9 @@ const styles = StyleSheet.create({
     color: '#007AFF',
     fontWeight: '600',
     fontSize: 14,
+  },
+  actionButtonDisabled: {
+    opacity: 0.5,
   },
   suspendButton: {
     flexDirection: 'row',
