@@ -103,7 +103,16 @@ export default function TabsLayout() {
             tab.style.maxWidth = '0';
             tab.style.overflow = 'hidden';
             tab.style.visibility = 'hidden';
+            tab.style.opacity = '0';
             tab.setAttribute('data-hidden', 'true');
+            
+            // Hide all icons inside the hidden tab
+            const icons = tab.querySelectorAll('svg, [class*="icon"], i, [dir="auto"]');
+            icons.forEach((icon) => {
+              (icon as HTMLElement).style.display = 'none';
+              (icon as HTMLElement).style.visibility = 'hidden';
+              (icon as HTMLElement).style.opacity = '0';
+            });
             
             // Also hide the parent container if it exists
             const parent = tab.parentElement as HTMLElement;
@@ -114,6 +123,7 @@ export default function TabsLayout() {
               parent.style.flex = '0 0 0';
               parent.style.margin = '0';
               parent.style.padding = '0';
+              parent.style.opacity = '0';
               parent.setAttribute('data-hidden', 'true');
             }
           } else {
@@ -126,7 +136,16 @@ export default function TabsLayout() {
             tab.style.maxWidth = '';
             tab.style.overflow = 'visible';
             tab.style.visibility = 'visible';
+            tab.style.opacity = '';
             tab.removeAttribute('data-hidden');
+            
+            // Show icons inside the visible tab
+            const icons = tab.querySelectorAll('svg, [class*="icon"], i, [dir="auto"]');
+            icons.forEach((icon) => {
+              (icon as HTMLElement).style.display = '';
+              (icon as HTMLElement).style.visibility = '';
+              (icon as HTMLElement).style.opacity = '';
+            });
             
             // Show the parent container if it exists
             const parent = tab.parentElement as HTMLElement;
@@ -135,6 +154,7 @@ export default function TabsLayout() {
               parent.style.width = '';
               parent.style.height = '';
               parent.style.flex = '0 1 auto';
+              parent.style.opacity = '';
               parent.removeAttribute('data-hidden');
             }
             
@@ -165,6 +185,33 @@ export default function TabsLayout() {
         setTimeout(updateTabVisibility, 50);
       });
       
+      // Also observe for route changes to update icons
+      const routeObserver = new MutationObserver(() => {
+        setTimeout(() => {
+          const tabList = document.querySelector('[role="tablist"]') as HTMLElement;
+          if (tabList) {
+            // Force update of all tabs to ensure correct icons
+            const tabs = Array.from(tabList.querySelectorAll('[role="tab"]')) as HTMLElement[];
+            tabs.forEach((tab) => {
+              // Check if tab should be visible based on href
+              const href = tab.getAttribute('href');
+              if (href) {
+                // Ensure only visible tabs show their icons
+                const isVisible = !tab.hasAttribute('data-hidden') && 
+                                window.getComputedStyle(tab).display !== 'none';
+                if (!isVisible) {
+                  const icons = tab.querySelectorAll('svg, [class*="icon"], i');
+                  icons.forEach((icon) => {
+                    (icon as HTMLElement).style.display = 'none';
+                  });
+                }
+              }
+            });
+            updateTabVisibility();
+          }
+        }, 100);
+      });
+      
       // Observe document for tablist creation
       const observeDocument = () => {
         const tabList = document.querySelector('[role="tablist"]');
@@ -173,8 +220,17 @@ export default function TabsLayout() {
             childList: true, 
             subtree: true, 
             attributes: true,
-            attributeFilter: ['style', 'aria-hidden']
+            attributeFilter: ['style', 'aria-hidden', 'aria-selected', 'href']
           });
+          
+          // Also observe the document for route changes
+          routeObserver.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['aria-selected', 'href']
+          });
+          
           updateTabVisibility();
         } else {
           setTimeout(observeDocument, 100);
@@ -272,13 +328,23 @@ export default function TabsLayout() {
           margin: 0 auto !important;
         }
         
-        /* Center icon itself */
-        [role="tablist"] [role="tab"] svg,
-        [role="tablist"] [role="tab"] [class*="icon"],
-        [role="tablist"] [role="tab"] i {
+        /* Center icon itself - only for visible tabs */
+        [role="tablist"] [role="tab"]:not([data-hidden="true"]) svg,
+        [role="tablist"] [role="tab"]:not([data-hidden="true"]) [class*="icon"],
+        [role="tablist"] [role="tab"]:not([data-hidden="true"]) i {
           display: block !important;
           margin: 0 auto !important;
           align-self: center !important;
+        }
+        
+        /* Hide icons in hidden tabs */
+        [role="tablist"] [role="tab"][data-hidden="true"] svg,
+        [role="tablist"] [role="tab"][data-hidden="true"] [class*="icon"],
+        [role="tablist"] [role="tab"][data-hidden="true"] i,
+        [role="tablist"] [role="tab"][data-hidden="true"] [dir="auto"] {
+          display: none !important;
+          visibility: hidden !important;
+          opacity: 0 !important;
         }
         
         /* Fix text truncation in tab labels - target all possible text containers */
@@ -343,6 +409,9 @@ export default function TabsLayout() {
         }
         if (observer) {
           observer.disconnect();
+        }
+        if (routeObserver) {
+          routeObserver.disconnect();
         }
       };
     }

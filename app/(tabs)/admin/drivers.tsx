@@ -418,16 +418,16 @@ export default function AdminDriversScreen() {
                 </>
               )}
               {item.status === 'active' && item.approval_status === 'approved' && (
-                <TouchableOpacity
-                  style={styles.suspendButton}
-                  onPress={() => suspendDriver(item.id)}
-                >
-                  <Ionicons name="ban" size={20} color="#FF3B30" />
-                  <Text style={styles.suspendButtonText}>
-                    {t('admin.suspendAccount')}
-                  </Text>
-                </TouchableOpacity>
-              )}
+              <TouchableOpacity
+                style={styles.suspendButton}
+                onPress={() => suspendDriver(item.id)}
+              >
+                <Ionicons name="ban" size={20} color="#FF3B30" />
+                <Text style={styles.suspendButtonText}>
+                  {t('admin.suspendAccount')}
+                </Text>
+              </TouchableOpacity>
+            )}
             </View>
           </View>
         )}

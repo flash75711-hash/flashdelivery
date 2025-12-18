@@ -102,7 +102,7 @@ Deno.serve(async (req) => {
     if (contentType.includes('multipart/form-data')) {
       // FormData واضح
       try {
-        const formData = await req.formData();
+    const formData = await req.formData();
         imageFile = formData.get('image') as File | Blob | string | null;
         formatParam = (formData.get('format') as string | null) || 'webp';
         console.log('✅ Parsed as FormData, format:', formatParam);

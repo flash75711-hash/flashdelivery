@@ -161,43 +161,43 @@ export async function uploadImageToImgBB(imageUri: string, format: 'webp' | 'avi
         } catch (invokeError: any) {
           // Fallback إلى fetch المباشر إذا فشل Supabase Client
           console.warn('Supabase functions.invoke failed, trying direct fetch:', invokeError);
-          
-          const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
-          if (!supabaseAnonKey) {
-            throw new Error('EXPO_PUBLIC_SUPABASE_ANON_KEY is not defined');
-          }
 
-          const authToken = session?.access_token || supabaseAnonKey;
-          const headers: Record<string, string> = {
+    const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+    if (!supabaseAnonKey) {
+      throw new Error('EXPO_PUBLIC_SUPABASE_ANON_KEY is not defined');
+    }
+
+    const authToken = session?.access_token || supabaseAnonKey;
+    const headers: Record<string, string> = {
             'Content-Type': 'application/json',
-            'apikey': supabaseAnonKey,
-          };
-          
-          if (authToken) {
-            headers['Authorization'] = `Bearer ${authToken}`;
-          }
+      'apikey': supabaseAnonKey,
+    };
+    
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`;
+    }
 
-          const uploadResponse = await fetch(functionUrl, {
-            method: 'POST',
-            headers,
+    const uploadResponse = await fetch(functionUrl, {
+      method: 'POST',
+      headers,
             body: JSON.stringify({
               image: base64String,
               format: format,
             }),
-          });
+    });
 
-          if (!uploadResponse.ok) {
-            const errorText = await uploadResponse.text();
-            console.error('Edge Function upload error:', errorText);
-            throw new Error(`Failed to upload image: ${uploadResponse.status}`);
-          }
+    if (!uploadResponse.ok) {
+      const errorText = await uploadResponse.text();
+      console.error('Edge Function upload error:', errorText);
+      throw new Error(`Failed to upload image: ${uploadResponse.status}`);
+    }
 
-          const result = await uploadResponse.json();
+    const result = await uploadResponse.json();
 
-          if (result.success && result.url) {
-            return result.url;
-          } else {
-            throw new Error(result.error || 'Upload failed');
+    if (result.success && result.url) {
+      return result.url;
+    } else {
+      throw new Error(result.error || 'Upload failed');
           }
         }
       } catch (convertError: any) {

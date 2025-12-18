@@ -142,10 +142,10 @@ export default function CompleteDriverRegistration() {
       } catch (error: any) {
         console.warn('Image manipulation failed, using original:', error);
         // إذا فشل التحويل، نستخدم الصورة الأصلية
-        if (type === 'idCard') {
-          setIdCardImage(result.assets[0].uri);
-        } else {
-          setSelfieImage(result.assets[0].uri);
+      if (type === 'idCard') {
+        setIdCardImage(result.assets[0].uri);
+      } else {
+        setSelfieImage(result.assets[0].uri);
         }
       }
     }
@@ -171,8 +171,8 @@ export default function CompleteDriverRegistration() {
         ...prev,
         [type]: { uploading: false, uploaded: true },
       }));
-      
-      return imageUrl;
+    
+    return imageUrl;
     } catch (error: any) {
       // تحديث حالة الخطأ
       setUploadProgress(prev => ({
@@ -226,8 +226,8 @@ export default function CompleteDriverRegistration() {
         }
 
         await Promise.all(uploadPromises);
-        setUploading(false);
-        
+      setUploading(false);
+
         // رسالة نجاح بعد رفع الصور (فقط إذا تم رفع صور جديدة)
         if (uploadPromises.length > 0) {
           Alert.alert('✅ نجح الرفع', 'تم رفع الصور بنجاح! جاري حفظ البيانات...');
