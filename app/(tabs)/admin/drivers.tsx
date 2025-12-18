@@ -8,6 +8,9 @@ import {
   TouchableOpacity,
   Alert,
   RefreshControl,
+  Modal,
+  Image,
+  ScrollView,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '@/lib/supabase';
@@ -19,12 +22,18 @@ interface Driver {
   email: string;
   phone: string;
   status: string;
+  approval_status?: 'pending' | 'approved' | 'rejected';
+  id_card_image_url?: string;
+  selfie_image_url?: string;
+  created_at?: string;
 }
 
 export default function AdminDriversScreen() {
   const { t } = useTranslation();
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
+  const [showDocumentsModal, setShowDocumentsModal] = useState(false);
 
   useEffect(() => {
     loadDrivers();
@@ -46,6 +55,69 @@ export default function AdminDriversScreen() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const approveDriver = async (driverId: string) => {
+    Alert.alert(
+      'موافقة على التسجيل',
+      'هل أنت متأكد من الموافقة على تسجيل هذا السائق؟',
+      [
+        { text: 'إلغاء', style: 'cancel' },
+        {
+          text: 'موافقة',
+          style: 'default',
+          onPress: async () => {
+            try {
+              const { error } = await supabase
+                .from('profiles')
+                .update({ 
+                  approval_status: 'approved',
+                  registration_complete: true,
+                  status: 'active'
+                })
+                .eq('id', driverId);
+
+              if (error) throw error;
+              Alert.alert('✅ نجح', 'تم الموافقة على تسجيل السائق بنجاح!\nسيتم إشعار السائق بالموافقة.');
+              loadDrivers();
+            } catch (error: any) {
+              Alert.alert('خطأ', error.message || 'فشل الموافقة على التسجيل');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const rejectDriver = async (driverId: string) => {
+    Alert.alert(
+      'رفض التسجيل',
+      'هل أنت متأكد من رفض تسجيل هذا السائق؟',
+      [
+        { text: 'إلغاء', style: 'cancel' },
+        {
+          text: 'رفض',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { error } = await supabase
+                .from('profiles')
+                .update({ 
+                  approval_status: 'rejected',
+                  registration_complete: false
+                })
+                .eq('id', driverId);
+
+              if (error) throw error;
+              Alert.alert('تم الرفض', 'تم رفض تسجيل السائق');
+              loadDrivers();
+            } catch (error: any) {
+              Alert.alert('خطأ', error.message || 'فشل رفض التسجيل');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const suspendDriver = async (driverId: string) => {
@@ -97,6 +169,32 @@ export default function AdminDriversScreen() {
                 <Text style={styles.driverPhone}>{item.phone}</Text>
               )}
               <View style={styles.statusContainer}>
+                {/* حالة الموافقة */}
+                {item.approval_status === 'pending' && (
+                  <View style={[styles.statusBadge, styles.statusPending]}>
+                    <Ionicons name="time-outline" size={14} color="#FF9500" />
+                    <Text style={[styles.statusText, { color: '#FF9500' }]}>
+                      في انتظار المراجعة
+                    </Text>
+                  </View>
+                )}
+                {item.approval_status === 'approved' && (
+                  <View style={[styles.statusBadge, styles.statusActive]}>
+                    <Ionicons name="checkmark-circle" size={14} color="#34C759" />
+                    <Text style={[styles.statusText, { color: '#34C759' }]}>
+                      موافق عليه
+                    </Text>
+                  </View>
+                )}
+                {item.approval_status === 'rejected' && (
+                  <View style={[styles.statusBadge, styles.statusSuspended]}>
+                    <Ionicons name="close-circle" size={14} color="#FF3B30" />
+                    <Text style={[styles.statusText, { color: '#FF3B30' }]}>
+                      مرفوض
+                    </Text>
+                  </View>
+                )}
+                {/* حالة الحساب */}
                 <View
                   style={[
                     styles.statusBadge,
@@ -111,17 +209,52 @@ export default function AdminDriversScreen() {
                 </View>
               </View>
             </View>
-            {item.status === 'active' && (
-              <TouchableOpacity
-                style={styles.suspendButton}
-                onPress={() => suspendDriver(item.id)}
-              >
-                <Ionicons name="ban" size={20} color="#FF3B30" />
-                <Text style={styles.suspendButtonText}>
-                  {t('admin.suspendAccount')}
-                </Text>
-              </TouchableOpacity>
-            )}
+            
+            {/* أزرار الإجراءات */}
+            <View style={styles.actionsContainer}>
+              {item.approval_status === 'pending' && (
+                <>
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.approveButton]}
+                    onPress={() => approveDriver(item.id)}
+                  >
+                    <Ionicons name="checkmark-circle" size={20} color="#34C759" />
+                    <Text style={styles.approveButtonText}>موافقة</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.rejectButton]}
+                    onPress={() => rejectDriver(item.id)}
+                  >
+                    <Ionicons name="close-circle" size={20} color="#FF3B30" />
+                    <Text style={styles.rejectButtonText}>رفض</Text>
+                  </TouchableOpacity>
+                  {/* عرض المستندات */}
+                  {(item.id_card_image_url || item.selfie_image_url) && (
+                    <TouchableOpacity
+                      style={[styles.actionButton, styles.viewDocumentsButton]}
+                      onPress={() => {
+                        setSelectedDriver(item);
+                        setShowDocumentsModal(true);
+                      }}
+                    >
+                      <Ionicons name="document-text" size={20} color="#007AFF" />
+                      <Text style={styles.viewDocumentsButtonText}>عرض المستندات</Text>
+                    </TouchableOpacity>
+                  )}
+                </>
+              )}
+              {item.status === 'active' && item.approval_status === 'approved' && (
+                <TouchableOpacity
+                  style={styles.suspendButton}
+                  onPress={() => suspendDriver(item.id)}
+                >
+                  <Ionicons name="ban" size={20} color="#FF3B30" />
+                  <Text style={styles.suspendButtonText}>
+                    {t('admin.suspendAccount')}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
         )}
         ListEmptyComponent={
@@ -130,6 +263,83 @@ export default function AdminDriversScreen() {
           </View>
         }
       />
+
+      {/* Modal لعرض المستندات */}
+      <Modal
+        visible={showDocumentsModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowDocumentsModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                مستندات {selectedDriver?.full_name || selectedDriver?.email}
+              </Text>
+              <TouchableOpacity
+                onPress={() => setShowDocumentsModal(false)}
+                style={styles.modalCloseButton}
+              >
+                <Ionicons name="close" size={24} color="#1a1a1a" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.modalBody}>
+              {selectedDriver?.id_card_image_url && (
+                <View style={styles.documentSection}>
+                  <Text style={styles.documentLabel}>صورة البطاقة الشخصية</Text>
+                  <Image
+                    source={{ uri: selectedDriver.id_card_image_url }}
+                    style={styles.documentImage}
+                    resizeMode="contain"
+                  />
+                </View>
+              )}
+              
+              {selectedDriver?.selfie_image_url && (
+                <View style={styles.documentSection}>
+                  <Text style={styles.documentLabel}>صورة السيلفي</Text>
+                  <Image
+                    source={{ uri: selectedDriver.selfie_image_url }}
+                    style={styles.documentImage}
+                    resizeMode="contain"
+                  />
+                </View>
+              )}
+              
+              {!selectedDriver?.id_card_image_url && !selectedDriver?.selfie_image_url && (
+                <Text style={styles.noDocumentsText}>لا توجد مستندات مرفوعة</Text>
+              )}
+            </ScrollView>
+            
+            {selectedDriver?.approval_status === 'pending' && (
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={[styles.modalActionButton, styles.modalRejectButton]}
+                  onPress={() => {
+                    setShowDocumentsModal(false);
+                    rejectDriver(selectedDriver.id);
+                  }}
+                >
+                  <Ionicons name="close-circle" size={20} color="#FF3B30" />
+                  <Text style={styles.modalRejectButtonText}>رفض</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalActionButton, styles.modalApproveButton]}
+                  onPress={() => {
+                    setShowDocumentsModal(false);
+                    approveDriver(selectedDriver.id);
+                  }}
+                >
+                  <Ionicons name="checkmark-circle" size={20} color="#34C759" />
+                  <Text style={styles.modalApproveButtonText}>موافقة</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -186,11 +396,17 @@ const styles = StyleSheet.create({
   statusContainer: {
     marginTop: 12,
     alignItems: 'flex-end',
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
   },
   statusBadge: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   statusActive: {
     backgroundColor: '#34C75920',
@@ -198,10 +414,53 @@ const styles = StyleSheet.create({
   statusSuspended: {
     backgroundColor: '#FF3B3020',
   },
+  statusPending: {
+    backgroundColor: '#FF950020',
+  },
   statusText: {
     fontSize: 12,
     fontWeight: '600',
     color: '#1a1a1a',
+  },
+  actionsContainer: {
+    marginTop: 12,
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    borderRadius: 8,
+    gap: 6,
+    flex: 1,
+    minWidth: 100,
+  },
+  approveButton: {
+    backgroundColor: '#34C75920',
+  },
+  approveButtonText: {
+    color: '#34C759',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  rejectButton: {
+    backgroundColor: '#FF3B3020',
+  },
+  rejectButtonText: {
+    color: '#FF3B30',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  viewDocumentsButton: {
+    backgroundColor: '#007AFF20',
+  },
+  viewDocumentsButtonText: {
+    color: '#007AFF',
+    fontWeight: '600',
+    fontSize: 14,
   },
   suspendButton: {
     flexDirection: 'row',
@@ -226,6 +485,91 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 16,
     color: '#999',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '90%',
+    paddingBottom: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+  },
+  modalCloseButton: {
+    padding: 4,
+  },
+  modalBody: {
+    padding: 20,
+  },
+  documentSection: {
+    marginBottom: 24,
+  },
+  documentLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 12,
+    textAlign: 'right',
+  },
+  documentImage: {
+    width: '100%',
+    height: 300,
+    borderRadius: 12,
+    backgroundColor: '#f5f5f5',
+  },
+  noDocumentsText: {
+    fontSize: 16,
+    color: '#999',
+    textAlign: 'center',
+    padding: 40,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  modalActionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    borderRadius: 12,
+    gap: 8,
+  },
+  modalApproveButton: {
+    backgroundColor: '#34C75920',
+  },
+  modalApproveButtonText: {
+    color: '#34C759',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  modalRejectButton: {
+    backgroundColor: '#FF3B3020',
+  },
+  modalRejectButtonText: {
+    color: '#FF3B30',
+    fontWeight: '600',
+    fontSize: 16,
   },
 });
 

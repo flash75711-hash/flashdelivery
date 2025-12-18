@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,9 +14,10 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { uploadImageToCatbox } from '@/lib/catbox';
+import { uploadImageToImgBB } from '@/lib/imgbb';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 
 export default function CompleteDriverRegistration() {
   const { phone: phoneParam, email } = useLocalSearchParams<{ phone?: string; email?: string }>();
@@ -28,6 +29,81 @@ export default function CompleteDriverRegistration() {
   const [selfieImage, setSelfieImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [loadingProfile, setLoadingProfile] = useState(true);
+  const [hasExistingData, setHasExistingData] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{
+    idCard: { uploading: boolean; uploaded: boolean; error?: string };
+    selfie: { uploading: boolean; uploaded: boolean; error?: string };
+  }>({
+    idCard: { uploading: false, uploaded: false },
+    selfie: { uploading: false, uploaded: false },
+  });
+
+  // تحميل البيانات الموجودة عند فتح الصفحة
+  useEffect(() => {
+    const loadExistingProfile = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          setLoadingProfile(false);
+          return;
+        }
+
+        // جلب بيانات السائق من قاعدة البيانات
+        const { data: profile, error } = await supabase
+          .from('profiles')
+          .select('full_name, phone, id_card_image_url, selfie_image_url')
+          .eq('id', user.id)
+          .single();
+
+        if (error && error.code !== 'PGRST116') {
+          console.error('Error loading profile:', error);
+        } else if (profile) {
+          // تحديد إذا كانت هناك بيانات موجودة
+          const hasData = !!(profile.full_name || profile.phone || profile.id_card_image_url || profile.selfie_image_url);
+          setHasExistingData(hasData);
+          
+          // تحميل البيانات الموجودة
+          if (profile.full_name) {
+            setFullName(profile.full_name);
+          }
+          if (profile.phone) {
+            setPhone(profile.phone);
+          }
+          if (profile.id_card_image_url) {
+            setIdCardImage(profile.id_card_image_url);
+            // تحديث حالة الرفع للصورة المرفوعة مسبقاً
+            setUploadProgress(prev => ({
+              ...prev,
+              idCard: { uploading: false, uploaded: true },
+            }));
+          }
+          if (profile.selfie_image_url) {
+            setSelfieImage(profile.selfie_image_url);
+            // تحديث حالة الرفع للصورة المرفوعة مسبقاً
+            setUploadProgress(prev => ({
+              ...prev,
+              selfie: { uploading: false, uploaded: true },
+            }));
+          }
+        }
+
+        // إذا لم يكن هناك phone في profile، جرب من phoneParam أو auth.user
+        if (!profile?.phone && !phoneParam) {
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+          if (authUser?.phone) {
+            setPhone(authUser.phone);
+          }
+        }
+      } catch (error) {
+        console.error('Error loading existing profile:', error);
+      } finally {
+        setLoadingProfile(false);
+      }
+    };
+
+    loadExistingProfile();
+  }, [phoneParam]);
 
   const pickImage = async (type: 'idCard' | 'selfie') => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -44,23 +120,67 @@ export default function CompleteDriverRegistration() {
     });
 
     if (!result.canceled && result.assets[0]) {
-      if (type === 'idCard') {
-        setIdCardImage(result.assets[0].uri);
-      } else {
-        setSelfieImage(result.assets[0].uri);
+      try {
+        // تحويل الصورة إلى WebP لتقليل الحجم وتحسين الأداء
+        const manipulatedImage = await ImageManipulator.manipulateAsync(
+          result.assets[0].uri,
+          [
+            // تقليل الحجم إذا كانت الصورة كبيرة (أقصى عرض 1200px)
+            { resize: { width: 1200 } },
+          ],
+          {
+            compress: 0.8, // ضغط بنسبة 80%
+            format: ImageManipulator.SaveFormat.WEBP, // تحويل إلى WebP
+          }
+        );
+        
+        if (type === 'idCard') {
+          setIdCardImage(manipulatedImage.uri);
+        } else {
+          setSelfieImage(manipulatedImage.uri);
+        }
+      } catch (error: any) {
+        console.warn('Image manipulation failed, using original:', error);
+        // إذا فشل التحويل، نستخدم الصورة الأصلية
+        if (type === 'idCard') {
+          setIdCardImage(result.assets[0].uri);
+        } else {
+          setSelfieImage(result.assets[0].uri);
+        }
       }
     }
   };
 
-  const uploadImage = async (uri: string, path: string): Promise<string> => {
+  const uploadImage = async (uri: string, type: 'idCard' | 'selfie'): Promise<string> => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('المستخدم غير موجود');
 
-    // رفع الصورة إلى Catbox
-    const fileName = `${user.id}_${path}_${Date.now()}`;
-    const imageUrl = await uploadImageToCatbox(uri, fileName);
-    
-    return imageUrl;
+    // تحديث حالة الرفع
+    setUploadProgress(prev => ({
+      ...prev,
+      [type]: { uploading: true, uploaded: false },
+    }));
+
+    try {
+      // رفع الصورة إلى ImgBB مع تحويل إلى WebP (أو AVIF إذا كان متاحاً)
+      // الصورة تم تحويلها بالفعل إلى WebP في pickImage
+      const imageUrl = await uploadImageToImgBB(uri, 'webp');
+      
+      // تحديث حالة النجاح
+      setUploadProgress(prev => ({
+        ...prev,
+        [type]: { uploading: false, uploaded: true },
+      }));
+      
+      return imageUrl;
+    } catch (error: any) {
+      // تحديث حالة الخطأ
+      setUploadProgress(prev => ({
+        ...prev,
+        [type]: { uploading: false, uploaded: false, error: error.message },
+      }));
+      throw error;
+    }
   };
 
   const handleComplete = async () => {
@@ -68,6 +188,10 @@ export default function CompleteDriverRegistration() {
       Alert.alert('خطأ', 'الرجاء إدخال الاسم الكامل ورقم التليفون');
       return;
     }
+
+    // التحقق من الصور - إذا كانت موجودة مسبقاً (URLs)، لا نحتاج لرفعها مرة أخرى
+    const hasIdCard = idCardImage && (idCardImage.startsWith('http') || idCardImage.startsWith('https'));
+    const hasSelfie = selfieImage && (selfieImage.startsWith('http') || selfieImage.startsWith('https'));
 
     if (!idCardImage || !selfieImage) {
       Alert.alert('خطأ', 'الرجاء رفع صورة البطاقة وصورة السيلفي');
@@ -82,15 +206,35 @@ export default function CompleteDriverRegistration() {
         throw new Error('المستخدم غير موجود');
       }
 
-      // رفع الصور
-      const [idCardUrl, selfieUrl] = await Promise.all([
-        uploadImage(idCardImage, 'id-card'),
-        uploadImage(selfieImage, 'selfie'),
-      ]);
+      // رفع الصور فقط إذا كانت جديدة (ليست URLs موجودة مسبقاً)
+      let idCardUrl = idCardImage;
+      let selfieUrl = selfieImage;
 
-      setUploading(false);
+      // إذا كانت الصور URLs موجودة مسبقاً، لا نحتاج لرفعها
+      const needsIdCardUpload = !idCardImage.startsWith('http') && !idCardImage.startsWith('https');
+      const needsSelfieUpload = !selfieImage.startsWith('http') && !selfieImage.startsWith('https');
 
-      // تحديث ملف المستخدم
+      if (needsIdCardUpload || needsSelfieUpload) {
+        setUploading(true);
+        
+        const uploadPromises = [];
+        if (needsIdCardUpload) {
+          uploadPromises.push(uploadImage(idCardImage, 'idCard').then(url => { idCardUrl = url; }));
+        }
+        if (needsSelfieUpload) {
+          uploadPromises.push(uploadImage(selfieImage, 'selfie').then(url => { selfieUrl = url; }));
+        }
+
+        await Promise.all(uploadPromises);
+        setUploading(false);
+        
+        // رسالة نجاح بعد رفع الصور (فقط إذا تم رفع صور جديدة)
+        if (uploadPromises.length > 0) {
+          Alert.alert('✅ نجح الرفع', 'تم رفع الصور بنجاح! جاري حفظ البيانات...');
+        }
+      }
+
+      // تحديث ملف المستخدم مع وضع حالة المراجعة
       const { error: profileError } = await supabase
         .from('profiles')
         .update({
@@ -98,14 +242,24 @@ export default function CompleteDriverRegistration() {
           phone: phone,
           id_card_image_url: idCardUrl,
           selfie_image_url: selfieUrl,
+          approval_status: 'pending', // في انتظار المراجعة
+          registration_complete: false, // لن يتم تفعيله حتى الموافقة
         })
         .eq('id', user.id);
 
       if (profileError) throw profileError;
 
-      Alert.alert('نجح', 'تم إكمال التسجيل بنجاح', [
-        { text: 'حسناً', onPress: () => router.replace('/(tabs)') },
-      ]);
+      // رسالة انتظار المراجعة
+      Alert.alert(
+        '⏳ في انتظار المراجعة',
+        'تم إرسال طلبك للمراجعة!\n\nسيقوم المدير بمراجعة بياناتك والمستندات المرفوعة.\nستتلقى إشعاراً عند الموافقة على طلبك.',
+        [
+          { 
+            text: 'حسناً', 
+            onPress: () => router.replace('/(tabs)/driver/dashboard') 
+          },
+        ]
+      );
     } catch (error: any) {
       setUploading(false);
       Alert.alert('خطأ', error.message || 'فشل إكمال التسجيل');
@@ -114,14 +268,46 @@ export default function CompleteDriverRegistration() {
     }
   };
 
+  if (loadingProfile) {
+    return (
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.container}
+      >
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#007AFF" />
+          <Text style={styles.loadingText}>جاري تحميل البيانات...</Text>
+        </View>
+      </KeyboardAvoidingView>
+    );
+  }
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
     >
+      {/* Header مع زر الرجوع */}
+      <View style={styles.header}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.backButton}
+        >
+          <Ionicons name="arrow-back" size={24} color="#1a1a1a" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>
+          {hasExistingData ? 'تحديث البيانات' : 'إكمال التسجيل'}
+        </Text>
+        <View style={styles.headerSpacer} />
+      </View>
+
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>إكمال التسجيل - سائق</Text>
-        <Text style={styles.subtitle}>أكمل بياناتك الشخصية</Text>
+        <Text style={styles.title}>
+          {hasExistingData ? 'تحديث بيانات السائق' : 'إكمال التسجيل - سائق'}
+        </Text>
+        <Text style={styles.subtitle}>
+          {hasExistingData ? 'قم بتحديث بياناتك الشخصية' : 'أكمل بياناتك الشخصية'}
+        </Text>
 
         <TextInput
           style={styles.input}
@@ -151,11 +337,36 @@ export default function CompleteDriverRegistration() {
               <View style={styles.imagePreview}>
                 <Image source={{ uri: idCardImage }} style={styles.image} />
                 <TouchableOpacity
-                  onPress={() => setIdCardImage(null)}
+                  onPress={() => {
+                    setIdCardImage(null);
+                    setUploadProgress(prev => ({
+                      ...prev,
+                      idCard: { uploading: false, uploaded: false },
+                    }));
+                  }}
                   style={styles.removeImageButton}
                 >
                   <Ionicons name="close-circle" size={24} color="#ff3b30" />
                 </TouchableOpacity>
+                {/* مؤشر حالة الرفع */}
+                {uploadProgress.idCard.uploading && (
+                  <View style={styles.uploadStatusOverlay}>
+                    <ActivityIndicator size="small" color="#fff" />
+                    <Text style={styles.uploadStatusText}>جاري الرفع...</Text>
+                  </View>
+                )}
+                {uploadProgress.idCard.uploaded && (
+                  <View style={[styles.uploadStatusOverlay, styles.uploadSuccess]}>
+                    <Ionicons name="checkmark-circle" size={32} color="#34C759" />
+                    <Text style={styles.uploadStatusText}>تم الرفع بنجاح ✓</Text>
+                  </View>
+                )}
+                {uploadProgress.idCard.error && (
+                  <View style={[styles.uploadStatusOverlay, styles.uploadError]}>
+                    <Ionicons name="alert-circle" size={32} color="#FF3B30" />
+                    <Text style={styles.uploadStatusText}>فشل الرفع</Text>
+                  </View>
+                )}
               </View>
             ) : (
               <TouchableOpacity
@@ -174,11 +385,36 @@ export default function CompleteDriverRegistration() {
               <View style={styles.imagePreview}>
                 <Image source={{ uri: selfieImage }} style={styles.image} />
                 <TouchableOpacity
-                  onPress={() => setSelfieImage(null)}
+                  onPress={() => {
+                    setSelfieImage(null);
+                    setUploadProgress(prev => ({
+                      ...prev,
+                      selfie: { uploading: false, uploaded: false },
+                    }));
+                  }}
                   style={styles.removeImageButton}
                 >
                   <Ionicons name="close-circle" size={24} color="#ff3b30" />
                 </TouchableOpacity>
+                {/* مؤشر حالة الرفع */}
+                {uploadProgress.selfie.uploading && (
+                  <View style={styles.uploadStatusOverlay}>
+                    <ActivityIndicator size="small" color="#fff" />
+                    <Text style={styles.uploadStatusText}>جاري الرفع...</Text>
+                  </View>
+                )}
+                {uploadProgress.selfie.uploaded && (
+                  <View style={[styles.uploadStatusOverlay, styles.uploadSuccess]}>
+                    <Ionicons name="checkmark-circle" size={32} color="#34C759" />
+                    <Text style={styles.uploadStatusText}>تم الرفع بنجاح ✓</Text>
+                  </View>
+                )}
+                {uploadProgress.selfie.error && (
+                  <View style={[styles.uploadStatusOverlay, styles.uploadError]}>
+                    <Ionicons name="alert-circle" size={32} color="#FF3B30" />
+                    <Text style={styles.uploadStatusText}>فشل الرفع</Text>
+                  </View>
+                )}
               </View>
             ) : (
               <TouchableOpacity
@@ -207,7 +443,9 @@ export default function CompleteDriverRegistration() {
           {loading ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.buttonText}>إكمال التسجيل</Text>
+            <Text style={styles.buttonText}>
+              {hasExistingData ? 'حفظ التغييرات' : 'إكمال التسجيل'}
+            </Text>
           )}
         </TouchableOpacity>
       </ScrollView>
@@ -220,9 +458,34 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
   },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'ios' ? 60 : 40,
+    paddingBottom: 16,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  backButton: {
+    padding: 8,
+    marginLeft: -8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+    flex: 1,
+    textAlign: 'center',
+  },
+  headerSpacer: {
+    width: 40,
+  },
   content: {
     padding: 20,
-    paddingTop: 60,
+    paddingTop: 20,
   },
   title: {
     fontSize: 28,
@@ -294,6 +557,30 @@ const styles = StyleSheet.create({
     right: 8,
     backgroundColor: 'rgba(255, 255, 255, 0.9)',
     borderRadius: 12,
+    zIndex: 10,
+  },
+  uploadStatusOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  uploadSuccess: {
+    backgroundColor: 'rgba(52, 199, 89, 0.9)',
+  },
+  uploadError: {
+    backgroundColor: 'rgba(255, 59, 48, 0.9)',
+  },
+  uploadStatusText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   uploadingContainer: {
     flexDirection: 'row',
@@ -320,6 +607,17 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: '600',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#666',
   },
 });
 

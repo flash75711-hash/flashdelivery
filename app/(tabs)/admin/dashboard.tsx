@@ -9,11 +9,13 @@ import {
   TextInput,
   TouchableOpacity,
   Alert,
+  Platform,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface DashboardStats {
   totalRevenue: number;
@@ -25,6 +27,7 @@ interface DashboardStats {
 export default function AdminDashboardScreen() {
   const { t } = useTranslation();
   const router = useRouter();
+  const { signOut } = useAuth();
   const [stats, setStats] = useState<DashboardStats>({
     totalRevenue: 0,
     totalTrips: 0,
@@ -35,6 +38,7 @@ export default function AdminDashboardScreen() {
   const [maxDeliveryDistance, setMaxDeliveryDistance] = useState<string>('3');
   const [editingDistance, setEditingDistance] = useState(false);
   const [savingDistance, setSavingDistance] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     loadStats();
@@ -130,6 +134,47 @@ export default function AdminDashboardScreen() {
       console.error('Error loading stats:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const confirmed = window.confirm('هل أنت متأكد من تسجيل الخروج؟');
+      if (confirmed) {
+        performLogout();
+      }
+    } else {
+      Alert.alert('تسجيل الخروج', 'هل أنت متأكد من تسجيل الخروج؟', [
+        { text: 'إلغاء', style: 'cancel' },
+        {
+          text: 'تسجيل الخروج',
+          style: 'destructive',
+          onPress: performLogout,
+        },
+      ]);
+    }
+  };
+
+  const performLogout = async () => {
+    try {
+      setLoggingOut(true);
+      await signOut();
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.location.href = '/login';
+      } else {
+        router.replace('/(auth)/login');
+      }
+    } catch (error: any) {
+      console.error('Error during logout:', error);
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.location.href = '/login';
+      } else {
+        router.replace('/(auth)/login');
+      }
+    } finally {
+      setLoggingOut(false);
     }
   };
 
@@ -274,6 +319,20 @@ export default function AdminDashboardScreen() {
               </View>
             )}
           </View>
+        </View>
+
+        {/* زر تسجيل الخروج */}
+        <View style={styles.logoutSection}>
+          <TouchableOpacity 
+            style={styles.logoutButton} 
+            onPress={handleLogout}
+            disabled={loggingOut}
+          >
+            <Ionicons name="log-out-outline" size={24} color="#FF3B30" />
+            <Text style={styles.logoutText}>
+              {t('auth.logout')}
+            </Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -486,6 +545,31 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'right',
     lineHeight: 20,
+  },
+  logoutSection: {
+    marginTop: 32,
+    marginBottom: 40,
+  },
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#FF3B30',
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  logoutText: {
+    color: '#FF3B30',
+    fontSize: 18,
+    fontWeight: '600',
   },
 });
 

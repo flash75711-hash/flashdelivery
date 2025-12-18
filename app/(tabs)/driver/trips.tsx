@@ -58,10 +58,12 @@ export default function DriverTripsScreen() {
 
   const loadNewOrders = async () => {
     try {
+      // جلب الطلبات الموجهة لهذا السائق (driver_id = user.id) أو الطلبات العامة (driver_id = null)
       const { data, error } = await supabase
         .from('orders')
         .select('*')
         .eq('status', 'pending')
+        .or(`driver_id.eq.${user?.id},driver_id.is.null`)
         .order('created_at', { ascending: false });
 
       if (error) throw error;

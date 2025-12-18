@@ -34,7 +34,7 @@
   },
   "customer": {
     "home": "الرئيسية",
-    "orderHistory": "سجل الطلبات",
+    "orderHistory": "الطلبات",
     "profile": "الملف الشخصي",
     "deliverPackage": "توصيل طرد",
     "outsideOrder": "طلبات من بره",
@@ -49,10 +49,10 @@
   },
   "driver": {
     "dashboard": "لوحة التحكم",
-    "newTrips": "الرحلات الجديدة",
+    "newTrips": "الرحلات",
     "map": "الخريطة",
     "wallet": "المحفظة",
-    "tripHistory": "سجل الرحلات",
+    "tripHistory": "السجل",
     "messages": "الرسائل",
     "activeTrip": "رحلة نشطة",
     "pickupReceived": "تم الاستلام",
@@ -62,18 +62,19 @@
     "deductions": "سجل الخصومات"
   },
   "vendor": {
-    "store": "المتجر/المكان",
-    "profile": "الصفحة الشخصية",
+    "store": "المتجر",
+    "profile": "الملف الشخصي",
     "storeDetails": "تفاصيل المتجر",
     "location": "الموقع الجغرافي",
     "workingHours": "ساعات العمل",
     "updateStore": "تحديث المتجر"
   },
   "admin": {
-    "dashboard": "لوحة القيادة",
-    "drivers": "إدارة السائقين",
-    "accounting": "المحاسبة/المدفوعات",
-    "allOrders": "سجل الطلبات الشامل",
+    "dashboard": "لوحة التحكم",
+    "drivers": "السائقين",
+    "accounting": "المحاسبة",
+    "allOrders": "الطلبات",
+    "places": "الأماكن",
     "totalRevenue": "إجمالي الإيرادات",
     "totalTrips": "إجمالي الرحلات",
     "totalCommissions": "إجمالي العمولات",
