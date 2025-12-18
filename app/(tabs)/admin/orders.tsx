@@ -6,9 +6,11 @@ import {
   SafeAreaView,
   FlatList,
   RefreshControl,
+  Platform,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '@/lib/supabase';
+import responsive from '@/utils/responsive';
 
 interface Order {
   id: string;
@@ -22,10 +24,109 @@ interface Order {
   delivery_address: string;
 }
 
+const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+    paddingBottom: tabBarBottomPadding,
+  },
+  header: {
+    backgroundColor: '#fff',
+    padding: responsive.getResponsivePadding(),
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  title: {
+    fontSize: responsive.getResponsiveFontSize(28),
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+    textAlign: 'right',
+  },
+  orderCard: {
+    backgroundColor: '#fff',
+    margin: responsive.getResponsivePadding(),
+    padding: responsive.getResponsivePadding(),
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  orderHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  orderId: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+    color: '#1a1a1a',
+  },
+  statusBadge: {
+    paddingHorizontal: responsive.isTablet() ? 16 : 12,
+    paddingVertical: responsive.isTablet() ? 8 : 6,
+    borderRadius: 12,
+  },
+  statusCompleted: {
+    backgroundColor: '#34C75920',
+  },
+  statusCancelled: {
+    backgroundColor: '#FF3B3020',
+  },
+  statusPending: {
+    backgroundColor: '#FF950020',
+  },
+  statusText: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    fontWeight: '600',
+    color: '#1a1a1a',
+  },
+  orderAddress: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#333',
+    marginBottom: 4,
+    textAlign: 'right',
+  },
+  orderFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  orderFee: {
+    fontSize: responsive.getResponsiveFontSize(18),
+    fontWeight: 'bold',
+    color: '#007AFF',
+  },
+  orderDate: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    color: '#999',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  emptyText: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    color: '#999',
+  },
+});
+
 export default function AdminOrdersScreen() {
   const { t } = useTranslation();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // Calculate tab bar padding for web
+  const tabBarBottomPadding = Platform.OS === 'web' ? responsive.getTabBarBottomPadding() : 0;
+  const styles = getStyles(tabBarBottomPadding);
 
   useEffect(() => {
     loadOrders();
@@ -131,98 +232,3 @@ export default function AdminOrdersScreen() {
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  header: {
-    backgroundColor: '#fff',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#1a1a1a',
-    textAlign: 'right',
-  },
-  orderCard: {
-    backgroundColor: '#fff',
-    margin: 16,
-    padding: 16,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  orderHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  orderId: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1a1a1a',
-  },
-  statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  statusCompleted: {
-    backgroundColor: '#34C75920',
-  },
-  statusCancelled: {
-    backgroundColor: '#FF3B3020',
-  },
-  statusPending: {
-    backgroundColor: '#FF950020',
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#1a1a1a',
-  },
-  orderAddress: {
-    fontSize: 14,
-    color: '#333',
-    marginBottom: 4,
-    textAlign: 'right',
-  },
-  orderFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-  },
-  orderFee: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#007AFF',
-  },
-  orderDate: {
-    fontSize: 12,
-    color: '#999',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 40,
-  },
-  emptyText: {
-    fontSize: 16,
-    color: '#999',
-  },
-});
-

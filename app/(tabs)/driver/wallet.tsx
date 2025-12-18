@@ -6,11 +6,13 @@ import {
   SafeAreaView,
   FlatList,
   RefreshControl,
+  Platform,
 } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
+import responsive from '@/utils/responsive';
 
 interface WalletTransaction {
   id: string;
@@ -27,6 +29,10 @@ export default function DriverWalletScreen() {
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const { t } = useTranslation();
+  
+  // Calculate tab bar padding for web
+  const tabBarBottomPadding = Platform.OS === 'web' ? responsive.getTabBarBottomPadding() : 0;
+  const styles = getStyles(tabBarBottomPadding);
 
   useEffect(() => {
     loadWalletData();
@@ -125,68 +131,84 @@ export default function DriverWalletScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    paddingBottom: tabBarBottomPadding,
   },
   header: {
     backgroundColor: '#fff',
-    padding: 20,
+    padding: responsive.getResponsivePadding(),
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
+    ...(responsive.isLargeScreen() && {
+      maxWidth: responsive.getMaxContentWidth(),
+      alignSelf: 'center',
+      width: '100%',
+    }),
   },
   title: {
-    fontSize: 28,
+    fontSize: responsive.getResponsiveFontSize(28),
     fontWeight: 'bold',
     color: '#1a1a1a',
     textAlign: 'right',
   },
   balanceCard: {
     backgroundColor: '#007AFF',
-    margin: 20,
-    padding: 24,
+    margin: responsive.getResponsivePadding(),
+    padding: responsive.isTablet() ? 32 : 24,
     borderRadius: 16,
     alignItems: 'center',
+    ...(responsive.isLargeScreen() && {
+      maxWidth: responsive.getMaxContentWidth() - (responsive.getResponsivePadding() * 2),
+      alignSelf: 'center',
+      width: '100%',
+    }),
   },
   balanceLabel: {
-    fontSize: 16,
+    fontSize: responsive.getResponsiveFontSize(16),
     color: '#fff',
     opacity: 0.9,
     marginBottom: 8,
   },
   balanceAmount: {
-    fontSize: 48,
+    fontSize: responsive.getResponsiveFontSize(48),
     fontWeight: 'bold',
     color: '#fff',
     marginBottom: 8,
   },
   commissionText: {
-    fontSize: 14,
+    fontSize: responsive.getResponsiveFontSize(14),
     color: '#fff',
     opacity: 0.8,
   },
   transactionsHeader: {
-    paddingHorizontal: 20,
+    paddingHorizontal: responsive.getResponsivePadding(),
     marginBottom: 12,
   },
   transactionsTitle: {
-    fontSize: 20,
+    fontSize: responsive.getResponsiveFontSize(20),
     fontWeight: '600',
     color: '#1a1a1a',
     textAlign: 'right',
   },
   transactionCard: {
     backgroundColor: '#fff',
-    marginHorizontal: 20,
+    marginHorizontal: responsive.getResponsivePadding(),
     marginBottom: 12,
-    padding: 16,
+    padding: responsive.isTablet() ? 20 : 16,
     borderRadius: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 2,
+    ...(responsive.isLargeScreen() && {
+      maxWidth: responsive.getMaxContentWidth() - (responsive.getResponsivePadding() * 2),
+      alignSelf: 'center',
+      width: '100%',
+    }),
   },
   transactionHeader: {
     flexDirection: 'row',

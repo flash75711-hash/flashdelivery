@@ -7,11 +7,13 @@ import {
   SafeAreaView,
   TouchableOpacity,
   RefreshControl,
+  Platform,
 } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { useTranslation } from 'react-i18next';
 import { useRouter } from 'expo-router';
+import responsive from '@/utils/responsive';
 
 interface Order {
   id: string;
@@ -28,6 +30,10 @@ export default function CustomerOrdersScreen() {
   const [loading, setLoading] = useState(true);
   const { t } = useTranslation();
   const router = useRouter();
+  
+  // Calculate tab bar padding for web
+  const tabBarBottomPadding = Platform.OS === 'web' ? responsive.getTabBarBottomPadding() : 0;
+  const styles = getStyles(tabBarBottomPadding);
 
   useEffect(() => {
     loadOrders();
@@ -143,33 +149,44 @@ export default function CustomerOrdersScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    paddingBottom: tabBarBottomPadding,
   },
   header: {
     backgroundColor: '#fff',
-    padding: 20,
+    padding: responsive.getResponsivePadding(),
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
+    ...(responsive.isLargeScreen() && {
+      maxWidth: responsive.getMaxContentWidth(),
+      alignSelf: 'center',
+      width: '100%',
+    }),
   },
   title: {
-    fontSize: 28,
+    fontSize: responsive.getResponsiveFontSize(28),
     fontWeight: 'bold',
     color: '#1a1a1a',
     textAlign: 'right',
   },
   orderCard: {
     backgroundColor: '#fff',
-    margin: 16,
-    padding: 16,
+    margin: responsive.getResponsivePadding(),
+    padding: responsive.isTablet() ? 20 : 16,
     borderRadius: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+    ...(responsive.isLargeScreen() && {
+      maxWidth: responsive.getMaxContentWidth() - (responsive.getResponsivePadding() * 2),
+      alignSelf: 'center',
+      width: '100%',
+    }),
   },
   orderHeader: {
     flexDirection: 'row',
@@ -177,22 +194,22 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   orderStatus: {
-    fontSize: 16,
+    fontSize: responsive.getResponsiveFontSize(16),
     fontWeight: '600',
     color: '#007AFF',
   },
   orderDate: {
-    fontSize: 14,
+    fontSize: responsive.getResponsiveFontSize(14),
     color: '#666',
   },
   orderAddress: {
-    fontSize: 14,
+    fontSize: responsive.getResponsiveFontSize(14),
     color: '#333',
     marginBottom: 4,
     textAlign: 'right',
   },
   orderFee: {
-    fontSize: 16,
+    fontSize: responsive.getResponsiveFontSize(16),
     fontWeight: '600',
     color: '#1a1a1a',
     marginTop: 8,
@@ -224,8 +241,10 @@ const styles = StyleSheet.create({
     padding: 40,
   },
   emptyText: {
-    fontSize: 16,
+    fontSize: responsive.getResponsiveFontSize(16),
     color: '#999',
   },
 });
+
+// This will be set in the component
 

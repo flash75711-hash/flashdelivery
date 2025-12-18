@@ -17,6 +17,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
+import responsive from '@/utils/responsive';
 
 interface Driver {
   id: string;
@@ -37,6 +38,10 @@ export default function AdminDriversScreen() {
   const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
   const [showDocumentsModal, setShowDocumentsModal] = useState(false);
   const [processingDriverId, setProcessingDriverId] = useState<string | null>(null);
+  
+  // Calculate tab bar padding for web
+  const tabBarBottomPadding = Platform.OS === 'web' ? responsive.getTabBarBottomPadding() : 0;
+  const styles = getStyles(tabBarBottomPadding);
 
   useEffect(() => {
     loadDrivers();
@@ -537,33 +542,44 @@ export default function AdminDriversScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    paddingBottom: tabBarBottomPadding,
   },
   header: {
     backgroundColor: '#fff',
-    padding: 20,
+    padding: responsive.getResponsivePadding(),
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
+    ...(responsive.isLargeScreen() && {
+      maxWidth: responsive.getMaxContentWidth(),
+      alignSelf: 'center',
+      width: '100%',
+    }),
   },
   title: {
-    fontSize: 28,
+    fontSize: responsive.getResponsiveFontSize(28),
     fontWeight: 'bold',
     color: '#1a1a1a',
     textAlign: 'right',
   },
   driverCard: {
     backgroundColor: '#fff',
-    margin: 16,
-    padding: 16,
+    margin: responsive.isTablet() ? 20 : 16,
+    padding: responsive.isTablet() ? 20 : 16,
     borderRadius: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+    ...(responsive.isLargeScreen() && {
+      maxWidth: responsive.getMaxContentWidth() - (responsive.getResponsivePadding() * 2),
+      alignSelf: 'center',
+      width: '100%',
+    }),
   },
   driverInfo: {
     marginBottom: 12,
@@ -768,4 +784,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
 });
+
+const styles = getStyles();
 

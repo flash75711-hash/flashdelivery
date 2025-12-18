@@ -18,6 +18,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase, isRegistrationComplete } from '@/lib/supabase';
 import CurrentLocationDisplay from '@/components/CurrentLocationDisplay';
 import { useRouter, useFocusEffect } from 'expo-router';
+import responsive from '@/utils/responsive';
 
 export default function DriverDashboardScreen() {
   console.log('DriverDashboard: Component rendered');
@@ -25,6 +26,11 @@ export default function DriverDashboardScreen() {
   const { user, signOut } = useAuth();
   const router = useRouter();
   console.log('DriverDashboard: User from auth:', user?.id);
+  
+  // Calculate tab bar padding for web
+  const tabBarBottomPadding = Platform.OS === 'web' ? responsive.getTabBarBottomPadding() : 0;
+  const styles = getStyles(tabBarBottomPadding);
+  
   const [isOnline, setIsOnline] = useState(false);
   const [loading, setLoading] = useState(true);
   const [toggling, setToggling] = useState(false);
@@ -707,26 +713,37 @@ export default function DriverDashboardScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    paddingBottom: tabBarBottomPadding,
   },
   header: {
     backgroundColor: '#fff',
-    padding: 20,
+    padding: responsive.getResponsivePadding(),
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
+    ...(responsive.isLargeScreen() && {
+      maxWidth: responsive.getMaxContentWidth(),
+      alignSelf: 'center',
+      width: '100%',
+    }),
   },
   title: {
-    fontSize: 28,
+    fontSize: responsive.getResponsiveFontSize(28),
     fontWeight: 'bold',
     color: '#1a1a1a',
     textAlign: 'right',
   },
   content: {
     flex: 1,
-    padding: 20,
+    padding: responsive.getResponsivePadding(),
+    ...(responsive.isLargeScreen() && {
+      maxWidth: responsive.getMaxContentWidth(),
+      alignSelf: 'center',
+      width: '100%',
+    }),
   },
   loadingContainer: {
     flex: 1,
@@ -1036,3 +1053,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+// This will be set in the component

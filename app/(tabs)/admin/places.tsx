@@ -19,6 +19,7 @@ import { getLocationWithAddress } from '@/lib/locationUtils';
 import { useAuth } from '@/contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+import responsive from '@/utils/responsive';
 
 // استيراد react-native-maps فقط على الموبايل
 let MapView: any = null;
@@ -46,8 +47,428 @@ interface Place {
   is_manual?: boolean;
 }
 
+const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+    paddingBottom: tabBarBottomPadding,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+    flex: 1,
+    textAlign: 'center',
+  },
+  addButton: {
+    padding: 4,
+  },
+  tabsContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    paddingHorizontal: responsive.isTablet() ? 12 : 8,
+    paddingVertical: responsive.isTablet() ? 12 : 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    ...(responsive.isLargeScreen() && {
+      maxWidth: responsive.getMaxContentWidth(),
+      alignSelf: 'center',
+      width: '100%',
+    }),
+  },
+  tab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: responsive.isTablet() ? 16 : 12,
+    paddingHorizontal: responsive.isTablet() ? 12 : 8,
+    borderRadius: 8,
+    gap: 6,
+  },
+  tabActive: {
+    backgroundColor: '#e3f2fd',
+  },
+  tabText: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#666',
+    fontWeight: '500',
+  },
+  tabTextActive: {
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: responsive.isTablet() ? 48 : 32,
+  },
+  emptyText: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    color: '#999',
+    marginTop: 16,
+    marginBottom: 24,
+  },
+  emptyButton: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: responsive.isTablet() ? 32 : 24,
+    paddingVertical: responsive.isTablet() ? 16 : 12,
+    borderRadius: 12,
+  },
+  emptyButtonText: {
+    color: '#fff',
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+  },
+  listContent: {
+    padding: responsive.getResponsivePadding(),
+    ...(responsive.isLargeScreen() && {
+      maxWidth: responsive.getMaxContentWidth(),
+      alignSelf: 'center',
+      width: '100%',
+    }),
+  },
+  placeCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    padding: responsive.isTablet() ? 20 : 16,
+    marginBottom: responsive.isTablet() ? 16 : 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    ...(responsive.isLargeScreen() && {
+      maxWidth: responsive.getMaxContentWidth() - (responsive.getResponsivePadding() * 2),
+      alignSelf: 'center',
+      width: '100%',
+    }),
+  },
+  placeCardManual: {
+    backgroundColor: '#FFF9E6',
+    borderColor: '#FFE082',
+    borderWidth: 1.5,
+  },
+  placeNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    marginBottom: 4,
+    gap: 8,
+  },
+  manualBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFF3CD',
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    borderRadius: 8,
+    minWidth: 24,
+    minHeight: 24,
+  },
+  placeInfo: {
+    flex: 1,
+  },
+  placeName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 4,
+    textAlign: 'right',
+  },
+  placeAddress: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+    textAlign: 'right',
+  },
+  placeCoordinates: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'right',
+  },
+  placeActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginLeft: 12,
+  },
+  actionButton: {
+    padding: 8,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '90%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+  },
+  modalBody: {
+    padding: 20,
+    maxHeight: 500,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 8,
+    marginTop: 16,
+    textAlign: 'right',
+  },
+  input: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    textAlign: 'right',
+  },
+  textArea: {
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  typeButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 8,
+  },
+  typeButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    alignItems: 'center',
+  },
+  typeButtonActive: {
+    borderColor: '#007AFF',
+    backgroundColor: '#e3f2fd',
+  },
+  typeButtonText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '600',
+  },
+  typeButtonTextActive: {
+    color: '#007AFF',
+  },
+  coordinatesRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  coordinateInput: {
+    flex: 1,
+  },
+  coordinateLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 4,
+    textAlign: 'right',
+  },
+  locationButtonsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+  },
+  locationButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#e3f2fd',
+    padding: 12,
+    borderRadius: 12,
+    gap: 8,
+  },
+  locationButtonHalf: {
+    flex: 1,
+  },
+  mapButton: {
+    backgroundColor: '#e8f5e9',
+  },
+  locationButtonText: {
+    color: '#007AFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  mapModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  mapModalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    height: '90%',
+  },
+  mapModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  mapModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+  },
+  mapContainer: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  mapWebView: {
+    flex: 1,
+    width: '100%',
+    position: 'relative' as any,
+  },
+  webMapInstructions: {
+    position: 'absolute' as any,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  webMapInstructionsText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center' as any,
+    marginBottom: 12,
+  },
+  webMapLinkButton: {
+    flexDirection: 'row' as any,
+    alignItems: 'center' as any,
+    justifyContent: 'center' as any,
+    backgroundColor: '#e3f2fd',
+    padding: 12,
+    borderRadius: 12,
+    gap: 8,
+  },
+  webMapLinkText: {
+    color: '#007AFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  mapNative: {
+    flex: 1,
+    width: '100%',
+  },
+  mapPlaceholder: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+  },
+  mapPlaceholderText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#999',
+    textAlign: 'center',
+  },
+  mapCoordinatesDisplay: {
+    padding: 16,
+    backgroundColor: '#f5f5f5',
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  mapCoordinatesText: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+    textAlign: 'right',
+  },
+  mapAddressText: {
+    fontSize: 15,
+    color: '#1a1a1a',
+    marginBottom: 12,
+    textAlign: 'right',
+    fontWeight: '500',
+    lineHeight: 20,
+  },
+  mapModalFooter: {
+    flexDirection: 'row',
+    gap: 12,
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  modalFooter: {
+    flexDirection: 'row',
+    gap: 12,
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  cancelButton: {
+    backgroundColor: '#f5f5f5',
+  },
+  cancelButtonText: {
+    color: '#666',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  saveButton: {
+    backgroundColor: '#007AFF',
+  },
+  saveButtonText: {
+    color: '#fff',
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+  },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+});
+
 export default function AdminPlacesScreen() {
   const router = useRouter();
+  
+  // Calculate tab bar padding for web
+  const tabBarBottomPadding = Platform.OS === 'web' ? responsive.getTabBarBottomPadding() : 0;
+  const styles = getStyles(tabBarBottomPadding);
   const { user } = useAuth();
   const [places, setPlaces] = useState<Place[]>([]);
   const [loading, setLoading] = useState(true);
@@ -864,404 +1285,3 @@ export default function AdminPlacesScreen() {
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#fff',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1a1a1a',
-    flex: 1,
-    textAlign: 'center',
-  },
-  addButton: {
-    padding: 4,
-  },
-  tabsContainer: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  tab: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-    gap: 6,
-  },
-  tabActive: {
-    backgroundColor: '#e3f2fd',
-  },
-  tabText: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
-  },
-  tabTextActive: {
-    color: '#007AFF',
-    fontWeight: '600',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
-  },
-  emptyText: {
-    fontSize: 16,
-    color: '#999',
-    marginTop: 16,
-    marginBottom: 24,
-  },
-  emptyButton: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 12,
-  },
-  emptyButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  listContent: {
-    padding: 16,
-  },
-  placeCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    padding: 16,
-    marginBottom: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  placeCardManual: {
-    backgroundColor: '#FFF9E6',
-    borderColor: '#FFE082',
-    borderWidth: 1.5,
-  },
-  placeNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    marginBottom: 4,
-    gap: 8,
-  },
-  manualBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFF3CD',
-    paddingHorizontal: 6,
-    paddingVertical: 4,
-    borderRadius: 8,
-    minWidth: 24,
-    minHeight: 24,
-  },
-  placeInfo: {
-    flex: 1,
-  },
-  placeName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1a1a1a',
-    marginBottom: 4,
-    textAlign: 'right',
-  },
-  placeAddress: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 4,
-    textAlign: 'right',
-  },
-  placeCoordinates: {
-    fontSize: 12,
-    color: '#999',
-    textAlign: 'right',
-  },
-  placeActions: {
-    flexDirection: 'row',
-    gap: 12,
-    marginLeft: 12,
-  },
-  actionButton: {
-    padding: 8,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '90%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1a1a1a',
-  },
-  modalBody: {
-    padding: 20,
-    maxHeight: 500,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1a1a1a',
-    marginBottom: 8,
-    marginTop: 16,
-    textAlign: 'right',
-  },
-  input: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    textAlign: 'right',
-  },
-  textArea: {
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  typeButtons: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 8,
-  },
-  typeButton: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#e0e0e0',
-    alignItems: 'center',
-  },
-  typeButtonActive: {
-    borderColor: '#007AFF',
-    backgroundColor: '#e3f2fd',
-  },
-  typeButtonText: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '600',
-  },
-  typeButtonTextActive: {
-    color: '#007AFF',
-  },
-  coordinatesRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  coordinateInput: {
-    flex: 1,
-  },
-  coordinateLabel: {
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 4,
-    textAlign: 'right',
-  },
-  locationButtonsRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 8,
-  },
-  locationButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#e3f2fd',
-    padding: 12,
-    borderRadius: 12,
-    gap: 8,
-  },
-  locationButtonHalf: {
-    flex: 1,
-  },
-  mapButton: {
-    backgroundColor: '#e8f5e9',
-  },
-  locationButtonText: {
-    color: '#007AFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  mapModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  mapModalContent: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    height: '90%',
-  },
-  mapModalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  mapModalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1a1a1a',
-  },
-  mapContainer: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  mapWebView: {
-    flex: 1,
-    width: '100%',
-    position: 'relative' as any,
-  },
-  webMapInstructions: {
-    position: 'absolute' as any,
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-  },
-  webMapInstructionsText: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center' as any,
-    marginBottom: 12,
-  },
-  webMapLinkButton: {
-    flexDirection: 'row' as any,
-    alignItems: 'center' as any,
-    justifyContent: 'center' as any,
-    backgroundColor: '#e3f2fd',
-    padding: 12,
-    borderRadius: 12,
-    gap: 8,
-  },
-  webMapLinkText: {
-    color: '#007AFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  mapNative: {
-    flex: 1,
-    width: '100%',
-  },
-  mapPlaceholder: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-  },
-  mapPlaceholderText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#999',
-    textAlign: 'center',
-  },
-  mapCoordinatesDisplay: {
-    padding: 16,
-    backgroundColor: '#f5f5f5',
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-  },
-  mapCoordinatesText: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 4,
-    textAlign: 'right',
-  },
-  mapAddressText: {
-    fontSize: 15,
-    color: '#1a1a1a',
-    marginBottom: 12,
-    textAlign: 'right',
-    fontWeight: '500',
-    lineHeight: 20,
-  },
-  mapModalFooter: {
-    flexDirection: 'row',
-    gap: 12,
-    padding: 20,
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-  },
-  modalFooter: {
-    flexDirection: 'row',
-    gap: 12,
-    padding: 20,
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-  },
-  modalButton: {
-    flex: 1,
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  cancelButton: {
-    backgroundColor: '#f5f5f5',
-  },
-  cancelButtonText: {
-    color: '#666',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  saveButton: {
-    backgroundColor: '#007AFF',
-  },
-  saveButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-});
-

@@ -7,6 +7,7 @@ import i18n from '@/i18n';
 import { I18nManager, Platform } from 'react-native';
 import * as Linking from 'expo-linking';
 import { supabase } from '@/lib/supabase';
+import responsive from '@/utils/responsive';
 
 // تفعيل RTL
 if (Platform.OS !== 'web') {
@@ -53,6 +54,40 @@ function DeepLinkHandler() {
 }
 
 export default function RootLayout() {
+  // إضافة CSS عام للتصميم المتجاوب على الويب
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const styleId = 'responsive-global-styles';
+      if (!document.getElementById(styleId)) {
+        const style = document.createElement('style');
+        style.id = styleId;
+        style.textContent = `
+          /* Responsive container for large screens */
+          @media (min-width: 1024px) {
+            body {
+              max-width: ${responsive.getMaxContentWidth()}px;
+              margin: 0 auto;
+            }
+          }
+          
+          /* Responsive text */
+          @media (max-width: 480px) {
+            body {
+              font-size: 14px;
+            }
+          }
+          
+          @media (min-width: 1024px) {
+            body {
+              font-size: 16px;
+            }
+          }
+        `;
+        document.head.appendChild(style);
+      }
+    }
+  }, []);
+
   return (
     <I18nextProvider i18n={i18n}>
       <AuthProvider>

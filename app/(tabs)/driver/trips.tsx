@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Alert,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -14,6 +15,7 @@ import { useTranslation } from 'react-i18next';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+import responsive from '@/utils/responsive';
 
 interface Order {
   id: string;
@@ -32,6 +34,10 @@ export default function DriverTripsScreen() {
   const [loading, setLoading] = useState(false);
   const { t } = useTranslation();
   const router = useRouter();
+  
+  // Calculate tab bar padding for web
+  const tabBarBottomPadding = Platform.OS === 'web' ? responsive.getTabBarBottomPadding() : 0;
+  const styles = getStyles(tabBarBottomPadding);
 
   useEffect(() => {
     loadNewOrders();
@@ -261,37 +267,53 @@ export default function DriverTripsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    paddingBottom: tabBarBottomPadding,
   },
   header: {
     backgroundColor: '#fff',
-    padding: 20,
+    padding: responsive.getResponsivePadding(),
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
+    ...(responsive.isLargeScreen() && {
+      maxWidth: responsive.getMaxContentWidth(),
+      alignSelf: 'center',
+      width: '100%',
+    }),
   },
   title: {
-    fontSize: 28,
+    fontSize: responsive.getResponsiveFontSize(28),
     fontWeight: 'bold',
     color: '#1a1a1a',
     textAlign: 'right',
   },
   content: {
     flex: 1,
-    padding: 20,
+    padding: responsive.getResponsivePadding(),
+    ...(responsive.isLargeScreen() && {
+      maxWidth: responsive.getMaxContentWidth(),
+      alignSelf: 'center',
+      width: '100%',
+    }),
   },
   orderCard: {
     backgroundColor: '#fff',
     borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
+    padding: responsive.isTablet() ? 24 : 20,
+    marginBottom: responsive.isTablet() ? 20 : 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 8,
     elevation: 4,
+    ...(responsive.isLargeScreen() && {
+      maxWidth: responsive.getMaxContentWidth() - (responsive.getResponsivePadding() * 2),
+      alignSelf: 'center',
+      width: '100%',
+    }),
   },
   orderHeader: {
     flexDirection: 'row',
@@ -332,54 +354,64 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   emptyText: {
-    fontSize: 18,
+    fontSize: responsive.getResponsiveFontSize(18),
     color: '#999',
     marginTop: 16,
   },
   activeTripContainer: {
     flex: 1,
-    padding: 20,
+    padding: responsive.getResponsivePadding(),
+    ...(responsive.isLargeScreen() && {
+      maxWidth: responsive.getMaxContentWidth(),
+      alignSelf: 'center',
+      width: '100%',
+    }),
   },
   tripCard: {
     backgroundColor: '#fff',
     borderRadius: 16,
-    padding: 24,
-    marginBottom: 24,
+    padding: responsive.isTablet() ? 32 : 24,
+    marginBottom: responsive.isTablet() ? 32 : 24,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 8,
     elevation: 4,
+    ...(responsive.isLargeScreen() && {
+      maxWidth: responsive.getMaxContentWidth() - (responsive.getResponsivePadding() * 2),
+      alignSelf: 'center',
+      width: '100%',
+    }),
   },
   tripTitle: {
-    fontSize: 20,
+    fontSize: responsive.getResponsiveFontSize(20),
     fontWeight: 'bold',
     color: '#1a1a1a',
     marginBottom: 16,
     textAlign: 'right',
   },
   tripAddress: {
-    fontSize: 16,
+    fontSize: responsive.getResponsiveFontSize(16),
     color: '#333',
     marginBottom: 12,
     textAlign: 'right',
   },
   tripFee: {
-    fontSize: 18,
+    fontSize: responsive.getResponsiveFontSize(18),
     fontWeight: 'bold',
     color: '#007AFF',
     marginTop: 8,
     textAlign: 'right',
   },
   actionsContainer: {
-    gap: 16,
+    gap: responsive.isTablet() ? 20 : 16,
   },
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 12,
-    padding: 16,
+    padding: responsive.isTablet() ? 20 : 16,
     gap: 8,
   },
   pickupButton: {
@@ -390,7 +422,7 @@ const styles = StyleSheet.create({
   },
   actionButtonText: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: responsive.getResponsiveFontSize(18),
     fontWeight: '600',
   },
 });

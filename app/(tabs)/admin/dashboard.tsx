@@ -16,6 +16,7 @@ import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/contexts/AuthContext';
+import responsive from '@/utils/responsive';
 
 interface DashboardStats {
   totalRevenue: number;
@@ -28,6 +29,10 @@ export default function AdminDashboardScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const { signOut } = useAuth();
+  
+  // Calculate tab bar padding for web
+  const tabBarBottomPadding = Platform.OS === 'web' ? responsive.getTabBarBottomPadding() : 0;
+  const styles = getStyles(tabBarBottomPadding);
   const [stats, setStats] = useState<DashboardStats>({
     totalRevenue: 0,
     totalTrips: 0,
@@ -339,10 +344,11 @@ export default function AdminDashboardScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    paddingBottom: tabBarBottomPadding,
   },
   header: {
     backgroundColor: '#fff',
@@ -568,7 +574,7 @@ const styles = StyleSheet.create({
   },
   logoutText: {
     color: '#FF3B30',
-    fontSize: 18,
+    fontSize: responsive.getResponsiveFontSize(18),
     fontWeight: '600',
   },
 });

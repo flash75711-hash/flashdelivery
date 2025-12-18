@@ -20,6 +20,7 @@ import { supabase, reverseGeocode } from '@/lib/supabase';
 import { getLocationWithAddress } from '@/lib/locationUtils';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import responsive from '@/utils/responsive';
 
 interface Address {
   id?: string;
@@ -34,6 +35,10 @@ export default function CustomerProfileScreen() {
   const { user, signOut, loadUser } = useAuth();
   const { t } = useTranslation();
   const router = useRouter();
+  
+  // Calculate tab bar padding for web
+  const tabBarBottomPadding = Platform.OS === 'web' ? responsive.getTabBarBottomPadding() : 0;
+  const styles = getStyles(tabBarBottomPadding);
   
   const [fullName, setFullName] = useState('');
   const [addresses, setAddresses] = useState<Address[]>([]);
@@ -572,29 +577,40 @@ export default function CustomerProfileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    paddingBottom: tabBarBottomPadding,
   },
   flex: {
     flex: 1,
   },
   header: {
     backgroundColor: '#fff',
-    padding: 20,
+    padding: responsive.getResponsivePadding(),
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
+    ...(responsive.isLargeScreen() && {
+      maxWidth: responsive.getMaxContentWidth(),
+      alignSelf: 'center',
+      width: '100%',
+    }),
   },
   title: {
-    fontSize: 28,
+    fontSize: responsive.getResponsiveFontSize(28),
     fontWeight: 'bold',
     color: '#1a1a1a',
     textAlign: 'right',
   },
   content: {
     flex: 1,
-    padding: 20,
+    padding: responsive.getResponsivePadding(),
+    ...(responsive.isLargeScreen() && {
+      maxWidth: responsive.getMaxContentWidth(),
+      alignSelf: 'center',
+      width: '100%',
+    }),
   },
   loadingContainer: {
     flex: 1,
@@ -628,7 +644,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   name: {
-    fontSize: 24,
+    fontSize: responsive.getResponsiveFontSize(24),
     fontWeight: 'bold',
     color: '#1a1a1a',
     marginBottom: 8,
@@ -644,8 +660,8 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
     borderRadius: 8,
-    padding: 12,
-    fontSize: 20,
+    padding: responsive.isTablet() ? 16 : 12,
+    fontSize: responsive.getResponsiveFontSize(20),
     fontWeight: 'bold',
     textAlign: 'center',
     maxWidth: 250,
@@ -661,20 +677,20 @@ const styles = StyleSheet.create({
   },
   editNameText: {
     color: '#007AFF',
-    fontSize: 14,
+    fontSize: responsive.getResponsiveFontSize(14),
   },
   email: {
-    fontSize: 16,
+    fontSize: responsive.getResponsiveFontSize(16),
     color: '#666',
     marginBottom: 4,
   },
   role: {
-    fontSize: 14,
+    fontSize: responsive.getResponsiveFontSize(14),
     color: '#007AFF',
     fontWeight: '600',
   },
   section: {
-    marginBottom: 20,
+    marginBottom: responsive.getResponsivePadding(),
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -787,16 +803,16 @@ const styles = StyleSheet.create({
   saveButton: {
     backgroundColor: '#007AFF',
     borderRadius: 12,
-    padding: 16,
+    padding: responsive.isTablet() ? 20 : 16,
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: responsive.getTabBarBottomPadding() + 20,
   },
   buttonDisabled: {
     opacity: 0.6,
   },
   saveButtonText: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: responsive.getResponsiveFontSize(18),
     fontWeight: '600',
   },
   menuItem: {
@@ -808,7 +824,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   menuText: {
-    fontSize: 16,
+    fontSize: responsive.getResponsiveFontSize(16),
     marginLeft: 12,
     color: '#1a1a1a',
   },

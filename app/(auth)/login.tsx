@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '@/lib/supabase';
+import responsive from '@/utils/responsive';
 
 export default function LoginScreen() {
   // رقم هاتف افتراضي للاختبار
@@ -28,6 +29,9 @@ export default function LoginScreen() {
   const router = useRouter();
   const { t } = useTranslation();
   const { user, loading: authLoading, loadUser } = useAuth();
+  
+  // Responsive styles
+  const styles = getStyles();
 
   // إذا كان المستخدم مسجل دخول بالفعل، نعيد التوجيه
   useEffect(() => {
@@ -315,7 +319,7 @@ export default function LoginScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = () => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
@@ -323,17 +327,22 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     justifyContent: 'center',
-    padding: 20,
+    padding: responsive.getResponsivePadding(),
+    ...(responsive.isLargeScreen() && {
+      maxWidth: 500,
+      alignSelf: 'center',
+      width: '100%',
+    }),
   },
   title: {
-    fontSize: 32,
+    fontSize: responsive.getResponsiveFontSize(32),
     fontWeight: 'bold',
     textAlign: 'center',
     marginBottom: 10,
     color: '#1a1a1a',
   },
   subtitle: {
-    fontSize: 18,
+    fontSize: responsive.getResponsiveFontSize(18),
     textAlign: 'center',
     marginBottom: 40,
     color: '#666',
@@ -341,14 +350,14 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: '#f5f5f5',
     borderRadius: 12,
-    padding: 16,
+    padding: responsive.isTablet() ? 18 : 16,
     marginBottom: 16,
-    fontSize: 16,
+    fontSize: responsive.getResponsiveFontSize(16),
   },
   button: {
     backgroundColor: '#007AFF',
     borderRadius: 12,
-    padding: 16,
+    padding: responsive.isTablet() ? 18 : 16,
     alignItems: 'center',
     marginTop: 8,
   },
@@ -357,7 +366,7 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: responsive.getResponsiveFontSize(18),
     fontWeight: '600',
   },
   linkButton: {
@@ -366,7 +375,7 @@ const styles = StyleSheet.create({
   },
   linkText: {
     color: '#007AFF',
-    fontSize: 16,
+    fontSize: responsive.getResponsiveFontSize(16),
   },
   resendButton: {
     alignSelf: 'center',
@@ -374,7 +383,7 @@ const styles = StyleSheet.create({
   },
   resendText: {
     color: '#007AFF',
-    fontSize: 14,
+    fontSize: responsive.getResponsiveFontSize(14),
   },
   resendTextDisabled: {
     color: '#999',
