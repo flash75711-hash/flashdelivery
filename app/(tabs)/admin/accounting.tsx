@@ -26,6 +26,10 @@ export default function AdminAccountingScreen() {
   const { t } = useTranslation();
   const [payments, setPayments] = useState<DriverPayment[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // Calculate tab bar padding for web
+  const tabBarBottomPadding = Platform.OS === 'web' ? responsive.getTabBarBottomPadding() : 0;
+  const styles = getStyles(tabBarBottomPadding);
 
   useEffect(() => {
     loadPayments();
