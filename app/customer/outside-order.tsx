@@ -496,6 +496,26 @@ export default function OutsideOrderScreen() {
       const findDriversInRadius = async (radius: number) => {
         console.log(`🔍 البحث عن سائقين في نطاق ${radius} كم من النقطة:`, searchPoint);
         
+        // أولاً: التحقق من جميع السائقين (للتشخيص)
+        const { data: allDriversCheck, error: checkError } = await supabase
+          .from('profiles')
+          .select('id, status, approval_status, role')
+          .eq('role', 'driver');
+        
+        if (checkError) {
+          console.error('❌ خطأ في جلب جميع السائقين:', checkError);
+        } else {
+          console.log(`📊 إجمالي السائقين في قاعدة البيانات: ${allDriversCheck?.length || 0}`);
+          if (allDriversCheck && allDriversCheck.length > 0) {
+            const statusCounts = allDriversCheck.reduce((acc: any, d: any) => {
+              const key = `${d.status || 'null'}_${d.approval_status || 'null'}`;
+              acc[key] = (acc[key] || 0) + 1;
+              return acc;
+            }, {});
+            console.log('📊 توزيع حالات السائقين:', statusCounts);
+          }
+        }
+        
         const { data: allDrivers, error: driversError } = await supabase
           .from('profiles')
           .select('id')
@@ -510,6 +530,10 @@ export default function OutsideOrderScreen() {
 
         if (!allDrivers || allDrivers.length === 0) {
           console.log('⚠️ لا يوجد سائقين نشطين وموافق عليهم');
+          console.log('💡 تأكد من:');
+          console.log('   1. وجود سائقين في قاعدة البيانات');
+          console.log('   2. أن status = "active"');
+          console.log('   3. أن approval_status = "approved"');
           return [];
         }
 
