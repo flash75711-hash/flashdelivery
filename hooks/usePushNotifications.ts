@@ -111,6 +111,12 @@ export function usePushNotifications() {
 }
 
 async function registerForPushNotificationsAsync(): Promise<string | null> {
+  // Push Notifications لا تعمل على الويب - فقط على الأجهزة الحقيقية
+  if (Platform.OS === 'web') {
+    console.log('ℹ️ Push Notifications are not supported on web platform');
+    return null;
+  }
+
   let token: string | null = null;
 
   if (Platform.OS === 'android') {
