@@ -456,7 +456,12 @@ export default function DeliverPackageScreen() {
       };
 
       const notifyDrivers = async (drivers: { driver_id: string }[], radius: number) => {
-        if (drivers.length === 0) return;
+        if (drivers.length === 0) {
+          console.log('⚠️ لا يوجد سائقين لإرسال إشعارات لهم');
+          return;
+        }
+
+        console.log(`📧 إرسال إشعارات لـ ${drivers.length} سائق`);
 
         const notifications = drivers.map(driver => ({
           user_id: driver.driver_id,
@@ -465,7 +470,13 @@ export default function DeliverPackageScreen() {
           type: 'info' as const,
         }));
 
-        await supabase.from('notifications').insert(notifications);
+        const { data, error } = await supabase.from('notifications').insert(notifications).select();
+
+        if (error) {
+          console.error('❌ خطأ في إرسال الإشعارات:', error);
+        } else {
+          console.log(`✅ تم إرسال ${data?.length || 0} إشعار بنجاح`);
+        }
       };
 
       const checkOrderAccepted = async () => {
