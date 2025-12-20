@@ -51,7 +51,30 @@ export default function CustomerProfileScreen() {
 
   // جلب بيانات المستخدم والعناوين
   useEffect(() => {
-    loadProfileData();
+    if (user) {
+      loadProfileData();
+      
+      // الاشتراك في Realtime لتحديث بيانات المستخدم تلقائياً
+      const profileChannel = supabase
+        .channel(`customer_profile_${user.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'profiles',
+            filter: `id=eq.${user.id}`,
+          },
+          () => {
+            loadProfileData();
+          }
+        )
+        .subscribe();
+      
+      return () => {
+        profileChannel.unsubscribe();
+      };
+    }
   }, [user]);
 
   const loadProfileData = async () => {

@@ -34,7 +34,30 @@ export default function DriverHistoryScreen() {
   const styles = getStyles(tabBarBottomPadding);
 
   useEffect(() => {
-    loadTrips();
+    if (user) {
+      loadTrips();
+      
+      // الاشتراك في Realtime لتحديث الطلبات تلقائياً
+      const tripsChannel = supabase
+        .channel(`driver_trips_${user.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'orders',
+            filter: `driver_id=eq.${user.id}`,
+          },
+          () => {
+            loadTrips();
+          }
+        )
+        .subscribe();
+      
+      return () => {
+        tripsChannel.unsubscribe();
+      };
+    }
   }, [user]);
 
   const loadTrips = async () => {
@@ -103,3 +126,82 @@ export default function DriverHistoryScreen() {
     </SafeAreaView>
   );
 }
+
+const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+    paddingBottom: tabBarBottomPadding,
+  },
+  header: {
+    backgroundColor: '#fff',
+    padding: responsive.getResponsivePadding(),
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    ...(responsive.isLargeScreen() && {
+      maxWidth: responsive.getMaxContentWidth(),
+      alignSelf: 'center',
+      width: '100%',
+    }),
+  },
+  title: {
+    fontSize: responsive.getResponsiveFontSize(28),
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+    textAlign: 'right',
+  },
+  tripCard: {
+    backgroundColor: '#fff',
+    margin: responsive.isTablet() ? 20 : 16,
+    padding: responsive.isTablet() ? 20 : 16,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    ...(responsive.isLargeScreen() && {
+      maxWidth: responsive.getMaxContentWidth() - (responsive.getResponsivePadding() * 2),
+      alignSelf: 'center',
+      width: '100%',
+    }),
+  },
+  tripHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  tripStatus: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+    color: '#34C759',
+  },
+  tripFee: {
+    fontSize: responsive.getResponsiveFontSize(18),
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+  },
+  tripAddress: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#666',
+    marginBottom: 8,
+    textAlign: 'right',
+  },
+  tripDate: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    color: '#999',
+    marginTop: 8,
+    textAlign: 'right',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#999',
+  },
+});

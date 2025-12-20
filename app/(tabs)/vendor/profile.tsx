@@ -34,7 +34,30 @@ export default function VendorProfileScreen() {
   const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
-    loadProfile();
+    if (user) {
+      loadProfile();
+      
+      // الاشتراك في Realtime لتحديث بيانات المستخدم تلقائياً
+      const profileChannel = supabase
+        .channel(`vendor_profile_${user.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'profiles',
+            filter: `id=eq.${user.id}`,
+          },
+          () => {
+            loadProfile();
+          }
+        )
+        .subscribe();
+      
+      return () => {
+        profileChannel.unsubscribe();
+      };
+    }
   }, [user]);
 
   const loadProfile = async () => {

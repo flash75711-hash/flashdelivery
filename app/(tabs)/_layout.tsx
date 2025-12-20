@@ -61,7 +61,7 @@ export default function TabsLayout() {
             child.style.margin = '0';
             child.style.padding = '0';
             child.setAttribute('data-hidden', 'true');
-          }
+        }
         });
         
         const tabs = Array.from(tabList.querySelectorAll('[role="tab"]')) as HTMLElement[];
@@ -156,8 +156,8 @@ export default function TabsLayout() {
               parent.style.flex = '0 1 auto';
               parent.style.opacity = '';
               parent.removeAttribute('data-hidden');
-            }
-            
+              }
+              
             visibleTabs.push(tab);
           }
         });
@@ -169,9 +169,9 @@ export default function TabsLayout() {
           // Force browser to recalculate layout
           void tabList.offsetHeight;
           console.log(`[TabBar] Visible tabs: ${visibleTabs.length}, Hidden tabs: ${tabs.length - visibleTabs.length}, Empty divs: ${allChildren.filter(c => !c.querySelector('[role="tab"]')).length}`);
-        }
+              }
       };
-      
+            
       // Run immediately and on mutations
       const runUpdate = () => {
         setTimeout(updateTabVisibility, 100);
@@ -204,9 +204,9 @@ export default function TabsLayout() {
                   icons.forEach((icon) => {
                     (icon as HTMLElement).style.display = 'none';
                   });
-                }
-              }
-            });
+            }
+          }
+        });
             updateTabVisibility();
           }
         }, 100);

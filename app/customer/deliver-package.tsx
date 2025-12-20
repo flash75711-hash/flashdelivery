@@ -12,12 +12,15 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase, reverseGeocode } from '@/lib/supabase';
-import { getLocationWithAddress } from '@/lib/locationUtils';
+import { supabase } from '@/lib/supabase';
+import { calculateDistance, getLocationWithAddress } from '@/lib/locationUtils';
+import { geocodeAddress } from '@/lib/supabase';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import * as Linking from 'expo-linking';
+import { createNotification, notifyAllActiveDrivers } from '@/lib/notifications';
+import { calculateDeliveryPrice } from '@/lib/priceCalculation';
 
 interface DeliveryPoint {
   id: string;
@@ -163,11 +166,75 @@ export default function DeliverPackageScreen() {
 
     setLoading(true);
     try {
-      // حساب الأجرة التقديرية (يمكن تحسينها لاحقاً)
-      // في الوضع المتعدد، نضيف 20 ج.م لكل نقطة إضافية
-      const baseFee = 50;
-      const additionalFee = deliveryMode === 'multi' ? (deliveryPoints.length - 2) * 20 : 0;
-      const estimatedFee = baseFee + additionalFee;
+      // حساب الأجرة بناءً على المسافة الفعلية (نفس النظام المستخدم في "طلب من خارج")
+      // النظام: أول طلب في 3 كم = 25 ج.م، كل طلب زيادة = +5 ج.م، كل كم زيادة = +5 ج.م
+      
+      let estimatedFee = 25; // سعر افتراضي
+      let totalDistance = 0;
+      
+      try {
+        if (deliveryMode === 'simple') {
+          // الوضع البسيط: حساب المسافة من نقطة الاستلام لنقطة التوصيل
+          const pickupCoords = await geocodeAddress(pickupAddress);
+          const deliveryCoords = await geocodeAddress(deliveryAddress);
+          
+          if (pickupCoords && deliveryCoords) {
+            totalDistance = calculateDistance(
+              pickupCoords.lat,
+              pickupCoords.lon,
+              deliveryCoords.lat,
+              deliveryCoords.lon
+            ) / 1000; // تحويل من متر إلى كيلومتر
+            
+            // حساب السعر: أول طلب في 3 كم = 25 ج.م، كل كم زيادة = +5 ج.م
+            estimatedFee = calculateDeliveryPrice(1, totalDistance);
+          } else {
+            // إذا فشل الحصول على الإحداثيات، نستخدم سعر افتراضي
+            estimatedFee = calculateDeliveryPrice(1, 3);
+          }
+        } else {
+          // الوضع المتعدد: حساب المسافة الإجمالية من نقطة الانطلاق → النقطة التالية → ... → نقطة الوصول
+          const locations: Array<{ lat: number; lon: number }> = [];
+          
+          for (const point of deliveryPoints) {
+            const coords = await geocodeAddress(point.address);
+            if (coords) {
+              locations.push(coords);
+            }
+          }
+          
+          if (locations.length >= 2) {
+            // حساب المسافة بين كل نقطتين متتاليتين
+            for (let i = 0; i < locations.length - 1; i++) {
+              const distance = calculateDistance(
+                locations[i].lat,
+                locations[i].lon,
+                locations[i + 1].lat,
+                locations[i + 1].lon
+              ) / 1000; // تحويل من متر إلى كيلومتر
+              totalDistance += distance;
+            }
+            
+            // حساب السعر: أول طلب في 3 كم = 25 ج.م، كل كم زيادة = +5 ج.م
+            // في الوضع المتعدد، نعتبر كل نقطة توقف = طلب إضافي
+            const ordersCount = deliveryPoints.length - 1; // عدد النقاط - 1
+            estimatedFee = calculateDeliveryPrice(ordersCount, totalDistance);
+          } else {
+            // إذا فشل الحصول على المواقع، نستخدم سعر افتراضي
+            const ordersCount = deliveryPoints.length - 1;
+            estimatedFee = calculateDeliveryPrice(ordersCount, 3 + (ordersCount - 1) * 2);
+          }
+        }
+      } catch (locationError) {
+        console.error('Error calculating distance for price:', locationError);
+        // في حالة الخطأ، نستخدم سعر افتراضي
+        if (deliveryMode === 'simple') {
+          estimatedFee = calculateDeliveryPrice(1, 3);
+        } else {
+          const ordersCount = deliveryPoints.length - 1;
+          estimatedFee = calculateDeliveryPrice(ordersCount, 3 + (ordersCount - 1) * 2);
+        }
+      }
 
       let orderData: any;
       
@@ -209,17 +276,244 @@ export default function DeliverPackageScreen() {
 
       if (error) throw error;
       
+      // تحديد نقطة البحث عن السائقين
+      let searchPoint: { lat: number; lon: number } | null = null;
+      
+      try {
+        if (deliveryMode === 'simple') {
+          // للوضع البسيط: البحث من نقطة الاستلام
+          const pickupCoords = await geocodeAddress(pickupAddress);
+          if (pickupCoords) {
+            searchPoint = pickupCoords;
+          }
+        } else {
+          // للوضع المتعدد: البحث من نقطة الانطلاق (أول نقطة)
+          const startPointCoords = await geocodeAddress(deliveryPoints[0].address);
+          if (startPointCoords) {
+            searchPoint = startPointCoords;
+          }
+        }
+      } catch (locationError) {
+        console.error('Error getting search point location:', locationError);
+        // إذا فشل الحصول على الموقع، نحاول استخدام موقع العميل الحالي
+        try {
+          const { status } = await Location.requestForegroundPermissionsAsync();
+          if (status === 'granted') {
+            const location = await Location.getCurrentPositionAsync({});
+            searchPoint = { lat: location.coords.latitude, lon: location.coords.longitude };
+          }
+        } catch (err) {
+          console.error('Error getting current location:', err);
+        }
+      }
+
+      // بدء البحث التلقائي عن السائقين
+      if (searchPoint && data) {
+        try {
+          // تحديث حالة البحث
+          await supabase
+            .from('orders')
+            .update({
+              search_status: 'searching',
+              search_started_at: new Date().toISOString(),
+            })
+            .eq('id', data.id);
+
+          // جلب الإعدادات
+          const { data: settings } = await supabase
+            .from('order_search_settings')
+            .select('setting_key, setting_value');
+
+          const initialRadius = parseFloat(
+            settings?.find(s => s.setting_key === 'initial_search_radius_km')?.setting_value || '3'
+          );
+          const expandedRadius = parseFloat(
+            settings?.find(s => s.setting_key === 'expanded_search_radius_km')?.setting_value || '6'
+          );
+          const initialDuration = parseFloat(
+            settings?.find(s => s.setting_key === 'initial_search_duration_seconds')?.setting_value || '10'
+          );
+          const expandedDuration = parseFloat(
+            settings?.find(s => s.setting_key === 'expanded_search_duration_seconds')?.setting_value || '10'
+          );
+
+          // بدء البحث
+          startOrderSearch(data.id, searchPoint, initialRadius, expandedRadius, initialDuration, expandedDuration);
+        } catch (searchError) {
+          console.error('Error starting search:', searchError);
+        }
+      }
+      
+      const message = searchPoint 
+        ? 'تم إرسال طلبك بنجاح! جاري البحث عن سائق...'
+        : 'تم إرسال طلبك بنجاح!';
+      
       // توجيه مباشر إلى قائمة الطلبات
       router.replace('/(tabs)/customer/orders');
       
       // عرض رسالة النجاح بعد التوجيه
       setTimeout(() => {
-        Alert.alert('✅ نجح', 'تم إرسال الطلب بنجاح');
+        Alert.alert('✅ نجح', message);
       }, 300);
     } catch (error: any) {
       Alert.alert('خطأ', error.message || 'فشل إرسال الطلب');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // دالة لبدء البحث التلقائي عن السائقين (نفس الكود من outside-order.tsx)
+  const startOrderSearch = async (
+    orderId: string,
+    searchPoint: { lat: number; lon: number },
+    initialRadius: number,
+    expandedRadius: number,
+    initialDuration: number,
+    expandedDuration: number
+  ) => {
+    try {
+      const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+        const R = 6371;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = 
+          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+          Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
+      };
+
+      const findDriversInRadius = async (radius: number) => {
+        const { data: allDrivers } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('role', 'driver')
+          .eq('status', 'active')
+          .eq('approval_status', 'approved');
+
+        if (!allDrivers || allDrivers.length === 0) return [];
+
+        const driverIds = allDrivers.map(d => d.id);
+        const { data: locationsData } = await supabase
+          .from('driver_locations')
+          .select('driver_id, latitude, longitude')
+          .in('driver_id', driverIds)
+          .order('updated_at', { ascending: false });
+
+        if (!locationsData) return [];
+
+        const latestLocations = new Map<string, { driver_id: string; latitude: number; longitude: number }>();
+        locationsData.forEach(loc => {
+          if (loc.latitude && loc.longitude && !latestLocations.has(loc.driver_id)) {
+            latestLocations.set(loc.driver_id, {
+              driver_id: loc.driver_id,
+              latitude: loc.latitude,
+              longitude: loc.longitude,
+            });
+          }
+        });
+
+        const driversInRadius: { driver_id: string; latitude: number; longitude: number }[] = [];
+        latestLocations.forEach((driver) => {
+          const distance = calculateDistance(
+            searchPoint.lat,
+            searchPoint.lon,
+            driver.latitude,
+            driver.longitude
+          );
+          if (distance <= radius) {
+            driversInRadius.push(driver);
+          }
+        });
+
+        return driversInRadius;
+      };
+
+      const notifyDrivers = async (drivers: { driver_id: string }[], radius: number) => {
+        if (drivers.length === 0) return;
+
+        const notifications = drivers.map(driver => ({
+          user_id: driver.driver_id,
+          title: 'طلب جديد متاح',
+          message: `يوجد طلب جديد متاح في نطاق ${radius} كم. تحقق من قائمة الطلبات.`,
+          type: 'info' as const,
+        }));
+
+        await supabase.from('notifications').insert(notifications);
+      };
+
+      const checkOrderAccepted = async () => {
+        const { data } = await supabase
+          .from('orders')
+          .select('status, driver_id')
+          .eq('id', orderId)
+          .single();
+
+        return data?.status === 'accepted' && data?.driver_id;
+      };
+
+      const initialDrivers = await findDriversInRadius(initialRadius);
+      if (initialDrivers.length > 0) {
+        await notifyDrivers(initialDrivers, initialRadius);
+      }
+
+      const initialStartTime = Date.now();
+      const checkInterval = setInterval(async () => {
+        const accepted = await checkOrderAccepted();
+        if (accepted) {
+          clearInterval(checkInterval);
+          await supabase
+            .from('orders')
+            .update({ search_status: 'found' })
+            .eq('id', orderId);
+          return;
+        }
+
+        if (Date.now() - initialStartTime >= initialDuration * 1000) {
+          clearInterval(checkInterval);
+          
+          await supabase
+            .from('orders')
+            .update({
+              search_status: 'expanded',
+              search_expanded_at: new Date().toISOString(),
+            })
+            .eq('id', orderId);
+
+          const expandedDrivers = await findDriversInRadius(expandedRadius);
+          const newDrivers = expandedDrivers.filter(
+            ed => !initialDrivers.some(id => id.driver_id === ed.driver_id)
+          );
+          
+          if (newDrivers.length > 0) {
+            await notifyDrivers(newDrivers, expandedRadius);
+          }
+
+          const expandedStartTime = Date.now();
+          const expandedCheckInterval = setInterval(async () => {
+            const accepted = await checkOrderAccepted();
+            if (accepted) {
+              clearInterval(expandedCheckInterval);
+              await supabase
+                .from('orders')
+                .update({ search_status: 'found' })
+                .eq('id', orderId);
+              return;
+            }
+
+            if (Date.now() - expandedStartTime >= expandedDuration * 1000) {
+              clearInterval(expandedCheckInterval);
+              await supabase
+                .from('orders')
+                .update({ search_status: 'stopped' })
+                .eq('id', orderId);
+            }
+          }, 1000);
+        }
+      }, 1000);
+    } catch (error) {
+      console.error('Error in order search:', error);
     }
   };
 

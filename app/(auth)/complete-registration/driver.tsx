@@ -18,6 +18,7 @@ import { uploadImageToImgBB } from '@/lib/imgbb';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
+import { notifyAllAdmins } from '@/lib/notifications';
 
 export default function CompleteDriverRegistration() {
   const { phone: phoneParam, email } = useLocalSearchParams<{ phone?: string; email?: string }>();
@@ -248,6 +249,13 @@ export default function CompleteDriverRegistration() {
         .eq('id', user.id);
 
       if (profileError) throw profileError;
+
+      // إرسال إشعار لجميع المديرين عن تسجيل سائق جديد
+      await notifyAllAdmins(
+        'سائق جديد ينتظر المراجعة',
+        `سائق جديد (${fullName || phone}) أكمل التسجيل وهو في انتظار المراجعة.`,
+        'info'
+      );
 
       // رسالة انتظار المراجعة
       Alert.alert(

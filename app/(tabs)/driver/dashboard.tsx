@@ -19,6 +19,7 @@ import { supabase, isRegistrationComplete } from '@/lib/supabase';
 import CurrentLocationDisplay from '@/components/CurrentLocationDisplay';
 import { useRouter, useFocusEffect } from 'expo-router';
 import responsive from '@/utils/responsive';
+import NotificationCard from '@/components/NotificationCard';
 
 export default function DriverDashboardScreen() {
   console.log('DriverDashboard: Component rendered');
@@ -43,25 +44,57 @@ export default function DriverDashboardScreen() {
     id_card_image_url?: string;
     selfie_image_url?: string;
     approval_status?: 'pending' | 'approved' | 'rejected';
+    status?: string;
   } | null>(null);
   const [registrationComplete, setRegistrationComplete] = useState(false);
   const [checkingRegistration, setCheckingRegistration] = useState(true);
   const [showApprovalAlert, setShowApprovalAlert] = useState(false);
   const previousApprovalStatusRef = useRef<'pending' | 'approved' | 'rejected' | undefined>(undefined);
+  const [notifications, setNotifications] = useState<Array<{
+    id: string;
+    title: string;
+    message: string;
+    type: 'info' | 'warning' | 'error' | 'success';
+    is_read: boolean;
+    created_at: string;
+  }>>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
     console.log('DriverDashboard: useEffect triggered, user:', user?.id);
     if (user) {
       loadDriverStatus();
       loadDriverProfile();
+      
+      // الاشتراك في Realtime لتحديث بيانات السائق تلقائياً
+      const profileChannel = supabase
+        .channel(`driver_profile_${user.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'profiles',
+            filter: `id=eq.${user.id}`,
+          },
+          (payload) => {
+            console.log('DriverDashboard: Profile updated via Realtime:', payload);
+            // إعادة تحميل بيانات السائق عند التحديث
+            loadDriverProfile();
+            loadDriverStatus();
+          }
+        )
+        .subscribe();
+      
+      return () => {
+        // تنظيف عند unmount
+        if (locationIntervalRef.current) {
+          clearInterval(locationIntervalRef.current);
+          locationIntervalRef.current = null;
+        }
+        profileChannel.unsubscribe();
+      };
     }
-    return () => {
-      // تنظيف عند unmount
-      if (locationIntervalRef.current) {
-        clearInterval(locationIntervalRef.current);
-        locationIntervalRef.current = null;
-      }
-    };
   }, [user]);
 
   // إعادة تحميل البيانات عند العودة للصفحة
@@ -127,7 +160,7 @@ export default function DriverDashboardScreen() {
       console.log('DriverDashboard: Stopping approval polling');
       clearInterval(checkApprovalInterval);
     };
-  }, [user, driverProfile?.approval_status]);
+  }, [user, driverProfile?.approval_status, registrationComplete]);
 
   const loadDriverStatus = async () => {
     if (!user) return;
@@ -166,10 +199,10 @@ export default function DriverDashboardScreen() {
       let error: any = null;
 
       try {
-        // محاولة جلب جميع البيانات بما فيها الصور وحالة الموافقة
+        // محاولة جلب جميع البيانات بما فيها الصور وحالة الموافقة وحالة الحساب
         const result = await supabase
           .from('profiles')
-          .select('full_name, phone, id_card_image_url, selfie_image_url, approval_status, registration_complete')
+          .select('full_name, phone, id_card_image_url, selfie_image_url, approval_status, registration_complete, status')
           .eq('id', user.id)
           .single();
         profile = result.data;
@@ -510,19 +543,29 @@ export default function DriverDashboardScreen() {
                 trackColor={{ false: '#e0e0e0', true: '#34C759' }}
                 thumbColor={isOnline ? '#fff' : '#f4f3f4'}
                 ios_backgroundColor="#e0e0e0"
-                disabled={toggling || driverProfile?.approval_status !== 'approved' || !registrationComplete}
+                disabled={toggling || driverProfile?.approval_status !== 'approved' || !registrationComplete || driverProfile?.status === 'suspended'}
               />
             )}
           </View>
 
+          {/* رسالة تحذيرية إذا كان الحساب معلق */}
+          {driverProfile?.status === 'suspended' && (
+            <View style={[styles.statusMessage, styles.suspendedMessage]}>
+              <Ionicons name="alert-circle" size={20} color="#FF3B30" />
+              <Text style={[styles.statusMessageText, styles.suspendedMessageText]}>
+                ⚠️ تم تعليق حسابك. يرجى التواصل مع الإدارة لمزيد من المعلومات.
+              </Text>
+            </View>
+          )}
+
           {/* رسالة توضيحية إذا لم يتم الموافقة */}
-          {driverProfile?.approval_status !== 'approved' && (
+          {driverProfile?.approval_status !== 'approved' && driverProfile?.status !== 'suspended' && (
             <View style={styles.statusMessage}>
               <Ionicons name="information-circle" size={16} color="#FF9500" />
               <Text style={styles.statusMessageText}>
-                {driverProfile?.approval_status === 'pending' 
+                {driverProfile?.approval_status === 'pending' && registrationComplete
                   ? 'في انتظار الموافقة على تسجيلك لتفعيل حالتك'
-                  : driverProfile?.approval_status === 'rejected'
+                  : driverProfile?.approval_status === 'rejected' && registrationComplete
                   ? 'تم رفض طلبك. يرجى التواصل مع الإدارة'
                   : 'يرجى إكمال التسجيل أولاً'}
               </Text>
@@ -533,7 +576,6 @@ export default function DriverDashboardScreen() {
             <View style={styles.locationContainer}>
               <CurrentLocationDisplay
                 onLocationUpdate={handleLocationUpdate}
-                showRefreshButton={false}
               />
             </View>
           )}
@@ -542,17 +584,22 @@ export default function DriverDashboardScreen() {
         <View style={styles.welcomeCard}>
           <Text style={styles.welcomeText}>مرحباً بك، السائق</Text>
           <Text style={styles.subText}>
-            {driverProfile?.approval_status === 'approved' && registrationComplete
+            {driverProfile?.status === 'suspended'
+              ? '⚠️ تم تعليق حسابك. يرجى التواصل مع الإدارة'
+              : driverProfile?.approval_status === 'approved' && registrationComplete
               ? (isOnline 
                   ? 'أنت نشط الآن ويمكنك استقبال الطلبات' 
                   : 'قم بتفعيل حالتك لبدء استقبال الطلبات')
-              : driverProfile?.approval_status === 'pending'
+              : driverProfile?.approval_status === 'pending' && registrationComplete
               ? 'في انتظار الموافقة على تسجيلك من قبل المدير'
-              : driverProfile?.approval_status === 'rejected'
+              : driverProfile?.approval_status === 'rejected' && registrationComplete
               ? 'تم رفض طلبك. يرجى التواصل مع الإدارة'
               : 'يرجى إكمال التسجيل أولاً'}
           </Text>
         </View>
+
+        {/* قسم الإشعارات */}
+        <NotificationCard />
 
         {/* قسم إكمال التسجيل - يظهر إذا لم يكمل التسجيل أو لا توجد بيانات */}
         {(!registrationComplete || !driverProfile) && (
@@ -576,8 +623,8 @@ export default function DriverDashboardScreen() {
           </TouchableOpacity>
         )}
 
-        {/* قسم انتظار المراجعة */}
-        {driverProfile?.approval_status === 'pending' && (
+        {/* قسم انتظار المراجعة - يظهر فقط بعد إكمال التسجيل */}
+        {driverProfile?.approval_status === 'pending' && registrationComplete && (
           <View style={styles.pendingReviewCard}>
             <View style={styles.pendingReviewHeader}>
               <Ionicons name="time" size={24} color="#FF9500" />
@@ -591,8 +638,8 @@ export default function DriverDashboardScreen() {
           </View>
         )}
 
-        {/* قسم الرفض */}
-        {driverProfile?.approval_status === 'rejected' && (
+        {/* قسم الرفض - يظهر فقط بعد إكمال التسجيل */}
+        {driverProfile?.approval_status === 'rejected' && registrationComplete && (
           <View style={styles.rejectedCard}>
             <View style={styles.rejectedHeader}>
               <Ionicons name="close-circle" size={24} color="#FF3B30" />
@@ -803,6 +850,16 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     color: '#FF9500',
     flex: 1,
     textAlign: 'right',
+  },
+  suspendedMessage: {
+    backgroundColor: '#FFEBEE',
+    borderWidth: 1,
+    borderColor: '#FF3B30',
+  },
+  suspendedMessageText: {
+    color: '#FF3B30',
+    fontSize: 14,
+    fontWeight: '600',
   },
   welcomeCard: {
     backgroundColor: '#007AFF',

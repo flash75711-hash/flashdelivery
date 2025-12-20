@@ -16,6 +16,7 @@ import { supabase, reverseGeocode } from '@/lib/supabase';
 import { getLocationWithAddress } from '@/lib/locationUtils';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+import { notifyAllAdmins } from '@/lib/notifications';
 
 interface Address {
   id?: string;
@@ -213,6 +214,13 @@ export default function CompleteCustomerRegistration() {
       }
 
       console.log('CompleteRegistration: Registration completed successfully');
+      
+      // إرسال إشعار لجميع المديرين عن تسجيل عميل جديد
+      await notifyAllAdmins(
+        'عميل جديد',
+        `عميل جديد (${fullName || phone}) أكمل التسجيل.`,
+        'info'
+      );
       
       // توجيه مباشر إلى الصفحة الرئيسية (سيتم التوجيه تلقائياً حسب role)
       router.replace('/(tabs)');

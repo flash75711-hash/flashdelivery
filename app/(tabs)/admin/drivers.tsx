@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import responsive from '@/utils/responsive';
+import { createNotification, notifyAllAdmins } from '@/lib/notifications';
 
 interface Driver {
   id: string;
@@ -37,17 +38,30 @@ export default function AdminDriversScreen() {
   const [loading, setLoading] = useState(true);
   const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
   const [showDocumentsModal, setShowDocumentsModal] = useState(false);
+  const [showDriverDetailsModal, setShowDriverDetailsModal] = useState(false);
   const [processingDriverId, setProcessingDriverId] = useState<string | null>(null);
+  const [filterActive, setFilterActive] = useState(false);
   
   // Calculate tab bar padding for web
   const tabBarBottomPadding = Platform.OS === 'web' ? responsive.getTabBarBottomPadding() : 0;
   const styles = getStyles(tabBarBottomPadding);
 
   useEffect(() => {
+    console.log('AdminDrivers: useEffect triggered');
     loadDrivers();
     // التحقق من أن المستخدم الحالي هو admin
     checkAdminStatus();
   }, []);
+
+  useEffect(() => {
+    // إعادة تحميل السائقين عند تغيير الفلتر
+    console.log('AdminDrivers: filterActive changed to:', filterActive);
+    loadDrivers();
+  }, [filterActive]);
+
+  useEffect(() => {
+    console.log('AdminDrivers: drivers state changed, count:', drivers.length);
+  }, [drivers]);
 
   const checkAdminStatus = async () => {
     try {
@@ -71,12 +85,18 @@ export default function AdminDriversScreen() {
   const loadDrivers = async () => {
     setLoading(true);
     try {
-      console.log('AdminDrivers: Loading drivers...');
-      const { data, error } = await supabase
+      console.log('AdminDrivers: Loading drivers...', filterActive ? '(active only)' : '(all)');
+      let query = supabase
         .from('profiles')
         .select('*')
-        .eq('role', 'driver')
-        .order('created_at', { ascending: false });
+        .eq('role', 'driver');
+      
+      // فلترة السائقين النشطين فقط إذا كان filterActive = true
+      if (filterActive) {
+        query = query.eq('status', 'active');
+      }
+      
+      const { data, error } = await query.order('created_at', { ascending: false });
 
       if (error) {
         console.error('AdminDrivers: Error loading drivers:', error);
@@ -84,7 +104,17 @@ export default function AdminDriversScreen() {
       }
       
       console.log('AdminDrivers: Loaded drivers:', data?.length || 0);
+      if (data && data.length > 0) {
+        console.log('AdminDrivers: Drivers data:', data.map(d => ({
+          id: d.id,
+          name: d.full_name,
+          status: d.status,
+          approval_status: d.approval_status,
+          canSuspend: d.status === 'active' && d.approval_status === 'approved'
+        })));
+      }
       setDrivers(data || []);
+      console.log('AdminDrivers: setDrivers called with', data?.length || 0, 'drivers');
     } catch (error: any) {
       console.error('AdminDrivers: Error loading drivers:', error);
       Alert.alert('خطأ', `فشل تحميل السائقين: ${error.message || error.code || 'خطأ غير معروف'}`);
@@ -131,6 +161,22 @@ export default function AdminDriversScreen() {
         }
         
         console.log('AdminDrivers: Driver approved successfully, updated rows:', data.length);
+        
+        // إرسال إشعار للإدارة عن الموافقة على السائق
+        const driverName = data[0]?.full_name || 'سائق';
+        await notifyAllAdmins(
+          'تم الموافقة على سائق',
+          `تم الموافقة على السائق ${driverName} بنجاح.`,
+          'success'
+        );
+        
+        // إرسال إشعار للسائق
+        await createNotification({
+          user_id: driverId,
+          title: 'تمت الموافقة على تسجيلك',
+          message: 'تمت الموافقة على تسجيلك بنجاح! يمكنك الآن البدء في العمل.',
+          type: 'success'
+        });
         
         if (Platform.OS === 'web') {
           window.alert('✅ نجح\nتم الموافقة على تسجيل السائق بنجاح!\nسيتم إشعار السائق بالموافقة.');
@@ -257,47 +303,348 @@ export default function AdminDriversScreen() {
   };
 
   const suspendDriver = async (driverId: string) => {
-    Alert.alert(
-      'تعليق الحساب',
-      'هل أنت متأكد من تعليق حساب هذا السائق؟',
-      [
-        { text: 'إلغاء', style: 'cancel' },
-        {
-          text: 'تعليق',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { error } = await supabase
-                .from('profiles')
-                .update({ status: 'suspended' })
-                .eq('id', driverId);
+    console.log('AdminDrivers: suspendDriver called for:', driverId);
+    
+    const performSuspension = async () => {
+      console.log('AdminDrivers: Suspending driver:', driverId);
+      setProcessingDriverId(driverId);
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        console.log('AdminDrivers: Current user:', user?.id);
+        
+        // جلب بيانات السائق لإرسال إشعار
+        const { data: driverData } = await supabase
+          .from('profiles')
+          .select('phone, full_name')
+          .eq('id', driverId)
+          .single();
+        
+        const { data, error } = await supabase
+          .from('profiles')
+          .update({ status: 'suspended' })
+          .eq('id', driverId)
+          .select();
 
-              if (error) throw error;
-              Alert.alert('نجح', 'تم تعليق حساب السائق');
-              loadDrivers();
-            } catch (error: any) {
-              Alert.alert('خطأ', error.message || 'فشل تعليق الحساب');
+        console.log('AdminDrivers: Suspend result:', { data, error, driverId });
+
+        if (error) {
+          console.error('AdminDrivers: Suspend error details:', {
+            message: error.message,
+            code: error.code,
+            details: error.details,
+            hint: error.hint
+          });
+          throw error;
+        }
+        
+        if (!data || data.length === 0) {
+          console.warn('AdminDrivers: No rows updated - check RLS policies');
+          throw new Error('لم يتم تحديث أي صفوف. يرجى التحقق من الصلاحيات.');
+        }
+        
+        console.log('AdminDrivers: Driver suspended successfully, updated rows:', data.length);
+        
+        // إرسال إشعار للإدارة عن تعليق السائق
+        const driverName = driverData?.full_name || 'سائق';
+        await notifyAllAdmins(
+          'تم تعليق حساب سائق',
+          `تم تعليق حساب السائق ${driverName}.`,
+          'warning'
+        );
+        
+        // إنشاء إشعار داخل التطبيق للسائق
+        await createNotification({
+          user_id: driverId,
+          title: 'تم تعليق حسابك',
+          message: 'تم تعليق حسابك في Flash Delivery. يرجى التواصل مع الإدارة لمزيد من المعلومات.',
+          type: 'error'
+        });
+        
+        // إرسال إشعار SMS للسائق
+        if (driverData?.phone) {
+          try {
+            const { error: smsError } = await supabase.functions.invoke('send-sms', {
+              body: {
+                to: driverData.phone,
+                message: `عزيزي ${driverData.full_name || 'السائق'}، تم تعليق حسابك في Flash Delivery. يرجى التواصل مع الإدارة لمزيد من المعلومات.`
+              }
+            });
+            if (smsError) {
+              console.error('AdminDrivers: Error sending SMS notification:', smsError);
+            } else {
+              console.log('AdminDrivers: SMS notification sent successfully');
             }
+          } catch (smsErr) {
+            console.error('AdminDrivers: Error invoking send-sms function:', smsErr);
+          }
+        }
+        
+        if (Platform.OS === 'web') {
+          window.alert('✅ نجح\nتم تعليق حساب السائق بنجاح\nتم إرسال إشعار للسائق');
+        } else {
+          Alert.alert('✅ نجح', 'تم تعليق حساب السائق بنجاح\nتم إرسال إشعار للسائق');
+        }
+        
+        await loadDrivers();
+      } catch (error: any) {
+        console.error('AdminDrivers: Error suspending driver:', error);
+        const errorMessage = error.message || error.code || 'فشل تعليق الحساب';
+        
+        if (Platform.OS === 'web') {
+          window.alert(`خطأ\n${errorMessage}`);
+        } else {
+          Alert.alert('خطأ', errorMessage, [{ text: 'حسناً' }]);
+        }
+      } finally {
+        setProcessingDriverId(null);
+      }
+    };
+
+    // استخدام window.confirm على الويب
+    if (Platform.OS === 'web') {
+      try {
+        const confirmed = window.confirm('تعليق الحساب\n\nهل أنت متأكد من تعليق حساب هذا السائق؟');
+        console.log('AdminDrivers: User confirmed suspension:', confirmed);
+        if (confirmed) {
+          performSuspension();
+        } else {
+          console.log('AdminDrivers: User cancelled suspension');
+        }
+      } catch (error) {
+        console.error('AdminDrivers: Error in window.confirm:', error);
+        // Fallback to Alert if window.confirm fails
+        Alert.alert(
+          'تعليق الحساب',
+          'هل أنت متأكد من تعليق حساب هذا السائق؟',
+          [
+            { text: 'إلغاء', style: 'cancel' },
+            {
+              text: 'تعليق',
+              style: 'destructive',
+              onPress: performSuspension,
+            },
+          ]
+        );
+      }
+    } else {
+      Alert.alert(
+        'تعليق الحساب',
+        'هل أنت متأكد من تعليق حساب هذا السائق؟',
+        [
+          { text: 'إلغاء', style: 'cancel' },
+          {
+            text: 'تعليق',
+            style: 'destructive',
+            onPress: performSuspension,
           },
-        },
-      ]
-    );
+        ]
+      );
+    }
   };
+
+  const reactivateDriver = async (driverId: string) => {
+    console.log('AdminDrivers: reactivateDriver called for:', driverId);
+    
+    const performReactivation = async () => {
+      console.log('AdminDrivers: Reactivating driver:', driverId);
+      setProcessingDriverId(driverId);
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        console.log('AdminDrivers: Current user:', user?.id);
+        
+        // جلب بيانات السائق لإرسال إشعار
+        const { data: driverData } = await supabase
+          .from('profiles')
+          .select('phone, full_name')
+          .eq('id', driverId)
+          .single();
+        
+        const { data, error } = await supabase
+          .from('profiles')
+          .update({ status: 'active' })
+          .eq('id', driverId)
+          .select();
+
+        console.log('AdminDrivers: Reactivate result:', { data, error, driverId });
+
+        if (error) {
+          console.error('AdminDrivers: Reactivate error details:', {
+            message: error.message,
+            code: error.code,
+            details: error.details,
+            hint: error.hint
+          });
+          throw error;
+        }
+        
+        if (!data || data.length === 0) {
+          console.warn('AdminDrivers: No rows updated - check RLS policies');
+          throw new Error('لم يتم تحديث أي صفوف. يرجى التحقق من الصلاحيات.');
+        }
+        
+        console.log('AdminDrivers: Driver reactivated successfully, updated rows:', data.length);
+        
+        // إرسال إشعار للإدارة عن إعادة تنشيط السائق
+        const driverName = driverData?.full_name || 'سائق';
+        await notifyAllAdmins(
+          'تم إعادة تنشيط حساب سائق',
+          `تم إعادة تنشيط حساب السائق ${driverName}.`,
+          'success'
+        );
+        
+        // إنشاء إشعار داخل التطبيق للسائق
+        await createNotification({
+          user_id: driverId,
+          title: 'تم إعادة تنشيط حسابك',
+          message: 'تم إعادة تنشيط حسابك في Flash Delivery. يمكنك الآن البدء في العمل.',
+          type: 'success'
+        });
+        
+        // إرسال إشعار SMS للسائق
+        if (driverData?.phone) {
+          try {
+            const { error: smsError } = await supabase.functions.invoke('send-sms', {
+              body: {
+                to: driverData.phone,
+                message: `عزيزي ${driverData.full_name || 'السائق'}، تم إعادة تنشيط حسابك في Flash Delivery. يمكنك الآن البدء في العمل.`
+              }
+            });
+            if (smsError) {
+              console.error('AdminDrivers: Error sending SMS notification:', smsError);
+            } else {
+              console.log('AdminDrivers: SMS notification sent successfully');
+            }
+          } catch (smsErr) {
+            console.error('AdminDrivers: Error invoking send-sms function:', smsErr);
+          }
+        }
+        
+        if (Platform.OS === 'web') {
+          window.alert('✅ نجح\nتم إعادة تنشيط حساب السائق بنجاح\nتم إرسال إشعار للسائق');
+        } else {
+          Alert.alert('✅ نجح', 'تم إعادة تنشيط حساب السائق بنجاح\nتم إرسال إشعار للسائق');
+        }
+        
+        await loadDrivers();
+      } catch (error: any) {
+        console.error('AdminDrivers: Error reactivating driver:', error);
+        const errorMessage = error.message || error.code || 'فشل إعادة تنشيط الحساب';
+        
+        if (Platform.OS === 'web') {
+          window.alert(`خطأ\n${errorMessage}`);
+        } else {
+          Alert.alert('خطأ', errorMessage, [{ text: 'حسناً' }]);
+        }
+      } finally {
+        setProcessingDriverId(null);
+      }
+    };
+
+    // استخدام window.confirm على الويب
+    if (Platform.OS === 'web') {
+      try {
+        const confirmed = window.confirm('إعادة تنشيط الحساب\n\nهل أنت متأكد من إعادة تنشيط حساب هذا السائق؟');
+        console.log('AdminDrivers: User confirmed reactivation:', confirmed);
+        if (confirmed) {
+          performReactivation();
+        } else {
+          console.log('AdminDrivers: User cancelled reactivation');
+        }
+      } catch (error) {
+        console.error('AdminDrivers: Error in window.confirm:', error);
+        // Fallback to Alert if window.confirm fails
+        Alert.alert(
+          'إعادة تنشيط الحساب',
+          'هل أنت متأكد من إعادة تنشيط حساب هذا السائق؟',
+          [
+            { text: 'إلغاء', style: 'cancel' },
+            {
+              text: 'إعادة التنشيط',
+              style: 'destructive',
+              onPress: performReactivation,
+            },
+          ]
+        );
+      }
+    } else {
+      // استخدام Alert.alert على Native
+      Alert.alert(
+        'إعادة تنشيط الحساب',
+        'هل أنت متأكد من إعادة تنشيط حساب هذا السائق؟',
+        [
+          { text: 'إلغاء', style: 'cancel' },
+          {
+            text: 'إعادة التنشيط',
+            style: 'default',
+            onPress: performReactivation,
+          },
+        ]
+      );
+    }
+  };
+
+  console.log('AdminDrivers: Component render, drivers count:', drivers.length, 'loading:', loading);
+  if (drivers.length > 0) {
+    console.log('AdminDrivers: Drivers state:', drivers.map(d => ({
+      id: d.id,
+      name: d.full_name,
+      status: d.status,
+      approval_status: d.approval_status,
+      canSuspend: d.status === 'active' && d.approval_status === 'approved'
+    })));
+  }
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>{t('admin.drivers')}</Text>
+        <TouchableOpacity
+          style={[styles.filterButton, filterActive && styles.filterButtonActive]}
+          onPress={() => {
+            setFilterActive(!filterActive);
+            // loadDrivers سيتم استدعاؤه تلقائياً من useEffect عند تغيير filterActive
+          }}
+        >
+          <Ionicons 
+            name={filterActive ? "checkmark-circle" : "filter-outline"} 
+            size={20} 
+            color={filterActive ? "#fff" : "#007AFF"} 
+          />
+          <Text style={[styles.filterButtonText, filterActive && styles.filterButtonTextActive]}>
+            {filterActive ? 'النشطين فقط' : 'جميع السائقين'}
+          </Text>
+        </TouchableOpacity>
       </View>
 
       <FlatList
         data={drivers}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item) => {
+          console.log('AdminDrivers: keyExtractor called for:', item.id);
+          return item.id;
+        }}
         refreshControl={
           <RefreshControl refreshing={loading} onRefresh={loadDrivers} />
         }
-        renderItem={({ item }) => (
-          <View style={styles.driverCard}>
+        onLayout={() => {
+          console.log('AdminDrivers: FlatList onLayout, drivers count:', drivers.length);
+        }}
+        renderItem={({ item, index }) => {
+          console.log(`AdminDrivers: Rendering driver [${index}]:`, {
+            id: item.id,
+            name: item.full_name,
+            status: item.status,
+            approval_status: item.approval_status,
+            shouldShowSuspend: item.status === 'active' && item.approval_status === 'approved'
+          });
+          return (
+          <TouchableOpacity 
+            style={styles.driverCard}
+            onPress={() => {
+              setSelectedDriver(item);
+              setShowDriverDetailsModal(true);
+            }}
+            activeOpacity={0.7}
+          >
             <View style={styles.driverInfo}>
               <Text style={styles.driverName}>{item.full_name || item.email}</Text>
               <Text style={styles.driverEmail}>{item.email}</Text>
@@ -418,25 +765,347 @@ export default function AdminDriversScreen() {
                 </>
               )}
               {item.status === 'active' && item.approval_status === 'approved' && (
-              <TouchableOpacity
-                style={styles.suspendButton}
-                onPress={() => suspendDriver(item.id)}
-              >
-                <Ionicons name="ban" size={20} color="#FF3B30" />
-                <Text style={styles.suspendButtonText}>
-                  {t('admin.suspendAccount')}
-                </Text>
-              </TouchableOpacity>
-            )}
+                <TouchableOpacity
+                  style={styles.suspendButton}
+                  onPressIn={() => {
+                    console.log('AdminDrivers: Suspend button onPressIn triggered');
+                  }}
+                  onPress={() => {
+                    console.log('AdminDrivers: Suspend button pressed for:', item.id, 'item:', item);
+                    if (!item.id) {
+                      console.error('AdminDrivers: No driver ID!');
+                      if (Platform.OS === 'web') {
+                        window.alert('خطأ\nمعرف السائق غير موجود');
+                      } else {
+                        Alert.alert('خطأ', 'معرف السائق غير موجود');
+                      }
+                      return;
+                    }
+                    console.log('AdminDrivers: Calling suspendDriver with ID:', item.id);
+                    suspendDriver(item.id);
+                  }}
+                  disabled={processingDriverId === item.id || loading}
+                  activeOpacity={0.7}
+                >
+                  {processingDriverId === item.id ? (
+                    <ActivityIndicator size="small" color="#FF3B30" />
+                  ) : (
+                    <>
+                      <Ionicons name="ban" size={20} color="#FF3B30" />
+                      <Text style={styles.suspendButtonText}>
+                        {t('admin.suspendAccount')}
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              )}
+              {item.status === 'suspended' && (
+                <TouchableOpacity
+                  style={styles.reactivateButton}
+                  onPressIn={() => {
+                    console.log('AdminDrivers: Reactivate button onPressIn triggered');
+                  }}
+                  onPress={() => {
+                    console.log('AdminDrivers: Reactivate button pressed for:', item.id, 'item:', item);
+                    if (!item.id) {
+                      console.error('AdminDrivers: No driver ID!');
+                      if (Platform.OS === 'web') {
+                        window.alert('خطأ\nمعرف السائق غير موجود');
+                      } else {
+                        Alert.alert('خطأ', 'معرف السائق غير موجود');
+                      }
+                      return;
+                    }
+                    console.log('AdminDrivers: Calling reactivateDriver with ID:', item.id);
+                    reactivateDriver(item.id);
+                  }}
+                  disabled={processingDriverId === item.id || loading}
+                  activeOpacity={0.7}
+                >
+                  {processingDriverId === item.id ? (
+                    <ActivityIndicator size="small" color="#34C759" />
+                  ) : (
+                    <>
+                      <Ionicons name="checkmark-circle" size={20} color="#34C759" />
+                      <Text style={styles.reactivateButtonText}>
+                        إعادة تنشيط الحساب
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              )}
             </View>
-          </View>
-        )}
+          </TouchableOpacity>
+          );
+        }}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>لا يوجد سائقين</Text>
           </View>
         }
       />
+
+      {/* Modal لعرض جميع بيانات السائق */}
+      <Modal
+        visible={showDriverDetailsModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowDriverDetailsModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                بيانات السائق
+              </Text>
+              <TouchableOpacity
+                onPress={() => setShowDriverDetailsModal(false)}
+                style={styles.modalCloseButton}
+              >
+                <Ionicons name="close" size={24} color="#1a1a1a" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.modalBody}>
+              {selectedDriver && (
+                <>
+                  {/* المعلومات الأساسية */}
+                  <View style={styles.detailSection}>
+                    <Text style={styles.sectionTitle}>المعلومات الأساسية</Text>
+                    
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>الاسم الكامل:</Text>
+                      <Text style={styles.detailValue}>
+                        {selectedDriver.full_name || 'غير محدد'}
+                      </Text>
+                    </View>
+                    
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>البريد الإلكتروني:</Text>
+                      <Text style={styles.detailValue}>{selectedDriver.email}</Text>
+                    </View>
+                    
+                    {selectedDriver.phone && (
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>رقم الهاتف:</Text>
+                        <Text style={styles.detailValue}>{selectedDriver.phone}</Text>
+                      </View>
+                    )}
+                    
+                    {selectedDriver.created_at && (
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>تاريخ التسجيل:</Text>
+                        <Text style={styles.detailValue}>
+                          {new Date(selectedDriver.created_at).toLocaleDateString('ar-EG', {
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {/* حالة الحساب */}
+                  <View style={styles.detailSection}>
+                    <Text style={styles.sectionTitle}>حالة الحساب</Text>
+                    
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>حالة الموافقة:</Text>
+                      <View style={styles.statusValueContainer}>
+                        {selectedDriver.approval_status === 'pending' && (
+                          <View style={[styles.statusBadge, styles.statusPending]}>
+                            <Ionicons name="time-outline" size={14} color="#FF9500" />
+                            <Text style={[styles.statusText, { color: '#FF9500' }]}>
+                              في انتظار المراجعة
+                            </Text>
+                          </View>
+                        )}
+                        {selectedDriver.approval_status === 'approved' && (
+                          <View style={[styles.statusBadge, styles.statusActive]}>
+                            <Ionicons name="checkmark-circle" size={14} color="#34C759" />
+                            <Text style={[styles.statusText, { color: '#34C759' }]}>
+                              موافق عليه
+                            </Text>
+                          </View>
+                        )}
+                        {selectedDriver.approval_status === 'rejected' && (
+                          <View style={[styles.statusBadge, styles.statusSuspended]}>
+                            <Ionicons name="close-circle" size={14} color="#FF3B30" />
+                            <Text style={[styles.statusText, { color: '#FF3B30' }]}>
+                              مرفوض
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                    
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>حالة الحساب:</Text>
+                      <View style={styles.statusValueContainer}>
+                        <View
+                          style={[
+                            styles.statusBadge,
+                            selectedDriver.status === 'active'
+                              ? styles.statusActive
+                              : styles.statusSuspended,
+                          ]}
+                        >
+                          <Text style={styles.statusText}>
+                            {selectedDriver.status === 'active' ? 'نشط' : 'معلق'}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* المستندات */}
+                  <View style={styles.detailSection}>
+                    <Text style={styles.sectionTitle}>المستندات المرفوعة</Text>
+                    
+                    {selectedDriver.id_card_image_url ? (
+                      <View style={styles.documentSection}>
+                        <Text style={styles.documentLabel}>صورة البطاقة الشخصية</Text>
+                        <Image
+                          source={{ uri: selectedDriver.id_card_image_url }}
+                          style={styles.documentImage}
+                          resizeMode="contain"
+                        />
+                      </View>
+                    ) : (
+                      <View style={styles.missingDocument}>
+                        <Ionicons name="document-outline" size={32} color="#999" />
+                        <Text style={styles.missingDocumentText}>
+                          لم يتم رفع صورة البطاقة الشخصية
+                        </Text>
+                      </View>
+                    )}
+                    
+                    {selectedDriver.selfie_image_url ? (
+                      <View style={styles.documentSection}>
+                        <Text style={styles.documentLabel}>صورة السيلفي</Text>
+                        <Image
+                          source={{ uri: selectedDriver.selfie_image_url }}
+                          style={styles.documentImage}
+                          resizeMode="contain"
+                        />
+                      </View>
+                    ) : (
+                      <View style={styles.missingDocument}>
+                        <Ionicons name="person-outline" size={32} color="#999" />
+                        <Text style={styles.missingDocumentText}>
+                          لم يتم رفع صورة السيلفي
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                </>
+              )}
+            </ScrollView>
+            
+            {/* أزرار الإجراءات */}
+            {selectedDriver?.approval_status === 'pending' && (
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={[
+                    styles.modalActionButton, 
+                    styles.modalRejectButton,
+                    processingDriverId === selectedDriver.id && styles.actionButtonDisabled
+                  ]}
+                  onPress={() => {
+                    setShowDriverDetailsModal(false);
+                    rejectDriver(selectedDriver.id);
+                  }}
+                  disabled={processingDriverId === selectedDriver.id}
+                >
+                  {processingDriverId === selectedDriver.id ? (
+                    <ActivityIndicator size="small" color="#FF3B30" />
+                  ) : (
+                    <>
+                      <Ionicons name="close-circle" size={20} color="#FF3B30" />
+                      <Text style={styles.modalRejectButtonText}>رفض</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.modalActionButton, 
+                    styles.modalApproveButton,
+                    processingDriverId === selectedDriver.id && styles.actionButtonDisabled
+                  ]}
+                  onPress={() => {
+                    setShowDriverDetailsModal(false);
+                    approveDriver(selectedDriver.id);
+                  }}
+                  disabled={processingDriverId === selectedDriver.id}
+                >
+                  {processingDriverId === selectedDriver.id ? (
+                    <ActivityIndicator size="small" color="#34C759" />
+                  ) : (
+                    <>
+                      <Ionicons name="checkmark-circle" size={20} color="#34C759" />
+                      <Text style={styles.modalApproveButtonText}>موافقة</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
+            
+            {/* أزرار التعليق/التفعيل */}
+            {selectedDriver?.approval_status === 'approved' && (
+              <View style={styles.modalActions}>
+                {selectedDriver.status === 'active' ? (
+                  <TouchableOpacity
+                    style={[
+                      styles.modalActionButton, 
+                      styles.modalRejectButton,
+                      processingDriverId === selectedDriver.id && styles.actionButtonDisabled
+                    ]}
+                    onPress={() => {
+                      setShowDriverDetailsModal(false);
+                      suspendDriver(selectedDriver.id);
+                    }}
+                    disabled={processingDriverId === selectedDriver.id}
+                  >
+                    {processingDriverId === selectedDriver.id ? (
+                      <ActivityIndicator size="small" color="#FF3B30" />
+                    ) : (
+                      <>
+                        <Ionicons name="ban" size={20} color="#FF3B30" />
+                        <Text style={styles.modalRejectButtonText}>تعليق الحساب</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={[
+                      styles.modalActionButton, 
+                      styles.modalApproveButton,
+                      processingDriverId === selectedDriver.id && styles.actionButtonDisabled
+                    ]}
+                    onPress={() => {
+                      setShowDriverDetailsModal(false);
+                      reactivateDriver(selectedDriver.id);
+                    }}
+                    disabled={processingDriverId === selectedDriver.id}
+                  >
+                    {processingDriverId === selectedDriver.id ? (
+                      <ActivityIndicator size="small" color="#34C759" />
+                    ) : (
+                      <>
+                        <Ionicons name="checkmark-circle" size={20} color="#34C759" />
+                        <Text style={styles.modalApproveButtonText}>إعادة تنشيط الحساب</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+          </View>
+        </View>
+      </Modal>
 
       {/* Modal لعرض المستندات */}
       <Modal
@@ -553,6 +1222,9 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     padding: responsive.getResponsivePadding(),
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     ...(responsive.isLargeScreen() && {
       maxWidth: responsive.getMaxContentWidth(),
       alignSelf: 'center',
@@ -564,6 +1236,31 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     fontWeight: 'bold',
     color: '#1a1a1a',
     textAlign: 'right',
+    flex: 1,
+  },
+  filterButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: responsive.isTablet() ? 16 : 12,
+    paddingVertical: responsive.isTablet() ? 10 : 8,
+    borderRadius: 8,
+    backgroundColor: '#f5f5f5',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    gap: 6,
+  },
+  filterButtonActive: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  filterButtonText: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  filterButtonTextActive: {
+    color: '#fff',
   },
   driverCard: {
     backgroundColor: '#fff',
@@ -688,6 +1385,20 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     color: '#FF3B30',
     fontWeight: '600',
   },
+  reactivateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#34C75920',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 8,
+    gap: 8,
+  },
+  reactivateButtonText: {
+    color: '#34C759',
+    fontWeight: '600',
+  },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -783,7 +1494,61 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     fontWeight: '600',
     fontSize: 16,
   },
+  detailSection: {
+    marginBottom: 24,
+    paddingBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+    marginBottom: 16,
+    textAlign: 'right',
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+    paddingVertical: 8,
+  },
+  detailLabel: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+    flex: 1,
+    textAlign: 'right',
+    marginRight: 12,
+  },
+  detailValue: {
+    fontSize: 14,
+    color: '#1a1a1a',
+    fontWeight: '600',
+    flex: 1,
+    textAlign: 'right',
+  },
+  statusValueContainer: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  missingDocument: {
+    padding: 20,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderStyle: 'dashed',
+  },
+  missingDocumentText: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 8,
+    textAlign: 'center',
+  },
 });
-
-const styles = getStyles();
 

@@ -10,6 +10,8 @@ import {
   TouchableOpacity,
   Alert,
   Platform,
+  Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useRouter } from 'expo-router';
@@ -17,6 +19,7 @@ import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/contexts/AuthContext';
 import responsive from '@/utils/responsive';
+import NotificationCard from '@/components/NotificationCard';
 
 interface DashboardStats {
   totalRevenue: number;
@@ -28,7 +31,7 @@ interface DashboardStats {
 export default function AdminDashboardScreen() {
   const { t } = useTranslation();
   const router = useRouter();
-  const { signOut } = useAuth();
+  const { signOut, user } = useAuth();
   
   // Calculate tab bar padding for web
   const tabBarBottomPadding = Platform.OS === 'web' ? responsive.getTabBarBottomPadding() : 0;
@@ -44,6 +47,12 @@ export default function AdminDashboardScreen() {
   const [editingDistance, setEditingDistance] = useState(false);
   const [savingDistance, setSavingDistance] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [showNotificationModal, setShowNotificationModal] = useState(false);
+  const [notificationTitle, setNotificationTitle] = useState('');
+  const [notificationMessage, setNotificationMessage] = useState('');
+  const [notificationType, setNotificationType] = useState<'info' | 'warning' | 'error' | 'success'>('info');
+  const [notificationTarget, setNotificationTarget] = useState<'customers' | 'drivers' | null>(null);
+  const [sendingNotification, setSendingNotification] = useState(false);
 
   useEffect(() => {
     loadStats();
@@ -242,6 +251,52 @@ export default function AdminDashboardScreen() {
           />
         </View>
 
+        {/* قسم الإشعارات */}
+        <NotificationCard compact={true} />
+
+        {/* قسم إرسال الإشعارات العامة */}
+        <View style={styles.settingsSection}>
+          <Text style={styles.settingsTitle}>إرسال إشعارات عامة</Text>
+          
+          <TouchableOpacity
+            style={styles.managementCard}
+            onPress={() => {
+              setNotificationTarget('customers');
+              setShowNotificationModal(true);
+            }}
+          >
+            <View style={styles.managementInfo}>
+              <Ionicons name="people" size={24} color="#007AFF" />
+              <View style={styles.managementTextContainer}>
+                <Text style={styles.managementLabel}>إرسال إشعار لجميع العملاء</Text>
+                <Text style={styles.managementDescription}>
+                  إرسال إشعار عام لجميع العملاء المسجلين
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={24} color="#999" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.managementCard}
+            onPress={() => {
+              setNotificationTarget('drivers');
+              setShowNotificationModal(true);
+            }}
+          >
+            <View style={styles.managementInfo}>
+              <Ionicons name="car" size={24} color="#007AFF" />
+              <View style={styles.managementTextContainer}>
+                <Text style={styles.managementLabel}>إرسال إشعار لجميع السائقين</Text>
+                <Text style={styles.managementDescription}>
+                  إرسال إشعار عام لجميع السائقين المسجلين
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={24} color="#999" />
+          </TouchableOpacity>
+        </View>
+
         {/* قسم الإدارة */}
         <View style={styles.settingsSection}>
           <Text style={styles.settingsTitle}>الإدارة</Text>
@@ -256,6 +311,29 @@ export default function AdminDashboardScreen() {
                 <Text style={styles.managementLabel}>إدارة الأماكن</Text>
                 <Text style={styles.managementDescription}>
                   إضافة وتعديل وحذف المولات والأسواق والمناطق في الدليل
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={24} color="#999" />
+          </TouchableOpacity>
+        </View>
+
+        {/* قسم إعدادات البحث عن السائقين */}
+        <View style={styles.settingsSection}>
+          <Text style={styles.settingsTitle}>إعدادات البحث عن السائقين</Text>
+          
+          <TouchableOpacity
+            style={styles.managementCard}
+            onPress={() => {
+              router.push('/(tabs)/admin/search-settings');
+            }}
+          >
+            <View style={styles.managementInfo}>
+              <Ionicons name="search" size={24} color="#007AFF" />
+              <View style={styles.managementTextContainer}>
+                <Text style={styles.managementLabel}>تعديل إعدادات البحث</Text>
+                <Text style={styles.managementDescription}>
+                  تعديل نطاق البحث ومدة البحث عن السائقين
                 </Text>
               </View>
             </View>
@@ -575,6 +653,119 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   logoutText: {
     color: '#FF3B30',
     fontSize: responsive.getResponsiveFontSize(18),
+    fontWeight: '600',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    width: '90%',
+    maxWidth: 500,
+    maxHeight: '80%',
+    padding: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  modalTitle: {
+    fontSize: responsive.getResponsiveFontSize(20),
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+    textAlign: 'right',
+  },
+  modalCloseButton: {
+    padding: 4,
+  },
+  modalBody: {
+    maxHeight: 400,
+  },
+  modalField: {
+    marginBottom: 20,
+  },
+  modalLabel: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 8,
+    textAlign: 'right',
+  },
+  modalInput: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+    padding: 16,
+    fontSize: responsive.getResponsiveFontSize(16),
+    textAlign: 'right',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  modalTextArea: {
+    minHeight: 100,
+    textAlignVertical: 'top',
+  },
+  typeButtons: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  typeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    backgroundColor: '#fff',
+  },
+  typeButtonActive: {
+    borderWidth: 2,
+  },
+  typeButtonText: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#666',
+    fontWeight: '600',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 20,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  modalActionButton: {
+    flex: 1,
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCancelButton: {
+    backgroundColor: '#f5f5f5',
+  },
+  modalCancelButtonText: {
+    color: '#666',
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+  },
+  modalSendButton: {
+    backgroundColor: '#007AFF',
+  },
+  modalSendButtonText: {
+    color: '#fff',
+    fontSize: responsive.getResponsiveFontSize(16),
     fontWeight: '600',
   },
 });

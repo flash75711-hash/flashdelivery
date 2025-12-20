@@ -31,6 +31,7 @@ import {
   findFarthestPlaceFromCustomer,
   orderPlacesByDistance,
 } from '@/lib/priceCalculation';
+import { createNotifications, notifyAllActiveDrivers } from '@/lib/notifications';
 
 interface Place {
   id: string;
@@ -468,6 +469,169 @@ export default function OutsideOrderScreen() {
     return R * c;
   };
 
+  // دالة لبدء البحث التلقائي عن السائقين
+  const startOrderSearch = async (
+    orderId: string,
+    searchPoint: { lat: number; lon: number },
+    initialRadius: number,
+    expandedRadius: number,
+    initialDuration: number,
+    expandedDuration: number
+  ) => {
+    try {
+      // حساب المسافة بين نقطتين
+      const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+        const R = 6371;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = 
+          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+          Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
+      };
+
+      // البحث عن السائقين في نطاق معين
+      const findDriversInRadius = async (radius: number) => {
+        const { data: allDrivers } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('role', 'driver')
+          .eq('status', 'active')
+          .eq('approval_status', 'approved');
+
+        if (!allDrivers || allDrivers.length === 0) return [];
+
+        const driverIds = allDrivers.map(d => d.id);
+        const { data: locationsData } = await supabase
+          .from('driver_locations')
+          .select('driver_id, latitude, longitude')
+          .in('driver_id', driverIds)
+          .order('updated_at', { ascending: false });
+
+        if (!locationsData) return [];
+
+        const latestLocations = new Map<string, { driver_id: string; latitude: number; longitude: number }>();
+        locationsData.forEach(loc => {
+          if (loc.latitude && loc.longitude && !latestLocations.has(loc.driver_id)) {
+            latestLocations.set(loc.driver_id, {
+              driver_id: loc.driver_id,
+              latitude: loc.latitude,
+              longitude: loc.longitude,
+            });
+          }
+        });
+
+        const driversInRadius: { driver_id: string; latitude: number; longitude: number }[] = [];
+        latestLocations.forEach((driver) => {
+          const distance = calculateDistance(
+            searchPoint.lat,
+            searchPoint.lon,
+            driver.latitude,
+            driver.longitude
+          );
+          if (distance <= radius) {
+            driversInRadius.push(driver);
+          }
+        });
+
+        return driversInRadius;
+      };
+
+      // إرسال إشعارات للسائقين
+      const notifyDrivers = async (drivers: { driver_id: string }[], radius: number) => {
+        if (drivers.length === 0) return;
+
+        const notifications = drivers.map(driver => ({
+          user_id: driver.driver_id,
+          title: 'طلب جديد متاح',
+          message: `يوجد طلب جديد متاح في نطاق ${radius} كم. تحقق من قائمة الطلبات.`,
+          type: 'info' as const,
+        }));
+
+        await supabase.from('notifications').insert(notifications);
+      };
+
+      // التحقق من قبول الطلب
+      const checkOrderAccepted = async () => {
+        const { data } = await supabase
+          .from('orders')
+          .select('status, driver_id')
+          .eq('id', orderId)
+          .single();
+
+        return data?.status === 'accepted' && data?.driver_id;
+      };
+
+      // البحث الأولي
+      const initialDrivers = await findDriversInRadius(initialRadius);
+      if (initialDrivers.length > 0) {
+        await notifyDrivers(initialDrivers, initialRadius);
+      }
+
+      // انتظار المدة الأولية مع التحقق من القبول
+      const initialStartTime = Date.now();
+      const checkInterval = setInterval(async () => {
+        const accepted = await checkOrderAccepted();
+        if (accepted) {
+          clearInterval(checkInterval);
+          await supabase
+            .from('orders')
+            .update({ search_status: 'found' })
+            .eq('id', orderId);
+          return;
+        }
+
+        if (Date.now() - initialStartTime >= initialDuration * 1000) {
+          clearInterval(checkInterval);
+          
+          // الانتقال للبحث الموسع
+          await supabase
+            .from('orders')
+            .update({
+              search_status: 'expanded',
+              search_expanded_at: new Date().toISOString(),
+            })
+            .eq('id', orderId);
+
+          const expandedDrivers = await findDriversInRadius(expandedRadius);
+          const newDrivers = expandedDrivers.filter(
+            ed => !initialDrivers.some(id => id.driver_id === ed.driver_id)
+          );
+          
+          if (newDrivers.length > 0) {
+            await notifyDrivers(newDrivers, expandedRadius);
+          }
+
+          // انتظار المدة الموسعة
+          const expandedStartTime = Date.now();
+          const expandedCheckInterval = setInterval(async () => {
+            const accepted = await checkOrderAccepted();
+            if (accepted) {
+              clearInterval(expandedCheckInterval);
+              await supabase
+                .from('orders')
+                .update({ search_status: 'found' })
+                .eq('id', orderId);
+              return;
+            }
+
+            if (Date.now() - expandedStartTime >= expandedDuration * 1000) {
+              clearInterval(expandedCheckInterval);
+              await supabase
+                .from('orders')
+                .update({ search_status: 'stopped' })
+                .eq('id', orderId);
+            }
+          }, 1000);
+        }
+      }, 1000);
+    } catch (error) {
+      console.error('Error in order search:', error);
+    }
+  };
+
   const getCityFromLocation = async (lat: number, lon: number): Promise<string | null> => {
     try {
       const data = await reverseGeocode(lat, lon);
@@ -778,89 +942,21 @@ export default function OutsideOrderScreen() {
         }
       });
 
-      // 3. جلب السائقين المتاحين
-      const { data: allDrivers, error: driversError } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('role', 'driver')
-        .eq('status', 'active');
-
-      let driversData: { driver_id: string; latitude: number; longitude: number }[] = [];
-      
-      if (!driversError && allDrivers && allDrivers.length > 0) {
-        const driverIds = allDrivers.map(d => d.id);
-        
-        const { data: locationsData, error: locationsError } = await supabase
-          .from('driver_locations')
-          .select('driver_id, latitude, longitude')
-          .in('driver_id', driverIds)
-          .order('updated_at', { ascending: false });
-
-        if (!locationsError && locationsData) {
-          const latestLocations = new Map<string, { driver_id: string; latitude: number; longitude: number }>();
-          locationsData.forEach(loc => {
-            if (loc.latitude && loc.longitude && !latestLocations.has(loc.driver_id)) {
-              latestLocations.set(loc.driver_id, {
-                driver_id: loc.driver_id,
-                latitude: loc.latitude,
-                longitude: loc.longitude,
-              });
-            }
-          });
-          driversData = Array.from(latestLocations.values());
-        }
-      }
-
-      // 4. ترتيب الأماكن من الأبعد للأقرب (من أبعد مكان لمكان العميل)
+      // 3. ترتيب الأماكن من الأبعد للأقرب
       const placesArray = Object.values(itemsByPlace).map(({ place }) => place);
       console.log(`📍 عدد الأماكن المختارة: ${placesArray.length}`);
-      console.log(`🚗 عدد السائقين المتاحين: ${driversData.length}`);
       
       // ترتيب الأماكن من الأبعد للأقرب
       const placesOrdered = orderPlacesByDistance(placesArray, customerLocation);
       console.log(`📍 الأماكن مرتبة من الأبعد للأقرب: ${placesOrdered.length} مكان`);
       
-      // إيجاد أبعد مكان (للبحث عن السائق الأقرب منه)
+      // إيجاد أبعد مكان (للبحث عن السائقين بجانبه)
       const farthestPlace = findFarthestPlaceFromCustomer(placesArray, customerLocation);
       
       if (farthestPlace) {
         console.log(`📍 أبعد مكان تم إيجاده: (${farthestPlace.lat.toFixed(6)}, ${farthestPlace.lon.toFixed(6)})`);
       } else {
         console.log('⚠️ لم يتم إيجاد أبعد مكان');
-      }
-      
-      // إيجاد أقرب سائق لأبعد مكان
-      interface DriverLocationType {
-        driver_id: string;
-        latitude: number;
-        longitude: number;
-      }
-      let nearestDriver: DriverLocationType | null = null;
-      let nearestDriverLocation: { lat: number; lon: number } | null = null;
-      
-      if (farthestPlace && driversData.length > 0) {
-        let minDistance = Infinity;
-        for (const driver of driversData) {
-          if (driver.latitude && driver.longitude) {
-            const distance = calculateDistance(
-              driver.latitude,
-              driver.longitude,
-              farthestPlace.lat,
-              farthestPlace.lon
-            );
-            if (distance <= maxDeliveryDistance * 1000 && distance < minDistance) {
-              minDistance = distance;
-              nearestDriver = driver;
-              nearestDriverLocation = { lat: driver.latitude, lon: driver.longitude };
-            }
-          }
-        }
-        
-        if (nearestDriver) {
-          console.log(`🚗 أقرب سائق لأبعد مكان: ${nearestDriver.driver_id} (${(minDistance / 1000).toFixed(2)} كم)`);
-        } else {
-          console.log('⚠️ لم يتم إيجاد سائق قريب من أبعد مكان');
-        }
       }
       
       // حساب السعر بناءً على القواعد الجديدة
@@ -949,49 +1045,15 @@ export default function OutsideOrderScreen() {
         }
       });
 
-      // 3. جلب السائقين المتاحين
-      const { data: allDrivers, error: driversError } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('role', 'driver')
-        .eq('status', 'active');
-
-      let driversData: { driver_id: string; latitude: number; longitude: number }[] = [];
-      
-      if (!driversError && allDrivers && allDrivers.length > 0) {
-        const driverIds = allDrivers.map(d => d.id);
-        
-        const { data: locationsData, error: locationsError } = await supabase
-          .from('driver_locations')
-          .select('driver_id, latitude, longitude')
-          .in('driver_id', driverIds)
-          .order('updated_at', { ascending: false });
-
-        if (!locationsError && locationsData) {
-          const latestLocations = new Map<string, { driver_id: string; latitude: number; longitude: number }>();
-          locationsData.forEach(loc => {
-            if (loc.latitude && loc.longitude && !latestLocations.has(loc.driver_id)) {
-              latestLocations.set(loc.driver_id, {
-                driver_id: loc.driver_id,
-                latitude: loc.latitude,
-                longitude: loc.longitude,
-              });
-            }
-          });
-          driversData = Array.from(latestLocations.values());
-        }
-      }
-
-      // 4. ترتيب الأماكن من الأبعد للأقرب (من أبعد مكان لمكان العميل)
+      // 3. ترتيب الأماكن من الأبعد للأقرب
       const placesArray = Object.values(itemsByPlace).map(({ place }) => place);
       console.log(`📍 عدد الأماكن المختارة: ${placesArray.length}`);
-      console.log(`🚗 عدد السائقين المتاحين: ${driversData.length}`);
       
       // ترتيب الأماكن من الأبعد للأقرب
       const placesOrdered = orderPlacesByDistance(placesArray, customerLocation);
       console.log(`📍 الأماكن مرتبة من الأبعد للأقرب: ${placesOrdered.length} مكان`);
       
-      // إيجاد أبعد مكان (للبحث عن السائق الأقرب منه)
+      // إيجاد أبعد مكان (للبحث عن السائقين بجانبه)
       const farthestPlace = findFarthestPlaceFromCustomer(placesArray, customerLocation);
       
       if (farthestPlace) {
@@ -999,44 +1061,9 @@ export default function OutsideOrderScreen() {
       } else {
         console.log('⚠️ لم يتم إيجاد أبعد مكان');
       }
-      
-      // إيجاد أقرب سائق نشط لأبعد مكان
-      interface DriverLocationType {
-        driver_id: string;
-        latitude: number;
-        longitude: number;
-      }
-      let nearestDriver: DriverLocationType | null = null;
-      let nearestDriverLocation: { lat: number; lon: number } | null = null;
-      
-      if (farthestPlace && driversData.length > 0) {
-        let minDistance = Infinity;
-        for (const driver of driversData) {
-          if (driver.latitude && driver.longitude) {
-            const distance = calculateDistance(
-              driver.latitude,
-              driver.longitude,
-              farthestPlace.lat,
-              farthestPlace.lon
-            );
-            if (distance <= maxDeliveryDistance * 1000 && distance < minDistance) {
-              minDistance = distance;
-              nearestDriver = driver;
-              nearestDriverLocation = { lat: driver.latitude, lon: driver.longitude };
-            }
-          }
-        }
-        
-        if (nearestDriver) {
-          console.log(`🚗 أقرب سائق نشط لأبعد مكان: ${nearestDriver.driver_id} (${(minDistance / 1000).toFixed(2)} كم)`);
-        } else {
-          console.log('⚠️ لم يتم إيجاد سائق قريب من أبعد مكان');
-        }
-      }
 
       // 5. إنشاء الطلبات مع السعر المختار
-      // استخدام نفس السائق (أقرب سائق لأبعد مكان) لجميع الطلبات
-      const selectedDriverId = nearestDriver ? nearestDriver.driver_id : null;
+      // لا نعين سائق الآن - سيتم البحث تلقائياً
       const orders: any[] = [];
       
       Object.values(itemsByPlace).forEach(({ place, items: placeItems }) => {
@@ -1049,7 +1076,7 @@ export default function OutsideOrderScreen() {
         orders.push({
           customer_id: user?.id,
           vendor_id: null,
-          driver_id: selectedDriverId, // نفس السائق لجميع الطلبات (أقرب سائق نشط لأبعد مكان)
+          driver_id: null, // سيتم البحث عن سائق تلقائياً
           items: itemNames,
           status: 'pending', // دائماً pending حتى يظهر في قائمة الطلبات الجديدة ويتلقى السائق الإشعار
           pickup_address: place.name + (place.address ? ` - ${place.address}` : ''),
@@ -1070,14 +1097,55 @@ export default function OutsideOrderScreen() {
 
       if (error) throw error;
 
-      const hasAssignedDriver = orders.some(order => order.driver_id !== null);
+      // بدء البحث التلقائي عن السائقين
+      // استخدام أبعد مكان كنقطة البحث
+      if (farthestPlace && data && data.length > 0) {
+        // بدء البحث لكل طلب (نستخدم نفس أبعد مكان لجميع الطلبات)
+        const searchPromises = data.map(async (order) => {
+          try {
+            // تحديث حالة البحث
+            await supabase
+              .from('orders')
+              .update({
+                search_status: 'searching',
+                search_started_at: new Date().toISOString(),
+              })
+              .eq('id', order.id);
+
+            // جلب الإعدادات
+            const { data: settings } = await supabase
+              .from('order_search_settings')
+              .select('setting_key, setting_value');
+
+            const initialRadius = parseFloat(
+              settings?.find(s => s.setting_key === 'initial_search_radius_km')?.setting_value || '3'
+            );
+            const expandedRadius = parseFloat(
+              settings?.find(s => s.setting_key === 'expanded_search_radius_km')?.setting_value || '6'
+            );
+            const initialDuration = parseFloat(
+              settings?.find(s => s.setting_key === 'initial_search_duration_seconds')?.setting_value || '10'
+            );
+            const expandedDuration = parseFloat(
+              settings?.find(s => s.setting_key === 'expanded_search_duration_seconds')?.setting_value || '10'
+            );
+
+            // بدء البحث
+            startOrderSearch(order.id, farthestPlace, initialRadius, expandedRadius, initialDuration, expandedDuration);
+          } catch (searchError) {
+            console.error(`Error starting search for order ${order.id}:`, searchError);
+          }
+        });
+
+        // لا ننتظر البحث - يتم في الخلفية
+        Promise.all(searchPromises).catch(err => {
+          console.error('Error starting searches:', err);
+        });
+      }
+
       const message = orders.length === 1
-        ? hasAssignedDriver 
-            ? 'تم إرسال طلبك بنجاح! تم تعيين سائق تلقائياً.'
-          : `تم إرسال طلبك بنجاح! سيتم إرساله للسائقين في نطاق ${maxDeliveryDistance} كم.`
-        : hasAssignedDriver 
-          ? `تم إرسال ${orders.length} طلب بنجاح! تم تعيين سائق تلقائياً.`
-          : `تم إرسال ${orders.length} طلب بنجاح! بانتظار قبول السائق.`;
+        ? 'تم إرسال طلبك بنجاح! جاري البحث عن سائق...'
+        : `تم إرسال ${orders.length} طلب بنجاح! جاري البحث عن سائق...`;
       
       router.replace('/(tabs)/customer/orders');
       

@@ -364,3 +364,42 @@ export async function reverseGeocode(lat: number, lon: number): Promise<any | nu
   }
 }
 
+/**
+ * Forward geocoding: تحويل العنوان إلى إحداثيات
+ */
+export async function geocodeAddress(address: string): Promise<{ lat: number; lon: number } | null> {
+  try {
+    if (!address || address.trim() === '') {
+      return null;
+    }
+
+    // استخدام Nominatim للـ forward geocoding
+    const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1&accept-language=ar`;
+    
+    const response = await fetch(nominatimUrl, {
+      headers: {
+        'User-Agent': 'FlashDelivery/1.0',
+      },
+    });
+
+    if (!response.ok) {
+      console.error('Geocoding failed:', response.status);
+      return null;
+    }
+
+    const data = await response.json();
+    
+    if (data && data.length > 0) {
+      return {
+        lat: parseFloat(data[0].lat),
+        lon: parseFloat(data[0].lon),
+      };
+    }
+
+    return null;
+  } catch (error: any) {
+    console.error('Forward geocoding error:', error);
+    return null;
+  }
+}
+

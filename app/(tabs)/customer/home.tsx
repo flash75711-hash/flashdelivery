@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,12 +6,14 @@ import {
   StyleSheet,
   SafeAreaView,
   Platform,
+  ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import CurrentLocationDisplay from '@/components/CurrentLocationDisplay';
 import responsive from '@/utils/responsive';
+import NotificationCard from '@/components/NotificationCard';
 
 const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   container: {
@@ -95,7 +97,11 @@ export default function CustomerHomeScreen() {
 
       <CurrentLocationDisplay />
 
-      <View style={styles.content}>
+      <ScrollView style={styles.content}>
+        {/* قسم الإشعارات */}
+        <NotificationCard />
+
+      <View>
         <TouchableOpacity
           style={styles.card}
           onPress={() => router.push('/customer/deliver-package')}
@@ -122,6 +128,7 @@ export default function CustomerHomeScreen() {
           </Text>
         </TouchableOpacity>
       </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }

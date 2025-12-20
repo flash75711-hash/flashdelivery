@@ -16,15 +16,25 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import responsive from '@/utils/responsive';
+import { createNotification } from '@/lib/notifications';
 
 interface Order {
   id: string;
   customer_id: string;
+  driver_id?: string | null;
   status: string;
+  order_type?: string;
+  items?: any;
+  package_description?: string;
   pickup_address: string;
   delivery_address: string;
   total_fee: number;
   created_at: string;
+  search_status?: string;
+  customer?: {
+    full_name?: string;
+    phone?: string;
+  };
 }
 
 export default function DriverTripsScreen() {
@@ -40,42 +50,77 @@ export default function DriverTripsScreen() {
   const styles = getStyles(tabBarBottomPadding);
 
   useEffect(() => {
-    loadNewOrders();
-    const subscription = supabase
-      .channel('driver_orders')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'orders',
-          filter: 'status=eq.pending',
-        },
-        () => {
-          loadNewOrders();
-        }
-      )
-      .subscribe();
+    if (user) {
+      loadNewOrders();
+      loadActiveOrder();
+      
+      const subscription = supabase
+        .channel('driver_orders')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'orders',
+            filter: 'status=eq.pending',
+          },
+          () => {
+            loadNewOrders();
+          }
+        )
+        .subscribe();
 
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, []);
+      // الاشتراك في تحديثات الرحلة النشطة
+      const activeOrderSubscription = supabase
+        .channel(`driver_active_order_${user.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'orders',
+            filter: `driver_id=eq.${user.id}`,
+          },
+          () => {
+            loadActiveOrder();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        subscription.unsubscribe();
+        activeOrderSubscription.unsubscribe();
+      };
+    }
+  }, [user]);
 
   const loadNewOrders = async () => {
     try {
+      setLoading(true);
       // جلب الطلبات الموجهة لهذا السائق (driver_id = user.id) أو الطلبات العامة (driver_id = null)
       const { data, error } = await supabase
         .from('orders')
-        .select('*')
+        .select(`
+          *,
+          customer:profiles!orders_customer_id_fkey(full_name, phone)
+        `)
         .eq('status', 'pending')
         .or(`driver_id.eq.${user?.id},driver_id.is.null`)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setOrders(data || []);
+      
+      // تحويل البيانات لتنسيق مناسب
+      const formattedOrders = (data || []).map((order: any) => ({
+        ...order,
+        customer: order.customer || null,
+      }));
+      
+      setOrders(formattedOrders);
     } catch (error) {
       console.error('Error loading orders:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -91,7 +136,19 @@ export default function DriverTripsScreen() {
         .eq('id', order.id);
 
       if (error) throw error;
-      setActiveOrder(order);
+      
+      // إرسال إشعار للعميل
+      if (order.customer_id) {
+        await createNotification({
+          user_id: order.customer_id,
+          title: 'تم قبول طلبك',
+          message: 'تم قبول طلبك وسيتم البدء في التوصيل قريباً.',
+          type: 'success'
+        });
+      }
+      
+      // إعادة تحميل الرحلة النشطة مع بيانات العميل
+      await loadActiveOrder();
       startLocationTracking(order.id);
       Alert.alert('نجح', 'تم قبول الطلب');
     } catch (error: any) {
@@ -135,6 +192,23 @@ export default function DriverTripsScreen() {
         .eq('id', activeOrder.id);
 
       if (error) throw error;
+      
+      // إرسال إشعار للعميل
+      if (activeOrder.customer_id) {
+        try {
+          await supabase
+            .from('notifications')
+            .insert({
+              user_id: activeOrder.customer_id,
+              title: 'تم استلام طلبك',
+              message: 'تم استلام طلبك من نقطة الاستلام.',
+              type: 'info'
+            });
+        } catch (notifErr) {
+          console.error('Error sending notification to customer:', notifErr);
+        }
+      }
+      
       Alert.alert('نجح', 'تم تحديث حالة الطلب');
     } catch (error: any) {
       Alert.alert('خطأ', error.message);
@@ -150,7 +224,10 @@ export default function DriverTripsScreen() {
     try {
       const { error } = await supabase
         .from('orders')
-        .update({ status: 'completed' })
+        .update({ 
+          status: 'completed',
+          completed_at: new Date().toISOString()
+        })
         .eq('id', activeOrder.id);
 
       if (error) throw error;
@@ -165,6 +242,16 @@ export default function DriverTripsScreen() {
         type: 'earning',
       });
 
+      // إرسال إشعار للعميل
+      if (activeOrder.customer_id) {
+        await createNotification({
+          user_id: activeOrder.customer_id,
+          title: 'تم إكمال طلبك',
+          message: `تم إكمال طلبك بنجاح. شكراً لاستخدامك Flash Delivery!`,
+          type: 'success'
+        });
+      }
+
       setActiveOrder(null);
       Alert.alert('نجح', 'تم إكمال الطلب');
       loadNewOrders();
@@ -175,48 +262,150 @@ export default function DriverTripsScreen() {
     }
   };
 
+  const loadActiveOrder = async () => {
+    if (!user) return;
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .select(`
+          *,
+          customer:profiles!orders_customer_id_fkey(full_name, phone)
+        `)
+        .eq('driver_id', user.id)
+        .in('status', ['accepted', 'pickedUp', 'inTransit'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (error && error.code !== 'PGRST116') {
+        console.error('Error loading active order:', error);
+        return;
+      }
+
+      if (data) {
+        setActiveOrder({
+          ...data,
+          customer: data.customer || null,
+        });
+      }
+    } catch (error) {
+      console.error('Error loading active order:', error);
+    }
+  };
+
   if (activeOrder) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.title}>رحلة نشطة</Text>
+          <TouchableOpacity
+            onPress={() => setActiveOrder(null)}
+            style={styles.backButton}
+          >
+            <Ionicons name="arrow-back" size={24} color="#007AFF" />
+          </TouchableOpacity>
         </View>
         <View style={styles.activeTripContainer}>
           <View style={styles.tripCard}>
-            <Text style={styles.tripTitle}>تفاصيل الرحلة</Text>
-            <Text style={styles.tripAddress}>
-              من: {activeOrder.pickup_address}
-            </Text>
-            <Text style={styles.tripAddress}>
-              إلى: {activeOrder.delivery_address}
-            </Text>
-            <Text style={styles.tripFee}>
-              الأجرة: {activeOrder.total_fee} ج.م
-            </Text>
+            <View style={styles.tripHeader}>
+              <View style={styles.tripHeaderLeft}>
+                <Ionicons 
+                  name={activeOrder.order_type === 'package' ? 'cube' : 'cart'} 
+                  size={24} 
+                  color="#007AFF" 
+                />
+                <Text style={styles.tripTitle}>
+                  {activeOrder.order_type === 'package' ? 'توصيل طلب' : 'طلب من خارج'}
+                </Text>
+              </View>
+              <View style={styles.statusBadge}>
+                <Text style={styles.statusText}>
+                  {activeOrder.status === 'accepted' && 'تم القبول'}
+                  {activeOrder.status === 'pickedUp' && 'تم الاستلام'}
+                  {activeOrder.status === 'inTransit' && 'قيد التوصيل'}
+                </Text>
+              </View>
+            </View>
+
+            {/* معلومات العميل */}
+            {activeOrder.customer && (
+              <View style={styles.customerInfo}>
+                <Ionicons name="person" size={18} color="#007AFF" />
+                <View style={styles.customerDetails}>
+                  <Text style={styles.customerName}>
+                    {activeOrder.customer.full_name || 'عميل'}
+                  </Text>
+                  {activeOrder.customer.phone && (
+                    <Text style={styles.customerPhone}>{activeOrder.customer.phone}</Text>
+                  )}
+                </View>
+              </View>
+            )}
+
+            {/* وصف الطلب */}
+            {activeOrder.package_description && (
+              <View style={styles.descriptionContainer}>
+                <Ionicons name="document-text" size={18} color="#666" />
+                <Text style={styles.descriptionText}>
+                  {activeOrder.package_description}
+                </Text>
+              </View>
+            )}
+
+            {/* عناوين الاستلام والتوصيل */}
+            <View style={styles.addressContainer}>
+              <View style={styles.addressRow}>
+                <Ionicons name="location" size={18} color="#34C759" />
+                <View style={styles.addressTextContainer}>
+                  <Text style={styles.addressLabel}>من:</Text>
+                  <Text style={styles.tripAddress}>{activeOrder.pickup_address}</Text>
+                </View>
+              </View>
+              <View style={styles.addressRow}>
+                <Ionicons name="location" size={18} color="#FF3B30" />
+                <View style={styles.addressTextContainer}>
+                  <Text style={styles.addressLabel}>إلى:</Text>
+                  <Text style={styles.tripAddress}>{activeOrder.delivery_address}</Text>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.feeContainer}>
+              <Ionicons name="cash" size={20} color="#007AFF" />
+              <Text style={styles.tripFee}>
+                الأجرة: {activeOrder.total_fee} ج.م
+              </Text>
+            </View>
           </View>
 
           <View style={styles.actionsContainer}>
-            <TouchableOpacity
-              style={[styles.actionButton, styles.pickupButton]}
-              onPress={markPickedUp}
-              disabled={loading}
-            >
-              <Ionicons name="checkmark-circle" size={24} color="#fff" />
-              <Text style={styles.actionButtonText}>
-                {t('driver.pickupReceived')}
-              </Text>
-            </TouchableOpacity>
+            {/* زر "تم الاستلام" - يظهر فقط إذا كان الطلب في حالة accepted */}
+            {activeOrder.status === 'accepted' && (
+              <TouchableOpacity
+                style={[styles.actionButton, styles.pickupButton]}
+                onPress={markPickedUp}
+                disabled={loading}
+              >
+                <Ionicons name="checkmark-circle" size={24} color="#fff" />
+                <Text style={styles.actionButtonText}>
+                  {t('driver.pickupReceived')}
+                </Text>
+              </TouchableOpacity>
+            )}
 
-            <TouchableOpacity
-              style={[styles.actionButton, styles.deliveryButton]}
-              onPress={markDelivered}
-              disabled={loading}
-            >
-              <Ionicons name="checkmark-done" size={24} color="#fff" />
-              <Text style={styles.actionButtonText}>
-                {t('driver.deliveryCompleted')}
-              </Text>
-            </TouchableOpacity>
+            {/* زر "تم التوصيل" - يظهر إذا كان الطلب في حالة pickedUp أو inTransit */}
+            {(activeOrder.status === 'pickedUp' || activeOrder.status === 'inTransit' || activeOrder.status === 'accepted') && (
+              <TouchableOpacity
+                style={[styles.actionButton, styles.deliveryButton]}
+                onPress={markDelivered}
+                disabled={loading || activeOrder.status === 'accepted'}
+              >
+                <Ionicons name="checkmark-done" size={24} color="#fff" />
+                <Text style={styles.actionButtonText}>
+                  {t('driver.deliveryCompleted')}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </SafeAreaView>
@@ -239,15 +428,83 @@ export default function DriverTripsScreen() {
           orders.map((order) => (
             <View key={order.id} style={styles.orderCard}>
               <View style={styles.orderHeader}>
-                <Text style={styles.orderId}>طلب #{order.id.slice(0, 8)}</Text>
+                <View style={styles.orderHeaderLeft}>
+                  <Ionicons 
+                    name={order.order_type === 'package' ? 'cube' : 'cart'} 
+                    size={20} 
+                    color="#007AFF" 
+                  />
+                  <Text style={styles.orderId}>
+                    {order.order_type === 'package' ? 'توصيل طلب' : 'طلب من خارج'}
+                  </Text>
+                </View>
                 <Text style={styles.orderFee}>{order.total_fee} ج.م</Text>
               </View>
-              <Text style={styles.orderAddress}>
-                من: {order.pickup_address}
-              </Text>
-              <Text style={styles.orderAddress}>
-                إلى: {order.delivery_address}
-              </Text>
+
+              {/* معلومات العميل */}
+              {order.customer && (
+                <View style={styles.customerInfo}>
+                  <Ionicons name="person" size={16} color="#666" />
+                  <Text style={styles.customerText}>
+                    {order.customer.full_name || 'عميل'}
+                    {order.customer.phone && ` - ${order.customer.phone}`}
+                  </Text>
+                </View>
+              )}
+
+              {/* وصف الطلب */}
+              {order.package_description && (
+                <View style={styles.descriptionContainer}>
+                  <Ionicons name="document-text" size={16} color="#666" />
+                  <Text style={styles.descriptionText} numberOfLines={2}>
+                    {order.package_description}
+                  </Text>
+                </View>
+              )}
+
+              {/* عناوين الاستلام والتوصيل */}
+              <View style={styles.addressContainer}>
+                <View style={styles.addressRow}>
+                  <Ionicons name="location" size={16} color="#34C759" />
+                  <View style={styles.addressTextContainer}>
+                    <Text style={styles.addressLabel}>من:</Text>
+                    <Text style={styles.orderAddress}>{order.pickup_address}</Text>
+                  </View>
+                </View>
+                <View style={styles.addressRow}>
+                  <Ionicons name="location" size={16} color="#FF3B30" />
+                  <View style={styles.addressTextContainer}>
+                    <Text style={styles.addressLabel}>إلى:</Text>
+                    <Text style={styles.orderAddress}>{order.delivery_address}</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* وقت إنشاء الطلب */}
+              <View style={styles.timeContainer}>
+                <Ionicons name="time-outline" size={14} color="#999" />
+                <Text style={styles.timeText}>
+                  {new Date(order.created_at).toLocaleDateString('ar-EG', {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })}
+                </Text>
+              </View>
+
+              {/* حالة البحث */}
+              {order.search_status && (
+                <View style={styles.searchStatusContainer}>
+                  <Ionicons name="search" size={14} color="#FF9500" />
+                  <Text style={styles.searchStatusText}>
+                    {order.search_status === 'searching' && 'جاري البحث عن سائق'}
+                    {order.search_status === 'expanded' && 'تم توسيع نطاق البحث'}
+                    {order.search_status === 'stopped' && 'توقف البحث'}
+                  </Text>
+                </View>
+              )}
+
               <TouchableOpacity
                 style={styles.acceptButton}
                 onPress={() => acceptOrder(order)}
@@ -256,7 +513,10 @@ export default function DriverTripsScreen() {
                 {loading ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
-                  <Text style={styles.acceptButtonText}>قبول الطلب</Text>
+                  <>
+                    <Ionicons name="checkmark-circle" size={20} color="#fff" />
+                    <Text style={styles.acceptButtonText}>قبول الطلب</Text>
+                  </>
                 )}
               </TouchableOpacity>
             </View>
@@ -424,6 +684,141 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     color: '#fff',
     fontSize: responsive.getResponsiveFontSize(18),
     fontWeight: '600',
+  },
+  orderHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  customerInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#F0F7FF',
+    borderRadius: 8,
+  },
+  customerText: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#666',
+    flex: 1,
+    textAlign: 'right',
+  },
+  descriptionContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 8,
+  },
+  descriptionText: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#333',
+    flex: 1,
+    textAlign: 'right',
+    lineHeight: 20,
+  },
+  addressContainer: {
+    marginTop: 16,
+    gap: 12,
+  },
+  addressRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  addressTextContainer: {
+    flex: 1,
+  },
+  addressLabel: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    color: '#999',
+    marginBottom: 4,
+    textAlign: 'right',
+  },
+  timeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  timeText: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    color: '#999',
+  },
+  searchStatusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: '#FFF4E6',
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+  },
+  searchStatusText: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    color: '#FF9500',
+    fontWeight: '500',
+  },
+  tripHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  tripHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  statusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#34C75920',
+    borderRadius: 12,
+  },
+  statusText: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    fontWeight: '600',
+    color: '#34C759',
+  },
+  customerDetails: {
+    flex: 1,
+  },
+  customerName: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+    color: '#1a1a1a',
+    textAlign: 'right',
+  },
+  customerPhone: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#666',
+    textAlign: 'right',
+    marginTop: 4,
+  },
+  feeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  backButton: {
+    padding: 4,
   },
 });
 
