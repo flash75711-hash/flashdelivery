@@ -198,17 +198,22 @@ export function useOrderSearch({
     if (drivers.length === 0) return;
 
     try {
-      const driverIds = drivers.map(d => d.driver_id);
-      const notifications = driverIds.map(driverId => ({
-        user_id: driverId,
-        title: 'طلب جديد متاح',
-        message: `يوجد طلب جديد متاح في نطاق ${radius} كم. تحقق من قائمة الطلبات.`,
-        type: 'info' as const,
-      }));
+      const title = 'طلب جديد متاح';
+      const message = `يوجد طلب جديد متاح في نطاق ${radius} كم. تحقق من قائمة الطلبات.`;
+      const type = 'info';
 
-      await supabase
-        .from('notifications')
-        .insert(notifications);
+      for (const driver of drivers) {
+        try {
+          await supabase.rpc('insert_notification_for_driver', {
+            p_user_id: driver.driver_id,
+            p_title: title,
+            p_message: message,
+            p_type: type,
+          });
+        } catch (error) {
+          console.error(`Error notifying driver ${driver.driver_id}:`, error);
+        }
+      }
     } catch (error) {
       console.error('Error notifying drivers:', error);
     }

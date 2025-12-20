@@ -8,6 +8,7 @@ import { I18nManager, Platform } from 'react-native';
 import * as Linking from 'expo-linking';
 import { supabase } from '@/lib/supabase';
 import responsive from '@/utils/responsive';
+import PushNotificationHandler from '@/components/PushNotificationHandler';
 
 // تفعيل RTL
 if (Platform.OS !== 'web') {
@@ -91,6 +92,7 @@ export default function RootLayout() {
   return (
     <I18nextProvider i18n={i18n}>
       <AuthProvider>
+        <PushNotificationHandler />
         <DeepLinkHandler />
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="(auth)" />

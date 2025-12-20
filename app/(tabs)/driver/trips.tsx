@@ -8,11 +8,14 @@ import {
   Alert,
   ActivityIndicator,
   Platform,
+  Modal,
+  TextInput,
+  ScrollView,
 } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { useTranslation } from 'react-i18next';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import responsive from '@/utils/responsive';
@@ -31,6 +34,11 @@ interface Order {
   total_fee: number;
   created_at: string;
   search_status?: string;
+  negotiated_price?: number;
+  negotiation_status?: string;
+  driver_proposed_price?: number;
+  customer_proposed_price?: number;
+  negotiation_history?: any[];
   customer?: {
     full_name?: string;
     phone?: string;
@@ -44,10 +52,24 @@ export default function DriverTripsScreen() {
   const [loading, setLoading] = useState(false);
   const { t } = useTranslation();
   const router = useRouter();
+  const params = useLocalSearchParams();
+  
+  // حالة التفاوض
+  const [showNegotiation, setShowNegotiation] = useState(false);
+  const [negotiatingOrder, setNegotiatingOrder] = useState<Order | null>(null);
+  const [proposedPrice, setProposedPrice] = useState('');
+  const [negotiationHistory, setNegotiationHistory] = useState<any[]>([]);
   
   // Calculate tab bar padding for web
   const tabBarBottomPadding = Platform.OS === 'web' ? responsive.getTabBarBottomPadding() : 0;
   const styles = getStyles(tabBarBottomPadding);
+  
+  // فتح صفحة التفاوض عند القبول من الإشعار العائم
+  useEffect(() => {
+    if (params.orderId && params.showNegotiation === 'true') {
+      loadOrderForNegotiation(params.orderId as string);
+    }
+  }, [params.orderId, params.showNegotiation]);
 
   useEffect(() => {
     if (user) {
@@ -87,12 +109,37 @@ export default function DriverTripsScreen() {
         )
         .subscribe();
 
+      // الاشتراك في تحديثات التفاوض
+      const negotiationSubscription = supabase
+        .channel(`driver_negotiation_${user.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'orders',
+            filter: `driver_id=eq.${user.id}`,
+          },
+          (payload) => {
+            if (negotiatingOrder && payload.new.id === negotiatingOrder.id) {
+              // تحديث حالة التفاوض
+              setNegotiatingOrder({
+                ...negotiatingOrder,
+                ...payload.new,
+              });
+              setNegotiationHistory(payload.new.negotiation_history || []);
+            }
+          }
+        )
+        .subscribe();
+
       return () => {
         subscription.unsubscribe();
         activeOrderSubscription.unsubscribe();
+        negotiationSubscription.unsubscribe();
       };
     }
-  }, [user]);
+  }, [user, negotiatingOrder]);
 
   const loadNewOrders = async () => {
     try {
@@ -124,9 +171,44 @@ export default function DriverTripsScreen() {
     }
   };
 
+  const loadOrderForNegotiation = async (orderId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .select(`
+          *,
+          customer:profiles!orders_customer_id_fkey(full_name, phone)
+        `)
+        .eq('id', orderId)
+        .single();
+
+      if (error) throw error;
+
+      if (data) {
+        setNegotiatingOrder({
+          ...data,
+          customer: data.customer || null,
+        });
+        setProposedPrice(data.total_fee?.toString() || '');
+        setNegotiationHistory(data.negotiation_history || []);
+        setShowNegotiation(true);
+      }
+    } catch (error) {
+      console.error('Error loading order for negotiation:', error);
+      Alert.alert('خطأ', 'فشل تحميل بيانات الطلب');
+    }
+  };
+
   const acceptOrder = async (order: Order) => {
     setLoading(true);
     try {
+      // إذا كان الطلب يحتاج تفاوض، افتح صفحة التفاوض
+      if (order.status === 'pending') {
+        await loadOrderForNegotiation(order.id);
+        setLoading(false);
+        return;
+      }
+
       const { error } = await supabase
         .from('orders')
         .update({
@@ -150,6 +232,105 @@ export default function DriverTripsScreen() {
       // إعادة تحميل الرحلة النشطة مع بيانات العميل
       await loadActiveOrder();
       startLocationTracking(order.id);
+      Alert.alert('نجح', 'تم قبول الطلب');
+    } catch (error: any) {
+      Alert.alert('خطأ', error.message || 'فشل قبول الطلب');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const proposePrice = async () => {
+    if (!negotiatingOrder || !proposedPrice) {
+      Alert.alert('خطأ', 'الرجاء إدخال سعر مقترح');
+      return;
+    }
+
+    const price = parseFloat(proposedPrice);
+    if (isNaN(price) || price <= 0) {
+      Alert.alert('خطأ', 'الرجاء إدخال سعر صحيح');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const newHistoryEntry = {
+        type: 'driver_proposed',
+        price: price,
+        timestamp: new Date().toISOString(),
+        driver_id: user?.id,
+      };
+
+      const updatedHistory = [...(negotiatingOrder.negotiation_history || []), newHistoryEntry];
+
+      const { error } = await supabase
+        .from('orders')
+        .update({
+          driver_proposed_price: price,
+          negotiation_status: 'driver_proposed',
+          negotiation_history: updatedHistory,
+        })
+        .eq('id', negotiatingOrder.id);
+
+      if (error) throw error;
+
+      // إرسال إشعار للعميل
+      if (negotiatingOrder.customer_id) {
+        await supabase
+          .from('notifications')
+          .insert({
+            user_id: negotiatingOrder.customer_id,
+            title: 'اقتراح سعر جديد',
+            message: `اقترح السائق سعر جديد: ${price} ج.م`,
+            type: 'info',
+            order_id: negotiatingOrder.id,
+          });
+      }
+
+      setNegotiationHistory(updatedHistory);
+      Alert.alert('نجح', 'تم إرسال اقتراح السعر للعميل');
+    } catch (error: any) {
+      Alert.alert('خطأ', error.message || 'فشل إرسال الاقتراح');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const acceptNegotiatedPrice = async () => {
+    if (!negotiatingOrder) return;
+
+    setLoading(true);
+    try {
+      const finalPrice = negotiatingOrder.negotiated_price || 
+                        negotiatingOrder.driver_proposed_price || 
+                        negotiatingOrder.total_fee;
+
+      const { error } = await supabase
+        .from('orders')
+        .update({
+          status: 'accepted',
+          driver_id: user?.id,
+          total_fee: finalPrice,
+          negotiation_status: 'accepted',
+        })
+        .eq('id', negotiatingOrder.id);
+
+      if (error) throw error;
+
+      // إرسال إشعار للعميل
+      if (negotiatingOrder.customer_id) {
+        await createNotification({
+          user_id: negotiatingOrder.customer_id,
+          title: 'تم قبول طلبك',
+          message: `تم قبول طلبك بسعر ${finalPrice} ج.م وسيتم البدء في التوصيل قريباً.`,
+          type: 'success'
+        });
+      }
+
+      setShowNegotiation(false);
+      setNegotiatingOrder(null);
+      await loadActiveOrder();
+      startLocationTracking(negotiatingOrder.id);
       Alert.alert('نجح', 'تم قبول الطلب');
     } catch (error: any) {
       Alert.alert('خطأ', error.message || 'فشل قبول الطلب');
@@ -292,6 +473,186 @@ export default function DriverTripsScreen() {
       console.error('Error loading active order:', error);
     }
   };
+
+  // إذا كان هناك طلب للتفاوض، اعرض modal التفاوض
+  if (showNegotiation && negotiatingOrder) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Modal
+          visible={showNegotiation}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowNegotiation(false)}
+        >
+          <View style={styles.negotiationModalOverlay}>
+            <View style={styles.negotiationModalContent}>
+              <View style={styles.negotiationHeader}>
+                <Text style={styles.negotiationTitle}>التفاوض على السعر</Text>
+                <TouchableOpacity
+                  onPress={() => setShowNegotiation(false)}
+                  style={styles.negotiationCloseButton}
+                >
+                  <Ionicons name="close" size={24} color="#666" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView>
+                <View style={styles.negotiationOrderInfo}>
+                  <Text style={styles.negotiationOrderType}>
+                    {negotiatingOrder.order_type === 'package' ? 'توصيل طلب' : 'طلب من خارج'}
+                  </Text>
+                  
+                  {negotiatingOrder.customer && (
+                    <View style={styles.customerInfo}>
+                      <Ionicons name="person" size={16} color="#666" />
+                      <Text style={styles.customerText}>
+                        {negotiatingOrder.customer.full_name || 'عميل'}
+                        {negotiatingOrder.customer.phone && ` - ${negotiatingOrder.customer.phone}`}
+                      </Text>
+                    </View>
+                  )}
+
+                  <View style={styles.negotiationPriceRow}>
+                    <Text style={styles.negotiationPriceLabel}>السعر الأصلي:</Text>
+                    <Text style={styles.negotiationOriginalPrice}>
+                      {negotiatingOrder.total_fee} ج.م
+                    </Text>
+                  </View>
+                  
+                  {negotiatingOrder.customer_proposed_price && (
+                    <View style={styles.negotiationPriceRow}>
+                      <Text style={styles.negotiationPriceLabel}>السعر المقترح من العميل:</Text>
+                      <Text style={styles.negotiationCustomerPrice}>
+                        {negotiatingOrder.customer_proposed_price} ج.م
+                      </Text>
+                    </View>
+                  )}
+
+                  {negotiatingOrder.driver_proposed_price && (
+                    <View style={styles.negotiationPriceRow}>
+                      <Text style={styles.negotiationPriceLabel}>السعر المقترح منك:</Text>
+                      <Text style={styles.negotiationDriverPrice}>
+                        {negotiatingOrder.driver_proposed_price} ج.م
+                      </Text>
+                    </View>
+                  )}
+
+                  {negotiatingOrder.negotiated_price && (
+                    <View style={styles.negotiationPriceRow}>
+                      <Text style={styles.negotiationPriceLabel}>السعر المتفق عليه:</Text>
+                      <Text style={styles.negotiationFinalPrice}>
+                        {negotiatingOrder.negotiated_price} ج.م
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* تاريخ التفاوض */}
+                {negotiationHistory.length > 0 && (
+                  <View style={styles.negotiationHistoryContainer}>
+                    <Text style={styles.negotiationHistoryTitle}>تاريخ التفاوض:</Text>
+                    <View style={styles.negotiationHistoryList}>
+                      {negotiationHistory.map((entry: any, index: number) => (
+                        <View key={index} style={styles.negotiationHistoryItem}>
+                          <Text style={styles.negotiationHistoryText}>
+                            {entry.type === 'driver_proposed' ? 'أنت اقترحت' : 'العميل اقترح'}: {entry.price} ج.م
+                          </Text>
+                          <Text style={styles.negotiationHistoryTime}>
+                            {new Date(entry.timestamp).toLocaleString('ar-EG')}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
+
+                {/* إدخال السعر المقترح */}
+                {negotiatingOrder.negotiation_status !== 'accepted' && (
+                  <View style={styles.negotiationInputContainer}>
+                    <Text style={styles.negotiationInputLabel}>اقترح سعر جديد:</Text>
+                    <TextInput
+                      style={styles.negotiationInput}
+                      value={proposedPrice}
+                      onChangeText={setProposedPrice}
+                      keyboardType="numeric"
+                      placeholder="أدخل السعر"
+                      placeholderTextColor="#999"
+                    />
+                    <TouchableOpacity
+                      style={[styles.negotiationButton, styles.proposeButton]}
+                      onPress={proposePrice}
+                      disabled={loading || !proposedPrice}
+                    >
+                      <Text style={styles.negotiationButtonText}>إرسال الاقتراح</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {/* زر قبول السعر النهائي */}
+                {negotiatingOrder.negotiated_price && (
+                  <TouchableOpacity
+                    style={[styles.negotiationButton, styles.acceptNegotiatedButton]}
+                    onPress={acceptNegotiatedPrice}
+                    disabled={loading}
+                  >
+                    <Text style={styles.negotiationButtonText}>
+                      قبول السعر ({negotiatingOrder.negotiated_price} ج.م)
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
+                {/* زر قبول السعر الأصلي */}
+                {!negotiatingOrder.negotiated_price && (
+                  <TouchableOpacity
+                    style={[styles.negotiationButton, styles.acceptOriginalButton]}
+                    onPress={async () => {
+                      setLoading(true);
+                      try {
+                        const { error } = await supabase
+                          .from('orders')
+                          .update({
+                            status: 'accepted',
+                            driver_id: user?.id,
+                            negotiation_status: 'accepted',
+                          })
+                          .eq('id', negotiatingOrder.id);
+
+                        if (error) throw error;
+
+                        if (negotiatingOrder.customer_id) {
+                          await createNotification({
+                            user_id: negotiatingOrder.customer_id,
+                            title: 'تم قبول طلبك',
+                            message: 'تم قبول طلبك بالسعر الأصلي وسيتم البدء في التوصيل قريباً.',
+                            type: 'success'
+                          });
+                        }
+
+                        setShowNegotiation(false);
+                        setNegotiatingOrder(null);
+                        await loadActiveOrder();
+                        startLocationTracking(negotiatingOrder.id);
+                        Alert.alert('نجح', 'تم قبول الطلب');
+                      } catch (error: any) {
+                        Alert.alert('خطأ', error.message || 'فشل قبول الطلب');
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    disabled={loading}
+                  >
+                    <Text style={styles.negotiationButtonText}>
+                      قبول السعر الأصلي ({negotiatingOrder.total_fee} ج.م)
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+      </SafeAreaView>
+    );
+  }
 
   if (activeOrder) {
     return (
@@ -819,6 +1180,148 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   },
   backButton: {
     padding: 4,
+  },
+  negotiationModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  negotiationModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: responsive.isLargeScreen() ? 600 : '100%',
+    maxHeight: '80%',
+  },
+  negotiationHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  negotiationTitle: {
+    fontSize: responsive.getResponsiveFontSize(20),
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+  },
+  negotiationCloseButton: {
+    padding: 4,
+  },
+  negotiationOrderInfo: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+  },
+  negotiationOrderType: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 12,
+    textAlign: 'right',
+  },
+  negotiationPriceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  negotiationPriceLabel: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#666',
+  },
+  negotiationOriginalPrice: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  negotiationCustomerPrice: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+    color: '#FF9500',
+  },
+  negotiationDriverPrice: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+    color: '#34C759',
+  },
+  negotiationFinalPrice: {
+    fontSize: responsive.getResponsiveFontSize(18),
+    fontWeight: 'bold',
+    color: '#34C759',
+  },
+  negotiationHistoryContainer: {
+    marginBottom: 20,
+  },
+  negotiationHistoryTitle: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 12,
+    textAlign: 'right',
+  },
+  negotiationHistoryList: {
+    maxHeight: 150,
+  },
+  negotiationHistoryItem: {
+    backgroundColor: '#f9f9f9',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+  },
+  negotiationHistoryText: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#333',
+    textAlign: 'right',
+  },
+  negotiationHistoryTime: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    color: '#999',
+    marginTop: 4,
+    textAlign: 'right',
+  },
+  negotiationInputContainer: {
+    marginBottom: 20,
+  },
+  negotiationInputLabel: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 8,
+    textAlign: 'right',
+  },
+  negotiationInput: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+    padding: 16,
+    fontSize: responsive.getResponsiveFontSize(16),
+    textAlign: 'right',
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  negotiationButton: {
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  proposeButton: {
+    backgroundColor: '#007AFF',
+  },
+  acceptNegotiatedButton: {
+    backgroundColor: '#34C759',
+  },
+  acceptOriginalButton: {
+    backgroundColor: '#34C759',
+  },
+  negotiationButtonText: {
+    color: '#fff',
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
   },
 });
 

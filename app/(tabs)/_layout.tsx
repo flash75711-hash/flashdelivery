@@ -5,11 +5,16 @@ import { useTranslation } from 'react-i18next';
 import { Platform, Dimensions } from 'react-native';
 import { useState, useEffect } from 'react';
 import responsive from '@/utils/responsive';
+import FloatingOrderNotification from '@/components/FloatingOrderNotification';
+import { useFloatingOrderNotifications } from '@/hooks/useFloatingOrderNotifications';
 
 export default function TabsLayout() {
   const { user, loading } = useAuth();
   const { t } = useTranslation();
   const [dimensions, setDimensions] = useState(Dimensions.get('window'));
+  
+  // إشعارات الطلبات العائمة للسائقين
+  const floatingNotifications = useFloatingOrderNotifications();
 
   useEffect(() => {
     const subscription = Dimensions.addEventListener('change', ({ window }) => {
@@ -426,8 +431,19 @@ export default function TabsLayout() {
   }
 
   return (
-    <Tabs
-      screenOptions={{
+    <>
+      {/* إشعارات الطلبات العائمة للسائقين */}
+      {user?.role === 'driver' && (
+        <FloatingOrderNotification
+          visible={floatingNotifications.visible}
+          notification={floatingNotifications.notification}
+          onAccept={floatingNotifications.handleAccept}
+          onReject={floatingNotifications.handleReject}
+          onDismiss={floatingNotifications.dismiss}
+        />
+      )}
+      <Tabs
+        screenOptions={{
         tabBarActiveTintColor: '#007AFF',
         tabBarInactiveTintColor: '#999',
         headerShown: false,
@@ -623,5 +639,6 @@ export default function TabsLayout() {
         }}
       />
     </Tabs>
+    </>
   );
 }

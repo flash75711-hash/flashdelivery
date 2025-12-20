@@ -479,6 +479,21 @@ export default function OutsideOrderScreen() {
     expandedDuration: number
   ) => {
     try {
+      // جلب سعر الطلب من قاعدة البيانات
+      const { data: orderData, error: orderError } = await supabase
+        .from('orders')
+        .select('total_fee')
+        .eq('id', orderId)
+        .single();
+
+      if (orderError || !orderData) {
+        console.error('❌ خطأ في جلب بيانات الطلب:', orderError);
+        return;
+      }
+
+      const orderPrice = orderData.total_fee || 0;
+      console.log(`💰 سعر الطلب: ${orderPrice} ج.م`);
+
       // حساب المسافة بين نقطتين
       const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
         const R = 6371;
@@ -589,7 +604,7 @@ export default function OutsideOrderScreen() {
       };
 
       // إرسال إشعارات للسائقين
-      const notifyDrivers = async (drivers: { driver_id: string }[], radius: number) => {
+      const notifyDrivers = async (drivers: { driver_id: string }[], radius: number, orderId: string, orderPrice: number) => {
         if (drivers.length === 0) {
           console.log('⚠️ لا يوجد سائقين لإرسال إشعارات لهم');
           return;
@@ -597,19 +612,49 @@ export default function OutsideOrderScreen() {
 
         console.log(`📧 إرسال إشعارات لـ ${drivers.length} سائق`);
 
-        const notifications = drivers.map(driver => ({
-          user_id: driver.driver_id,
-          title: 'طلب جديد متاح',
-          message: `يوجد طلب جديد متاح في نطاق ${radius} كم. تحقق من قائمة الطلبات.`,
-          type: 'info' as const,
-        }));
+        // جلب تفاصيل الطلب
+        const { data: orderData } = await supabase
+          .from('orders')
+          .select('order_type, pickup_address, delivery_address')
+          .eq('id', orderId)
+          .single();
 
-        const { data, error } = await supabase.from('notifications').insert(notifications).select();
+        // استخدام الدالة insert_notification_for_driver لتجاوز مشاكل RLS
+        const title = 'طلب جديد متاح';
+        const message = `يوجد طلب جديد متاح في نطاق ${radius} كم. السعر: ${orderPrice} ج.م`;
+        const type = 'info';
 
-        if (error) {
-          console.error('❌ خطأ في إرسال الإشعارات:', error);
-        } else {
-          console.log(`✅ تم إرسال ${data?.length || 0} إشعار بنجاح`);
+        let successCount = 0;
+        let errorCount = 0;
+
+        // إرسال إشعار لكل سائق باستخدام الدالة مع order_id
+        for (const driver of drivers) {
+          try {
+            const { data, error } = await supabase.rpc('insert_notification_for_driver', {
+              p_user_id: driver.driver_id,
+              p_title: title,
+              p_message: message,
+              p_type: type,
+              p_order_id: orderId,
+            });
+
+            if (error) {
+              console.error(`❌ خطأ في إرسال إشعار للسائق ${driver.driver_id}:`, error);
+              errorCount++;
+            } else {
+              successCount++;
+            }
+          } catch (err) {
+            console.error(`❌ خطأ في إرسال إشعار للسائق ${driver.driver_id}:`, err);
+            errorCount++;
+          }
+        }
+
+        if (successCount > 0) {
+          console.log(`✅ تم إرسال ${successCount} إشعار بنجاح`);
+        }
+        if (errorCount > 0) {
+          console.error(`❌ فشل إرسال ${errorCount} إشعار`);
         }
       };
 
@@ -627,7 +672,7 @@ export default function OutsideOrderScreen() {
       // البحث الأولي
       const initialDrivers = await findDriversInRadius(initialRadius);
       if (initialDrivers.length > 0) {
-        await notifyDrivers(initialDrivers, initialRadius);
+        await notifyDrivers(initialDrivers, initialRadius, orderId, orderPrice);
       } else {
         // إذا لم يتم العثور على سائقين في النطاق، نرسل إشعارات لجميع السائقين النشطين
         console.log('⚠️ لم يتم العثور على سائقين في النطاق الأولي، إرسال إشعارات لجميع السائقين النشطين');
@@ -640,21 +685,40 @@ export default function OutsideOrderScreen() {
             .eq('approval_status', 'approved');
 
           if (allActiveDrivers && allActiveDrivers.length > 0) {
-            const fallbackNotifications = allActiveDrivers.map(driver => ({
-              user_id: driver.id,
-              title: 'طلب جديد متاح',
-              message: 'يوجد طلب جديد متاح. تحقق من قائمة الطلبات.',
-              type: 'info' as const,
-            }));
+            const title = 'طلب جديد متاح';
+            const message = `يوجد طلب جديد متاح. السعر: ${orderPrice} ج.م`;
+            const type = 'info';
 
-            const { error: fallbackError } = await supabase
-              .from('notifications')
-              .insert(fallbackNotifications);
+            let successCount = 0;
+            let errorCount = 0;
 
-            if (fallbackError) {
-              console.error('❌ خطأ في إرسال الإشعارات البديلة:', fallbackError);
-            } else {
-              console.log(`✅ تم إرسال ${fallbackNotifications.length} إشعار بديل لجميع السائقين النشطين`);
+            for (const driver of allActiveDrivers) {
+              try {
+                const { error } = await supabase.rpc('insert_notification_for_driver', {
+                  p_user_id: driver.id,
+                  p_title: title,
+                  p_message: message,
+                  p_type: type,
+                  p_order_id: orderId,
+                });
+
+                if (error) {
+                  console.error(`❌ خطأ في إرسال إشعار بديل للسائق ${driver.id}:`, error);
+                  errorCount++;
+                } else {
+                  successCount++;
+                }
+              } catch (err) {
+                console.error(`❌ خطأ في إرسال إشعار بديل للسائق ${driver.id}:`, err);
+                errorCount++;
+              }
+            }
+
+            if (successCount > 0) {
+              console.log(`✅ تم إرسال ${successCount} إشعار بديل لجميع السائقين النشطين`);
+            }
+            if (errorCount > 0) {
+              console.error(`❌ فشل إرسال ${errorCount} إشعار بديل`);
             }
           }
         } catch (fallbackErr) {
@@ -693,7 +757,7 @@ export default function OutsideOrderScreen() {
           );
           
           if (newDrivers.length > 0) {
-            await notifyDrivers(newDrivers, expandedRadius);
+            await notifyDrivers(newDrivers, expandedRadius, orderId, orderPrice);
           }
 
           // انتظار المدة الموسعة

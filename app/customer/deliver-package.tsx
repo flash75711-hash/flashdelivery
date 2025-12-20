@@ -372,6 +372,15 @@ export default function DeliverPackageScreen() {
     expandedDuration: number
   ) => {
     try {
+      // جلب بيانات الطلب (السعر)
+      const { data: orderData } = await supabase
+        .from('orders')
+        .select('total_fee')
+        .eq('id', orderId)
+        .single();
+      
+      const orderPrice = parseFloat(orderData?.total_fee?.toString() || '0');
+      
       const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
         const R = 6371;
         const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -479,7 +488,7 @@ export default function DeliverPackageScreen() {
         return driversInRadius;
       };
 
-      const notifyDrivers = async (drivers: { driver_id: string }[], radius: number) => {
+      const notifyDrivers = async (drivers: { driver_id: string }[], radius: number, orderId: string, orderPrice: number) => {
         if (drivers.length === 0) {
           console.log('⚠️ لا يوجد سائقين لإرسال إشعارات لهم');
           return;
@@ -487,19 +496,49 @@ export default function DeliverPackageScreen() {
 
         console.log(`📧 إرسال إشعارات لـ ${drivers.length} سائق`);
 
-        const notifications = drivers.map(driver => ({
-          user_id: driver.driver_id,
-          title: 'طلب جديد متاح',
-          message: `يوجد طلب جديد متاح في نطاق ${radius} كم. تحقق من قائمة الطلبات.`,
-          type: 'info' as const,
-        }));
+        // جلب تفاصيل الطلب
+        const { data: orderData } = await supabase
+          .from('orders')
+          .select('order_type, pickup_address, delivery_address')
+          .eq('id', orderId)
+          .single();
 
-        const { data, error } = await supabase.from('notifications').insert(notifications).select();
+        // استخدام الدالة insert_notification_for_driver لتجاوز مشاكل RLS
+        const title = 'طلب جديد متاح';
+        const message = `يوجد طلب جديد متاح في نطاق ${radius} كم. السعر: ${orderPrice} ج.م`;
+        const type = 'info';
 
-        if (error) {
-          console.error('❌ خطأ في إرسال الإشعارات:', error);
-        } else {
-          console.log(`✅ تم إرسال ${data?.length || 0} إشعار بنجاح`);
+        let successCount = 0;
+        let errorCount = 0;
+
+        // إرسال إشعار لكل سائق باستخدام الدالة مع order_id
+        for (const driver of drivers) {
+          try {
+            const { data, error } = await supabase.rpc('insert_notification_for_driver', {
+              p_user_id: driver.driver_id,
+              p_title: title,
+              p_message: message,
+              p_type: type,
+              p_order_id: orderId,
+            });
+
+            if (error) {
+              console.error(`❌ خطأ في إرسال إشعار للسائق ${driver.driver_id}:`, error);
+              errorCount++;
+            } else {
+              successCount++;
+            }
+          } catch (err) {
+            console.error(`❌ خطأ في إرسال إشعار للسائق ${driver.driver_id}:`, err);
+            errorCount++;
+          }
+        }
+
+        if (successCount > 0) {
+          console.log(`✅ تم إرسال ${successCount} إشعار بنجاح`);
+        }
+        if (errorCount > 0) {
+          console.error(`❌ فشل إرسال ${errorCount} إشعار`);
         }
       };
 
@@ -528,21 +567,40 @@ export default function DeliverPackageScreen() {
             .eq('approval_status', 'approved');
 
           if (allActiveDrivers && allActiveDrivers.length > 0) {
-            const fallbackNotifications = allActiveDrivers.map(driver => ({
-              user_id: driver.id,
-              title: 'طلب جديد متاح',
-              message: 'يوجد طلب جديد متاح. تحقق من قائمة الطلبات.',
-              type: 'info' as const,
-            }));
+            const title = 'طلب جديد متاح';
+            const message = `يوجد طلب جديد متاح. السعر: ${orderPrice} ج.م`;
+            const type = 'info';
 
-            const { error: fallbackError } = await supabase
-              .from('notifications')
-              .insert(fallbackNotifications);
+            let successCount = 0;
+            let errorCount = 0;
 
-            if (fallbackError) {
-              console.error('❌ خطأ في إرسال الإشعارات البديلة:', fallbackError);
-            } else {
-              console.log(`✅ تم إرسال ${fallbackNotifications.length} إشعار بديل لجميع السائقين النشطين`);
+            for (const driver of allActiveDrivers) {
+              try {
+                const { error } = await supabase.rpc('insert_notification_for_driver', {
+                  p_user_id: driver.id,
+                  p_title: title,
+                  p_message: message,
+                  p_type: type,
+                  p_order_id: orderId,
+                });
+
+                if (error) {
+                  console.error(`❌ خطأ في إرسال إشعار بديل للسائق ${driver.id}:`, error);
+                  errorCount++;
+                } else {
+                  successCount++;
+                }
+              } catch (err) {
+                console.error(`❌ خطأ في إرسال إشعار بديل للسائق ${driver.id}:`, err);
+                errorCount++;
+              }
+            }
+
+            if (successCount > 0) {
+              console.log(`✅ تم إرسال ${successCount} إشعار بديل لجميع السائقين النشطين`);
+            }
+            if (errorCount > 0) {
+              console.error(`❌ فشل إرسال ${errorCount} إشعار بديل`);
             }
           }
         } catch (fallbackErr) {
@@ -579,7 +637,7 @@ export default function DeliverPackageScreen() {
           );
           
           if (newDrivers.length > 0) {
-            await notifyDrivers(newDrivers, expandedRadius);
+            await notifyDrivers(newDrivers, expandedRadius, orderId, orderPrice);
           }
 
           const expandedStartTime = Date.now();
