@@ -385,23 +385,44 @@ export default function DeliverPackageScreen() {
       };
 
       const findDriversInRadius = async (radius: number) => {
-        const { data: allDrivers } = await supabase
+        console.log(`🔍 البحث عن سائقين في نطاق ${radius} كم من النقطة:`, searchPoint);
+        
+        const { data: allDrivers, error: driversError } = await supabase
           .from('profiles')
           .select('id')
           .eq('role', 'driver')
           .eq('status', 'active')
           .eq('approval_status', 'approved');
 
-        if (!allDrivers || allDrivers.length === 0) return [];
+        if (driversError) {
+          console.error('❌ خطأ في جلب السائقين:', driversError);
+          return [];
+        }
+
+        if (!allDrivers || allDrivers.length === 0) {
+          console.log('⚠️ لا يوجد سائقين نشطين وموافق عليهم');
+          return [];
+        }
+
+        console.log(`✅ تم العثور على ${allDrivers.length} سائق نشط وموافق عليه`);
 
         const driverIds = allDrivers.map(d => d.id);
-        const { data: locationsData } = await supabase
+        const { data: locationsData, error: locationsError } = await supabase
           .from('driver_locations')
-          .select('driver_id, latitude, longitude')
+          .select('driver_id, latitude, longitude, updated_at')
           .in('driver_id', driverIds)
           .order('updated_at', { ascending: false });
 
-        if (!locationsData) return [];
+        if (locationsError) {
+          console.error('❌ خطأ في جلب مواقع السائقين:', locationsError);
+        }
+
+        if (!locationsData || locationsData.length === 0) {
+          console.log('⚠️ لا توجد مواقع محدثة للسائقين');
+          return [];
+        }
+
+        console.log(`📍 تم العثور على ${locationsData.length} موقع سائق`);
 
         const latestLocations = new Map<string, { driver_id: string; latitude: number; longitude: number }>();
         locationsData.forEach(loc => {
@@ -414,6 +435,8 @@ export default function DeliverPackageScreen() {
           }
         });
 
+        console.log(`📍 ${latestLocations.size} سائق لديه موقع محدث`);
+
         const driversInRadius: { driver_id: string; latitude: number; longitude: number }[] = [];
         latestLocations.forEach((driver) => {
           const distance = calculateDistance(
@@ -424,9 +447,11 @@ export default function DeliverPackageScreen() {
           );
           if (distance <= radius) {
             driversInRadius.push(driver);
+            console.log(`✅ سائق في النطاق: ${driver.driver_id} على بعد ${distance.toFixed(2)} كم`);
           }
         });
 
+        console.log(`✅ تم العثور على ${driversInRadius.length} سائق في نطاق ${radius} كم`);
         return driversInRadius;
       };
 
@@ -456,6 +481,38 @@ export default function DeliverPackageScreen() {
       const initialDrivers = await findDriversInRadius(initialRadius);
       if (initialDrivers.length > 0) {
         await notifyDrivers(initialDrivers, initialRadius);
+      } else {
+        // إذا لم يتم العثور على سائقين في النطاق، نرسل إشعارات لجميع السائقين النشطين
+        console.log('⚠️ لم يتم العثور على سائقين في النطاق الأولي، إرسال إشعارات لجميع السائقين النشطين');
+        try {
+          const { data: allActiveDrivers } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('role', 'driver')
+            .eq('status', 'active')
+            .eq('approval_status', 'approved');
+
+          if (allActiveDrivers && allActiveDrivers.length > 0) {
+            const fallbackNotifications = allActiveDrivers.map(driver => ({
+              user_id: driver.id,
+              title: 'طلب جديد متاح',
+              message: 'يوجد طلب جديد متاح. تحقق من قائمة الطلبات.',
+              type: 'info' as const,
+            }));
+
+            const { error: fallbackError } = await supabase
+              .from('notifications')
+              .insert(fallbackNotifications);
+
+            if (fallbackError) {
+              console.error('❌ خطأ في إرسال الإشعارات البديلة:', fallbackError);
+            } else {
+              console.log(`✅ تم إرسال ${fallbackNotifications.length} إشعار بديل لجميع السائقين النشطين`);
+            }
+          }
+        } catch (fallbackErr) {
+          console.error('❌ خطأ في إرسال الإشعارات البديلة:', fallbackErr);
+        }
       }
 
       const initialStartTime = Date.now();
