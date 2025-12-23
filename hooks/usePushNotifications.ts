@@ -149,21 +149,16 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
   }
   
   try {
-    // الحصول على projectId من Constants
-    const projectId = Constants.expoConfig?.extra?.eas?.projectId || 
-                      Constants.easConfig?.projectId ||
-                      process.env.EXPO_PUBLIC_EAS_PROJECT_ID;
+    // استخدم الـ ID الخاص بمشروعك مباشرة لضمان أعلى استقرار
+    const projectId = "7911787e-4e04-41da-aa13-d05501daea9c";
     
-    if (!projectId) {
-      console.warn('⚠️ No EAS project ID found. Push notifications may not work.');
-      // محاولة بدون projectId (للتطوير المحلي)
-      token = (await Notifications.getExpoPushTokenAsync()).data;
-    } else {
-      token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
-    }
+    token = (await Notifications.getExpoPushTokenAsync({
+      projectId: projectId,
+    })).data;
     
     console.log('✅ Expo Push Token:', token);
   } catch (e) {
+    // في حالة حدوث أي خطأ، التطبيق لن ينهار (No Crash) بل سيكتفي بطباعة الخطأ
     console.error('Error getting Expo push token:', e);
     token = null;
   }
