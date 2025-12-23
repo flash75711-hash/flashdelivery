@@ -11,6 +11,7 @@ interface OrderNotification {
   order_type?: string;
   pickup_address?: string;
   delivery_address?: string;
+  items?: any; // النقاط المتعددة في المسار
   created_at: string;
 }
 
@@ -23,7 +24,7 @@ export function useFloatingOrderNotifications() {
     try {
       const { data, error } = await supabase
         .from('orders')
-        .select('id, order_type, pickup_address, delivery_address, total_fee, status')
+        .select('id, order_type, pickup_address, delivery_address, total_fee, status, items')
         .eq('id', orderId)
         .single();
 
@@ -75,6 +76,7 @@ export function useFloatingOrderNotifications() {
               order_type: orderDetails.order_type,
               pickup_address: orderDetails.pickup_address,
               delivery_address: orderDetails.delivery_address,
+              items: orderDetails.items, // إضافة النقاط المتعددة
               created_at: notification.created_at,
             });
             setVisible(true);
@@ -117,6 +119,7 @@ export function useFloatingOrderNotifications() {
                 order_type: orderDetails.order_type,
                 pickup_address: orderDetails.pickup_address,
                 delivery_address: orderDetails.delivery_address,
+                items: orderDetails.items, // إضافة النقاط المتعددة
                 created_at: newNotification.created_at,
               });
               setVisible(true);

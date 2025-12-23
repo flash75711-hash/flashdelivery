@@ -1067,7 +1067,7 @@ export default function PlacesDirectoryScreen() {
     } else {
       console.log('No back navigation available, going to outside-order');
       // إذا لم يكن هناك screen للرجوع إليه، نذهب إلى outside-order
-      router.replace('/customer/outside-order');
+      router.replace('/orders/outside-order');
     }
   };
 
@@ -1103,7 +1103,7 @@ export default function PlacesDirectoryScreen() {
       router.back();
     } else {
       console.log('No back navigation available, going to outside-order');
-      router.replace('/customer/outside-order');
+      router.replace('/orders/outside-order');
     }
   };
 
@@ -1123,7 +1123,7 @@ export default function PlacesDirectoryScreen() {
           if (router.canGoBack()) {
             router.back();
           } else {
-            router.replace('/customer/outside-order');
+            router.replace('/orders/outside-order');
           }
         }}>
           <Ionicons name="arrow-back" size={24} color="#1a1a1a" />

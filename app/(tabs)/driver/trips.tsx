@@ -145,23 +145,78 @@ export default function DriverTripsScreen() {
     try {
       setLoading(true);
       // جلب الطلبات الموجهة لهذا السائق (driver_id = user.id) أو الطلبات العامة (driver_id = null)
-      const { data, error } = await supabase
-        .from('orders')
-        .select(`
-          *,
-          customer:profiles!orders_customer_id_fkey(full_name, phone)
-        `)
-        .eq('status', 'pending')
-        .or(`driver_id.eq.${user?.id},driver_id.is.null`)
-        .order('created_at', { ascending: false });
+      // استخدام استعلامين منفصلين ثم دمج النتائج لتجنب مشاكل .or()
+      const [assignedOrders, generalOrders] = await Promise.all([
+        // الطلبات الموجهة لهذا السائق
+        supabase
+          .from('orders')
+          .select('*')
+          .eq('status', 'pending')
+          .eq('driver_id', user?.id)
+          .order('created_at', { ascending: false }),
+        // الطلبات العامة (بدون سائق)
+        supabase
+          .from('orders')
+          .select('*')
+          .eq('status', 'pending')
+          .is('driver_id', null)
+          .order('created_at', { ascending: false }),
+      ]);
 
-      if (error) throw error;
+      if (assignedOrders.error) throw assignedOrders.error;
+      if (generalOrders.error) throw generalOrders.error;
+
+      // دمج النتائج وإزالة التكرارات
+      const allOrders = [...(assignedOrders.data || []), ...(generalOrders.data || [])];
+      const uniqueOrders = allOrders.filter((order, index, self) =>
+        index === self.findIndex((o) => o.id === order.id)
+      );
       
-      // تحويل البيانات لتنسيق مناسب
-      const formattedOrders = (data || []).map((order: any) => ({
-        ...order,
-        customer: order.customer || null,
-      }));
+      // ترتيب حسب التاريخ
+      uniqueOrders.sort((a, b) => 
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+      
+      // جلب بيانات العملاء بشكل منفصل
+      const customerIds = uniqueOrders
+        .map((order: any) => order.customer_id)
+        .filter((id): id is string => id != null);
+      
+      const customerProfilesMap = new Map<string, { full_name?: string; phone?: string }>();
+      
+      if (customerIds.length > 0) {
+        const uniqueCustomerIds = [...new Set(customerIds)];
+        const { data: profiles, error: profilesError } = await supabase
+          .from('profiles')
+          .select('id, full_name, phone')
+          .in('id', uniqueCustomerIds);
+        
+        if (!profilesError && profiles) {
+          profiles.forEach((profile: any) => {
+            customerProfilesMap.set(profile.id, {
+              full_name: profile.full_name,
+              phone: profile.phone,
+            });
+          });
+        }
+      }
+      
+      // تحويل البيانات وتضمين بيانات العميل
+      const formattedOrders = uniqueOrders.map((order: any) => {
+        // تسجيل البيانات للتأكد من وجود items
+        if (order.items) {
+          console.log('📍 طلب جديد يحتوي على items:', {
+            orderId: order.id,
+            itemsType: typeof order.items,
+            isArray: Array.isArray(order.items),
+            itemsLength: Array.isArray(order.items) ? order.items.length : 'N/A',
+          });
+        }
+        return {
+          ...order,
+          customer: order.customer_id ? (customerProfilesMap.get(order.customer_id) || null) : null,
+        };
+      });
       
       setOrders(formattedOrders);
     } catch (error) {
@@ -175,24 +230,42 @@ export default function DriverTripsScreen() {
     try {
       const { data, error } = await supabase
         .from('orders')
-        .select(`
-          *,
-          customer:profiles!orders_customer_id_fkey(full_name, phone)
-        `)
+        .select('*')
         .eq('id', orderId)
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
 
-      if (data) {
+      if (!data) {
+        Alert.alert('خطأ', 'الطلب غير موجود أو لا يمكن الوصول إليه');
+        return;
+      }
+
+        // جلب بيانات العميل بشكل منفصل
+        let customerData = null;
+        if (data.customer_id) {
+          const { data: profiles, error: profileError } = await supabase
+            .from('profiles')
+            .select('full_name, phone')
+            .eq('id', data.customer_id)
+            .limit(1);
+          
+          if (!profileError && profiles && profiles.length > 0) {
+            const profile = profiles[0];
+            customerData = {
+              full_name: profile.full_name,
+              phone: profile.phone,
+            };
+          }
+        }
+        
         setNegotiatingOrder({
           ...data,
-          customer: data.customer || null,
+          customer: customerData,
         });
         setProposedPrice(data.total_fee?.toString() || '');
         setNegotiationHistory(data.negotiation_history || []);
         setShowNegotiation(true);
-      }
     } catch (error) {
       console.error('Error loading order for negotiation:', error);
       Alert.alert('خطأ', 'فشل تحميل بيانات الطلب');
@@ -263,31 +336,47 @@ export default function DriverTripsScreen() {
 
       const updatedHistory = [...(negotiatingOrder.negotiation_history || []), newHistoryEntry];
 
-      const { error } = await supabase
+      console.log('📤 إرسال اقتراح السعر:', { orderId: negotiatingOrder.id, price, customerId: negotiatingOrder.customer_id });
+
+      const { error, data } = await supabase
         .from('orders')
         .update({
           driver_proposed_price: price,
           negotiation_status: 'driver_proposed',
           negotiation_history: updatedHistory,
         })
-        .eq('id', negotiatingOrder.id);
+        .eq('id', negotiatingOrder.id)
+        .select();
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ خطأ في تحديث الطلب:', error);
+        throw error;
+      }
+
+      console.log('✅ تم تحديث الطلب بنجاح:', data);
 
       // إرسال إشعار للعميل
       if (negotiatingOrder.customer_id) {
-        await supabase
-          .from('notifications')
-          .insert({
-            user_id: negotiatingOrder.customer_id,
-            title: 'اقتراح سعر جديد',
-            message: `اقترح السائق سعر جديد: ${price} ج.م`,
-            type: 'info',
-            order_id: negotiatingOrder.id,
-          });
+        console.log('📨 إنشاء إشعار للعميل:', negotiatingOrder.customer_id);
+        const notificationResult = await createNotification({
+          user_id: negotiatingOrder.customer_id,
+          title: 'اقتراح سعر جديد',
+          message: `اقترح السائق سعر جديد: ${price} ج.م`,
+          type: 'info',
+          order_id: negotiatingOrder.id,
+        });
+        
+        // إذا فشل إنشاء الإشعار، سجل الخطأ لكن لا توقف العملية
+        if (!notificationResult.success) {
+          console.error('⚠️ فشل إنشاء الإشعار (لكن الاقتراح تم حفظه):', notificationResult.error);
+          // الإشعار ليس ضرورياً لعملية الإرسال، لكن يجب تسجيل الخطأ
+        } else {
+          console.log('✅ تم إنشاء الإشعار بنجاح');
+        }
       }
 
       setNegotiationHistory(updatedHistory);
+      setProposedPrice(''); // مسح حقل السعر بعد الإرسال الناجح
       Alert.alert('نجح', 'تم إرسال اقتراح السعر للعميل');
     } catch (error: any) {
       Alert.alert('خطأ', error.message || 'فشل إرسال الاقتراح');
@@ -377,14 +466,12 @@ export default function DriverTripsScreen() {
       // إرسال إشعار للعميل
       if (activeOrder.customer_id) {
         try {
-          await supabase
-            .from('notifications')
-            .insert({
-              user_id: activeOrder.customer_id,
-              title: 'تم استلام طلبك',
-              message: 'تم استلام طلبك من نقطة الاستلام.',
-              type: 'info'
-            });
+          await createNotification({
+            user_id: activeOrder.customer_id,
+            title: 'تم استلام طلبك',
+            message: 'تم استلام طلبك من نقطة الاستلام.',
+            type: 'info'
+          });
         } catch (notifErr) {
           console.error('Error sending notification to customer:', notifErr);
         }
@@ -448,26 +535,45 @@ export default function DriverTripsScreen() {
     try {
       const { data, error } = await supabase
         .from('orders')
-        .select(`
-          *,
-          customer:profiles!orders_customer_id_fkey(full_name, phone)
-        `)
+        .select('*')
         .eq('driver_id', user.id)
         .in('status', ['accepted', 'pickedUp', 'inTransit'])
         .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
+        .limit(1);
 
-      if (error && error.code !== 'PGRST116') {
+      if (error) {
         console.error('Error loading active order:', error);
         return;
       }
 
-      if (data) {
+      // إذا كان هناك طلب واحد فقط، استخدمه
+      if (data && data.length === 1) {
+        const orderData = data[0];
+        
+        // جلب بيانات العميل بشكل منفصل
+        let customerData = null;
+        if (orderData.customer_id) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('full_name, phone')
+            .eq('id', orderData.customer_id)
+            .single();
+          
+          if (profile) {
+            customerData = {
+              full_name: profile.full_name,
+              phone: profile.phone,
+            };
+          }
+        }
+        
         setActiveOrder({
-          ...data,
-          customer: data.customer || null,
+          ...orderData,
+          customer: customerData,
         });
+      } else {
+        // لا يوجد طلب نشط
+        setActiveOrder(null);
       }
     } catch (error) {
       console.error('Error loading active order:', error);
@@ -715,20 +821,63 @@ export default function DriverTripsScreen() {
 
             {/* عناوين الاستلام والتوصيل */}
             <View style={styles.addressContainer}>
-              <View style={styles.addressRow}>
-                <Ionicons name="location" size={18} color="#34C759" />
-                <View style={styles.addressTextContainer}>
-                  <Text style={styles.addressLabel}>من:</Text>
-                  <Text style={styles.tripAddress}>{activeOrder.pickup_address}</Text>
-                </View>
-              </View>
-              <View style={styles.addressRow}>
-                <Ionicons name="location" size={18} color="#FF3B30" />
-                <View style={styles.addressTextContainer}>
-                  <Text style={styles.addressLabel}>إلى:</Text>
-                  <Text style={styles.tripAddress}>{activeOrder.delivery_address}</Text>
-                </View>
-              </View>
+              {/* إذا كان الطلب يحتوي على عدة نقاط (items)، نعرضها جميعاً */}
+              {(() => {
+                // التحقق من وجود items وتنسيقه
+                const routePoints = activeOrder.items;
+                const hasMultiplePoints = routePoints && 
+                  Array.isArray(routePoints) && 
+                  routePoints.length > 0;
+                
+                if (hasMultiplePoints) {
+                  console.log('📍 عرض مسار متعدد النقاط:', routePoints.length, 'نقطة');
+                  return (
+                    <>
+                      {routePoints.map((point: any, index: number) => {
+                        const pointAddress = point.address || point;
+                        const pointDescription = point.description || '';
+                        return (
+                          <View key={index} style={styles.addressRow}>
+                            <Ionicons 
+                              name={index === 0 ? "play-circle" : index === routePoints.length - 1 ? "checkmark-circle" : "ellipse"} 
+                              size={18} 
+                              color={index === 0 ? "#34C759" : index === routePoints.length - 1 ? "#FF3B30" : "#007AFF"} 
+                            />
+                            <View style={styles.addressTextContainer}>
+                              <Text style={styles.addressLabel}>
+                                {index === 0 ? 'نقطة الانطلاق:' : index === routePoints.length - 1 ? 'نقطة الوصول:' : `نقطة ${index + 1}:`}
+                              </Text>
+                              <Text style={styles.tripAddress}>
+                                {pointDescription ? `${pointDescription}: ` : ''}{typeof pointAddress === 'string' ? pointAddress : JSON.stringify(pointAddress)}
+                              </Text>
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </>
+                  );
+                }
+                return null;
+              })()}
+              {/* إذا لم يكن هناك items أو كان فارغاً، نعرض العنوانين البسيطين */}
+              {(!activeOrder.items || !Array.isArray(activeOrder.items) || activeOrder.items.length === 0) && (
+                <>
+                  <View style={styles.addressRow}>
+                    <Ionicons name="location" size={18} color="#34C759" />
+                    <View style={styles.addressTextContainer}>
+                      <Text style={styles.addressLabel}>من:</Text>
+                      <Text style={styles.tripAddress}>{activeOrder.pickup_address}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.addressRow}>
+                    <Ionicons name="location" size={18} color="#FF3B30" />
+                    <View style={styles.addressTextContainer}>
+                      <Text style={styles.addressLabel}>إلى:</Text>
+                      <Text style={styles.tripAddress}>{activeOrder.delivery_address}</Text>
+                    </View>
+                  </View>
+                </>
+              )}
             </View>
 
             <View style={styles.feeContainer}>
@@ -825,20 +974,65 @@ export default function DriverTripsScreen() {
 
               {/* عناوين الاستلام والتوصيل */}
               <View style={styles.addressContainer}>
-                <View style={styles.addressRow}>
-                  <Ionicons name="location" size={16} color="#34C759" />
-                  <View style={styles.addressTextContainer}>
-                    <Text style={styles.addressLabel}>من:</Text>
-                    <Text style={styles.orderAddress}>{order.pickup_address}</Text>
-                  </View>
-                </View>
-                <View style={styles.addressRow}>
-                  <Ionicons name="location" size={16} color="#FF3B30" />
-                  <View style={styles.addressTextContainer}>
-                    <Text style={styles.addressLabel}>إلى:</Text>
-                    <Text style={styles.orderAddress}>{order.delivery_address}</Text>
-                  </View>
-                </View>
+                {/* إذا كان الطلب يحتوي على عدة نقاط، نعرض ملخص */}
+                {(() => {
+                  let routePoints = order.items;
+                  
+                  // إذا كان items نص JSON، نحاول تحويله
+                  if (routePoints && typeof routePoints === 'string') {
+                    try {
+                      routePoints = JSON.parse(routePoints);
+                    } catch (e) {
+                      console.warn('⚠️ فشل تحويل items من JSON:', e);
+                      routePoints = null;
+                    }
+                  }
+                  
+                  const hasMultiplePoints = routePoints && 
+                    Array.isArray(routePoints) && 
+                    routePoints.length > 0;
+                  
+                  if (hasMultiplePoints) {
+                    const firstPoint = routePoints[0];
+                    const lastPoint = routePoints[routePoints.length - 1];
+                    const firstPointObj = typeof firstPoint === 'object' ? firstPoint : { address: firstPoint };
+                    const lastPointObj = typeof lastPoint === 'object' ? lastPoint : { address: lastPoint };
+                    const firstAddress = firstPointObj.address || firstPoint || 'عنوان غير محدد';
+                    const lastAddress = lastPointObj.address || lastPoint || 'عنوان غير محدد';
+                    
+                    return (
+                      <View style={styles.addressRow}>
+                        <Ionicons name="map" size={16} color="#007AFF" />
+                        <View style={styles.addressTextContainer}>
+                          <Text style={styles.addressLabel}>مسار متعدد النقاط ({routePoints.length} نقطة):</Text>
+                          <Text style={styles.orderAddress} numberOfLines={1}>
+                            {typeof firstAddress === 'string' ? firstAddress : JSON.stringify(firstAddress)} → ... → {typeof lastAddress === 'string' ? lastAddress : JSON.stringify(lastAddress)}
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  }
+                  return null;
+                })()}
+                {/* إذا لم يكن هناك items أو كان فارغاً، نعرض العنوانين البسيطين */}
+                {(!order.items || !Array.isArray(order.items) || order.items.length === 0) && (
+                  <>
+                    <View style={styles.addressRow}>
+                      <Ionicons name="location" size={16} color="#34C759" />
+                      <View style={styles.addressTextContainer}>
+                        <Text style={styles.addressLabel}>من:</Text>
+                        <Text style={styles.orderAddress}>{order.pickup_address}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.addressRow}>
+                      <Ionicons name="location" size={16} color="#FF3B30" />
+                      <View style={styles.addressTextContainer}>
+                        <Text style={styles.addressLabel}>إلى:</Text>
+                        <Text style={styles.orderAddress}>{order.delivery_address}</Text>
+                      </View>
+                    </View>
+                  </>
+                )}
               </View>
 
               {/* وقت إنشاء الطلب */}

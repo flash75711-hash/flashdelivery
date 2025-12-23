@@ -52,6 +52,7 @@ export default function AdminDashboardScreen() {
   const [notificationMessage, setNotificationMessage] = useState('');
   const [notificationType, setNotificationType] = useState<'info' | 'warning' | 'error' | 'success'>('info');
   const [notificationTarget, setNotificationTarget] = useState<'customers' | 'drivers' | null>(null);
+  const [showOrderTypeModal, setShowOrderTypeModal] = useState(false);
   const [sendingNotification, setSendingNotification] = useState(false);
 
   useEffect(() => {
@@ -254,6 +255,81 @@ export default function AdminDashboardScreen() {
         {/* قسم الإشعارات */}
         <NotificationCard compact={true} />
 
+        {/* قسم طلب جديد */}
+        <View style={styles.newOrderSection}>
+          <TouchableOpacity
+            style={styles.newOrderCard}
+            onPress={() => setShowOrderTypeModal(true)}
+          >
+            <Ionicons name="add-circle" size={32} color="#007AFF" />
+            <View style={styles.newOrderTextContainer}>
+              <Text style={styles.newOrderTitle}>طلب جديد</Text>
+              <Text style={styles.newOrderDescription}>إنشاء طلب توصيل جديد</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={24} color="#999" />
+          </TouchableOpacity>
+        </View>
+
+        {/* Modal لاختيار نوع الطلب */}
+        <Modal
+          visible={showOrderTypeModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowOrderTypeModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>اختر نوع الطلب</Text>
+                <TouchableOpacity
+                  onPress={() => setShowOrderTypeModal(false)}
+                  style={styles.modalCloseButton}
+                >
+                  <Ionicons name="close" size={24} color="#666" />
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                style={styles.orderTypeOption}
+                onPress={() => {
+                  setShowOrderTypeModal(false);
+                  router.push('/orders/deliver-package');
+                }}
+              >
+                <View style={[styles.orderTypeIcon, { backgroundColor: '#E3F2FD' }]}>
+                  <Ionicons name="cube" size={32} color="#007AFF" />
+                </View>
+                <View style={styles.orderTypeTextContainer}>
+                  <Text style={styles.orderTypeOptionTitle}>{t('customer.deliverPackage')}</Text>
+                  <Text style={styles.orderTypeOptionDescription}>
+                    توصيل طرد من موقع إلى آخر
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={24} color="#999" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.orderTypeOption}
+                onPress={() => {
+                  setShowOrderTypeModal(false);
+                  router.push('/orders/outside-order');
+                }}
+              >
+                <View style={[styles.orderTypeIcon, { backgroundColor: '#E8F5E9' }]}>
+                  <Ionicons name="cart" size={32} color="#34C759" />
+                </View>
+                <View style={styles.orderTypeTextContainer}>
+                  <Text style={styles.orderTypeOptionTitle}>{t('customer.outsideOrder')}</Text>
+                  <Text style={styles.orderTypeOptionDescription}>
+                    طلب شراء من متجر معين
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={24} color="#999" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
         {/* قسم إرسال الإشعارات العامة */}
         <View style={styles.settingsSection}>
           <Text style={styles.settingsTitle}>إرسال إشعارات عامة</Text>
@@ -443,6 +519,35 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   content: {
     flex: 1,
     padding: 20,
+  },
+  newOrderSection: {
+    marginBottom: 20,
+  },
+  newOrderCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  newOrderTextContainer: {
+    flex: 1,
+  },
+  newOrderTitle: {
+    fontSize: responsive.getResponsiveFontSize(18),
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 4,
+  },
+  newOrderDescription: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#666',
   },
   statsGrid: {
     flexDirection: 'row',
@@ -767,6 +872,35 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     color: '#fff',
     fontSize: responsive.getResponsiveFontSize(16),
     fontWeight: '600',
+  },
+  orderTypeOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: '#f9f9f9',
+    marginBottom: 12,
+    gap: 16,
+  },
+  orderTypeIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  orderTypeTextContainer: {
+    flex: 1,
+  },
+  orderTypeOptionTitle: {
+    fontSize: responsive.getResponsiveFontSize(18),
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 4,
+  },
+  orderTypeOptionDescription: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#666',
   },
 });
 

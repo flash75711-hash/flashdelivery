@@ -40,22 +40,105 @@ async function sendPushNotification(userId: string, title: string, message: stri
 
 /**
  * إنشاء إشعار واحد وإرسال Push Notification
+ * يستخدم الدالة insert_notification_for_driver للسائقين لتجاوز RLS
  */
 export async function createNotification(params: CreateNotificationParams) {
   try {
-    const { error } = await supabase
-      .from('notifications')
-      .insert({
-        user_id: params.user_id,
-        title: params.title,
-        message: params.message,
-        type: params.type || 'info',
-        order_id: params.order_id || null,
+    // الحصول على المستخدم الحالي
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser) {
+      console.error('[createNotification] No authenticated user');
+      return { success: false, error: new Error('No authenticated user') };
+    }
+
+    // التحقق من دور المستخدم الحالي والمستلم
+    const { data: currentUser, error: currentUserError } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', authUser.id)
+      .maybeSingle();
+
+    if (currentUserError) {
+      console.error('[createNotification] Error fetching current user:', currentUserError);
+    }
+
+    const { data: targetUser, error: targetUserError } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', params.user_id)
+      .maybeSingle();
+
+    if (targetUserError) {
+      console.error('[createNotification] Error fetching target user:', targetUserError);
+    }
+
+    const isCustomer = currentUser?.role === 'customer';
+    const isDriver = currentUser?.role === 'driver';
+    const targetIsDriver = targetUser?.role === 'driver';
+    const targetIsCustomer = targetUser?.role === 'customer';
+
+    // إذا كان المستخدم عميلاً والمستلم سائق، استخدم الدالة RPC
+    if (isCustomer && targetIsDriver) {
+      const { error } = await supabase.rpc('insert_notification_for_driver', {
+        p_user_id: params.user_id,
+        p_title: params.title,
+        p_message: params.message,
+        p_type: params.type || 'info',
+        p_order_id: params.order_id || null,
       });
-    
-    if (error) {
-      console.error('Error creating notification:', error);
-      return { success: false, error };
+
+      if (error) {
+        console.error('Error creating notification:', error);
+        return { success: false, error };
+      }
+    } 
+    // إذا كان المستخدم سائقاً والمستلم عميل، استخدم الدالة RPC
+    else if (isDriver && targetIsCustomer) {
+      const { error } = await supabase.rpc('insert_notification_for_customer_by_driver', {
+        p_user_id: params.user_id,
+        p_title: params.title,
+        p_message: params.message,
+        p_type: params.type || 'info',
+        p_order_id: params.order_id || null,
+      });
+
+      if (error) {
+        console.error('Error creating notification:', error);
+        return { success: false, error };
+      }
+    }
+    // إذا كان المستخدم سائقاً ولكن لم نتمكن من التحقق من دور المستلم، جرب RPC function
+    else if (isDriver && !targetUser) {
+      // Fallback: إذا كان المستخدم سائقاً ولم نتمكن من التحقق من دور المستلم، استخدم RPC function
+      const { error } = await supabase.rpc('insert_notification_for_customer_by_driver', {
+        p_user_id: params.user_id,
+        p_title: params.title,
+        p_message: params.message,
+        p_type: params.type || 'info',
+        p_order_id: params.order_id || null,
+      });
+
+      if (error) {
+        console.error('Error creating notification:', error);
+        return { success: false, error };
+      }
+    }
+    // للمستخدمين الآخرين (مثل المديرين)، استخدم INSERT العادي
+    else {
+      const { error } = await supabase
+        .from('notifications')
+        .insert({
+          user_id: params.user_id,
+          title: params.title,
+          message: params.message,
+          type: params.type || 'info',
+          order_id: params.order_id || null,
+        });
+      
+      if (error) {
+        console.error('Error creating notification:', error);
+        return { success: false, error };
+      }
     }
     
     // إرسال Push Notification
@@ -84,25 +167,29 @@ export async function createNotifications(notifications: CreateNotificationParam
       .from('profiles')
       .select('role')
       .eq('id', (await supabase.auth.getUser()).data.user?.id || '')
-      .single();
+      .maybeSingle();
 
     const isCustomer = currentUser?.role === 'customer';
+    const isDriver = currentUser?.role === 'driver';
 
-    // إذا كان المستخدم عميلاً، استخدم الدالة للسائقين
-    if (isCustomer) {
+    // إذا كان المستخدم عميلاً أو سائقاً، استخدم الدالة RPC المناسبة
+    if (isCustomer || isDriver) {
       let successCount = 0;
       let errorCount = 0;
 
       for (const notification of notifications) {
-        // التحقق من أن المستلم سائق
+        // التحقق من دور المستلم
         const { data: targetUser } = await supabase
           .from('profiles')
           .select('role')
           .eq('id', notification.user_id)
-          .single();
+          .maybeSingle();
 
-        if (targetUser?.role === 'driver') {
-          // استخدام الدالة للسائقين
+        const targetIsDriver = targetUser?.role === 'driver';
+        const targetIsCustomer = targetUser?.role === 'customer';
+
+        // إذا كان المستخدم عميلاً والمستلم سائق
+        if (isCustomer && targetIsDriver) {
           try {
             const { error } = await supabase.rpc('insert_notification_for_driver', {
               p_user_id: notification.user_id,
@@ -127,6 +214,35 @@ export async function createNotifications(notifications: CreateNotificationParam
             }
           } catch (err) {
             console.error(`Error creating notification for driver ${notification.user_id}:`, err);
+            errorCount++;
+          }
+        }
+        // إذا كان المستخدم سائقاً والمستلم عميل
+        else if (isDriver && targetIsCustomer) {
+          try {
+            const { error } = await supabase.rpc('insert_notification_for_customer_by_driver', {
+              p_user_id: notification.user_id,
+              p_title: notification.title,
+              p_message: notification.message,
+              p_type: notification.type || 'info',
+              p_order_id: notification.order_id || null,
+            });
+
+            if (error) {
+              console.error(`Error creating notification for customer ${notification.user_id}:`, error);
+              errorCount++;
+            } else {
+              successCount++;
+              // إرسال Push Notification
+              await sendPushNotification(
+                notification.user_id,
+                notification.title,
+                notification.message,
+                notification.order_id ? { order_id: notification.order_id } : undefined
+              );
+            }
+          } catch (err) {
+            console.error(`Error creating notification for customer ${notification.user_id}:`, err);
             errorCount++;
           }
         } else {

@@ -1,0 +1,572 @@
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  SafeAreaView,
+  ScrollView,
+  TouchableOpacity,
+  ActivityIndicator,
+  Platform,
+  Modal,
+  TextInput,
+  Alert,
+} from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/contexts/AuthContext';
+import responsive from '@/utils/responsive';
+import { createNotification } from '@/lib/notifications';
+
+interface Order {
+  id: string;
+  status: string;
+  order_type: string;
+  pickup_address: string;
+  delivery_address: string;
+  total_fee: number;
+  created_at: string;
+  items?: any;
+  negotiated_price?: number;
+  negotiation_status?: string;
+  driver_proposed_price?: number;
+  customer_proposed_price?: number;
+  customer_id: string;
+  driver_id?: string | null;
+}
+
+export default function OrderDetailScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const { user } = useAuth();
+  const router = useRouter();
+  const [order, setOrder] = useState<Order | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [showNegotiation, setShowNegotiation] = useState(false);
+  const [proposedPrice, setProposedPrice] = useState('');
+
+  useEffect(() => {
+    loadOrder();
+  }, [id]);
+
+  const loadOrder = async () => {
+    if (!id) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      if (error) throw error;
+      setOrder(data);
+    } catch (error) {
+      console.error('Error loading order:', error);
+      Alert.alert('خطأ', 'فشل تحميل تفاصيل الطلب');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const acceptDriverProposal = async () => {
+    if (!order || !order.driver_proposed_price) return;
+
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({
+          negotiation_status: 'accepted',
+          negotiated_price: order.driver_proposed_price,
+          total_fee: order.driver_proposed_price,
+        })
+        .eq('id', order.id);
+
+      if (error) throw error;
+
+      // إشعار السائق
+      if (order.driver_id) {
+        await createNotification({
+          user_id: order.driver_id,
+          title: 'تم قبول اقتراحك',
+          message: `تم قبول اقتراحك للسعر ${order.driver_proposed_price} ج.م`,
+          type: 'success',
+          order_id: order.id,
+        });
+      }
+
+      Alert.alert('نجح', 'تم قبول اقتراح السائق');
+      setShowNegotiation(false);
+      loadOrder();
+    } catch (error: any) {
+      console.error('Error accepting proposal:', error);
+      Alert.alert('خطأ', error.message || 'فشل قبول الاقتراح');
+    }
+  };
+
+  const proposePrice = async () => {
+    if (!order || !proposedPrice) return;
+
+    const price = parseFloat(proposedPrice);
+    if (isNaN(price) || price <= 0) {
+      Alert.alert('خطأ', 'يرجى إدخال سعر صحيح');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({
+          negotiation_status: 'customer_proposed',
+          customer_proposed_price: price,
+        })
+        .eq('id', order.id);
+
+      if (error) throw error;
+
+      // إشعار السائق
+      if (order.driver_id) {
+        const notificationResult = await createNotification({
+          user_id: order.driver_id,
+          title: 'اقتراح سعر جديد',
+          message: `العميل يقترح سعر ${price} ج.م`,
+          type: 'info',
+          order_id: order.id,
+        });
+        
+        // إذا فشل إنشاء الإشعار، سجل الخطأ لكن لا توقف العملية
+        if (!notificationResult.success) {
+          console.error('Failed to create notification:', notificationResult.error);
+          // الإشعار ليس ضرورياً لعملية الإرسال، لكن يجب تسجيل الخطأ
+        }
+      }
+
+      Alert.alert('نجح', 'تم إرسال اقتراحك');
+      setShowNegotiation(false);
+      setProposedPrice('');
+      loadOrder();
+    } catch (error: any) {
+      console.error('Error proposing price:', error);
+      Alert.alert('خطأ', error.message || 'فشل إرسال الاقتراح');
+    }
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={24} color="#1a1a1a" />
+          </TouchableOpacity>
+          <Text style={styles.title}>تفاصيل الطلب</Text>
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#007AFF" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!order) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={24} color="#1a1a1a" />
+          </TouchableOpacity>
+          <Text style={styles.title}>تفاصيل الطلب</Text>
+        </View>
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>الطلب غير موجود</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const isCustomer = user?.id === order.customer_id;
+  const hasNegotiation = order.negotiation_status === 'driver_proposed' && order.driver_proposed_price;
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={24} color="#1a1a1a" />
+        </TouchableOpacity>
+        <Text style={styles.title}>تفاصيل الطلب</Text>
+      </View>
+
+      <ScrollView style={styles.content}>
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.orderType}>
+              {order.order_type === 'package' ? 'توصيل طرد' : 'طلب شراء'}
+            </Text>
+            <View style={[styles.statusBadge, { backgroundColor: getStatusColor(order.status) + '20' }]}>
+              <Text style={[styles.statusText, { color: getStatusColor(order.status) }]}>
+                {getStatusText(order.status)}
+              </Text>
+            </View>
+          </View>
+
+          <Text style={styles.date}>
+            {new Date(order.created_at).toLocaleDateString('ar-EG', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
+          </Text>
+
+          {order.pickup_address && (
+            <View style={styles.addressRow}>
+              <Ionicons name="location" size={20} color="#34C759" />
+              <Text style={styles.address}>من: {order.pickup_address}</Text>
+            </View>
+          )}
+
+          {order.delivery_address && (
+            <View style={styles.addressRow}>
+              <Ionicons name="location" size={20} color="#FF3B30" />
+              <Text style={styles.address}>إلى: {order.delivery_address}</Text>
+            </View>
+          )}
+
+          <View style={styles.priceRow}>
+            <Text style={styles.priceLabel}>الأجرة:</Text>
+            <Text style={styles.priceValue}>
+              {order.negotiated_price || order.total_fee} ج.م
+            </Text>
+          </View>
+
+          {hasNegotiation && isCustomer && (
+            <TouchableOpacity
+              style={styles.negotiationButton}
+              onPress={() => setShowNegotiation(true)}
+            >
+              <Ionicons name="cash" size={20} color="#FF9500" />
+              <Text style={styles.negotiationButtonText}>
+                اقتراح سعر من السائق: {order.driver_proposed_price} ج.م
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </ScrollView>
+
+      {/* Modal للتفاوض */}
+      <Modal
+        visible={showNegotiation}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowNegotiation(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>التفاوض على السعر</Text>
+              <TouchableOpacity onPress={() => setShowNegotiation(false)}>
+                <Ionicons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView>
+              <View style={styles.negotiationInfo}>
+                <View style={styles.negotiationPriceRow}>
+                  <Text style={styles.negotiationPriceLabel}>السعر الأصلي:</Text>
+                  <Text style={styles.negotiationOriginalPrice}>{order.total_fee} ج.م</Text>
+                </View>
+
+                {order.driver_proposed_price && (
+                  <View style={styles.negotiationPriceRow}>
+                    <Text style={styles.negotiationPriceLabel}>السعر المقترح من السائق:</Text>
+                    <Text style={styles.negotiationDriverPrice}>
+                      {order.driver_proposed_price} ج.م
+                    </Text>
+                  </View>
+                )}
+
+                {order.negotiation_status === 'driver_proposed' && (
+                  <TouchableOpacity
+                    style={[styles.negotiationActionButton, styles.acceptButton]}
+                    onPress={acceptDriverProposal}
+                  >
+                    <Text style={styles.negotiationActionButtonText}>
+                      قبول اقتراح السائق ({order.driver_proposed_price} ج.م)
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
+                {order.negotiation_status !== 'accepted' && (
+                  <View style={styles.negotiationInputContainer}>
+                    <Text style={styles.negotiationInputLabel}>اقترح سعر جديد:</Text>
+                    <TextInput
+                      style={styles.negotiationInput}
+                      value={proposedPrice}
+                      onChangeText={setProposedPrice}
+                      keyboardType="numeric"
+                      placeholder="أدخل السعر"
+                      placeholderTextColor="#999"
+                    />
+                    <TouchableOpacity
+                      style={[styles.negotiationActionButton, styles.proposeButton]}
+                      onPress={proposePrice}
+                      disabled={!proposedPrice}
+                    >
+                      <Text style={styles.negotiationActionButtonText}>إرسال الاقتراح</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    </SafeAreaView>
+  );
+}
+
+const getStatusColor = (status: string) => {
+  switch (status) {
+    case 'completed':
+      return '#34C759';
+    case 'accepted':
+    case 'pickedUp':
+    case 'inTransit':
+      return '#007AFF';
+    case 'cancelled':
+      return '#FF3B30';
+    default:
+      return '#FF9500';
+  }
+};
+
+const getStatusText = (status: string) => {
+  switch (status) {
+    case 'pending':
+      return 'قيد الانتظار';
+    case 'accepted':
+      return 'مقبول';
+    case 'pickedUp':
+      return 'تم الاستلام';
+    case 'inTransit':
+      return 'قيد التوصيل';
+    case 'completed':
+      return 'مكتمل';
+    case 'cancelled':
+      return 'ملغي';
+    default:
+      return status;
+  }
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    padding: responsive.getResponsivePadding(),
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    gap: 12,
+  },
+  title: {
+    fontSize: responsive.getResponsiveFontSize(20),
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+    flex: 1,
+    textAlign: 'right',
+  },
+  content: {
+    flex: 1,
+    padding: responsive.getResponsivePadding(),
+  },
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  orderType: {
+    fontSize: responsive.getResponsiveFontSize(20),
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+  },
+  statusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  statusText: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    fontWeight: '600',
+  },
+  date: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#666',
+    marginBottom: 16,
+    textAlign: 'right',
+  },
+  addressRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginBottom: 12,
+  },
+  address: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    color: '#333',
+    flex: 1,
+    textAlign: 'right',
+  },
+  priceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  priceLabel: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    color: '#666',
+  },
+  priceValue: {
+    fontSize: responsive.getResponsiveFontSize(20),
+    fontWeight: 'bold',
+    color: '#34C759',
+  },
+  negotiationButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF4E6',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 16,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#FF9500',
+  },
+  negotiationButtonText: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#FF9500',
+    fontWeight: '600',
+    flex: 1,
+    textAlign: 'right',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  emptyText: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    color: '#999',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: responsive.isLargeScreen() ? 600 : '100%',
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontSize: responsive.getResponsiveFontSize(20),
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+  },
+  negotiationInfo: {
+    gap: 16,
+  },
+  negotiationPriceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  negotiationPriceLabel: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#666',
+  },
+  negotiationOriginalPrice: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  negotiationDriverPrice: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+    color: '#34C759',
+  },
+  negotiationInputContainer: {
+    marginTop: 16,
+  },
+  negotiationInputLabel: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 8,
+    textAlign: 'right',
+  },
+  negotiationInput: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+    padding: 16,
+    fontSize: responsive.getResponsiveFontSize(16),
+    textAlign: 'right',
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  negotiationActionButton: {
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  acceptButton: {
+    backgroundColor: '#34C759',
+  },
+  proposeButton: {
+    backgroundColor: '#007AFF',
+  },
+  negotiationActionButtonText: {
+    color: '#fff',
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+  },
+});
+

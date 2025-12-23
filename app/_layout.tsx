@@ -98,7 +98,6 @@ export default function RootLayout() {
           <Stack.Screen name="(auth)" />
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="index" />
-          <Stack.Screen name="customer/outside-order" />
         </Stack>
       </AuthProvider>
     </I18nextProvider>

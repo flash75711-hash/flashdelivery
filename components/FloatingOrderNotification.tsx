@@ -23,6 +23,7 @@ interface OrderNotification {
   order_type?: string;
   pickup_address?: string;
   delivery_address?: string;
+  items?: any; // النقاط المتعددة في المسار
 }
 
 interface FloatingOrderNotificationProps {
@@ -69,50 +70,7 @@ export default function FloatingOrderNotification({
     
     setLoading(true);
     try {
-      // تحديث حالة الطلب إلى accepted
-      const { error: updateError } = await supabase
-        .from('orders')
-        .update({
-          status: 'accepted',
-          driver_id: user.id,
-        })
-        .eq('id', notification.order_id);
-
-      if (updateError) throw updateError;
-
-      // جلب بيانات الطلب لإرسال إشعار للعميل
-      const { data: order } = await supabase
-        .from('orders')
-        .select('customer_id')
-        .eq('id', notification.order_id)
-        .single();
-
-      if (order?.customer_id) {
-        // إرسال إشعار للعميل باستخدام دالة SECURITY DEFINER
-        await supabase.rpc('insert_notification_for_customer', {
-          p_user_id: order.customer_id,
-          p_title: 'تم قبول طلبك',
-          p_message: 'تم قبول طلبك وسيتم البدء في التوصيل قريباً.',
-          p_type: 'success',
-          p_order_id: notification.order_id,
-        }).catch(err => {
-          console.error('Error sending notification to customer:', err);
-          // محاولة بديلة: INSERT مباشر (يحتاج RLS policy)
-          supabase
-            .from('notifications')
-            .insert({
-              user_id: order.customer_id,
-              title: 'تم قبول طلبك',
-              message: 'تم قبول طلبك وسيتم البدء في التوصيل قريباً.',
-              type: 'success',
-              order_id: notification.order_id,
-            }).catch(() => {
-              console.log('Both notification methods failed');
-            });
-        });
-      }
-
-      // تحديث الإشعار كمقروء
+      // تحديث الإشعار كمقروء فقط
       await supabase
         .from('notifications')
         .update({ is_read: true })
@@ -121,8 +79,9 @@ export default function FloatingOrderNotification({
       onAccept();
       onDismiss();
       
-      // الانتقال إلى صفحة الرحلات مع فتح التفاوض
-      // استخدام setTimeout للتأكد من أن الإشعار يختفي قبل الانتقال
+      // الانتقال إلى صفحة الرحلات مع فتح صفحة التفاوض
+      // في صفحة التفاوض، يمكن للسائق قبول السعر الأصلي أو اقتراح سعر جديد
+      // بعد الموافقة على السعر، سيتم تحديث حالة الطلب إلى accepted
       setTimeout(() => {
         router.push({
           pathname: '/(tabs)/driver/trips',
@@ -180,7 +139,7 @@ export default function FloatingOrderNotification({
           <View style={styles.header}>
             <View style={styles.headerLeft}>
               <Ionicons 
-                name={notification.order_type === 'package' ? 'cube' : 'cart'} 
+                name="map" 
                 size={24} 
                 color="#007AFF" 
               />
@@ -191,7 +150,10 @@ export default function FloatingOrderNotification({
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.message}>{notification.message}</Text>
+          {/* عرض الرسالة فقط إذا كانت موجودة */}
+          {notification.message && (
+            <Text style={styles.message}>{notification.message}</Text>
+          )}
 
           {/* معلومات الطلب */}
           <View style={styles.orderInfo}>
@@ -200,23 +162,89 @@ export default function FloatingOrderNotification({
               <Text style={styles.price}>{notification.total_fee} ج.م</Text>
             </View>
             
-            {notification.pickup_address && (
-              <View style={styles.addressRow}>
-                <Ionicons name="location" size={16} color="#34C759" />
-                <Text style={styles.address} numberOfLines={1}>
-                  من: {notification.pickup_address}
-                </Text>
-              </View>
-            )}
-            
-            {notification.delivery_address && (
-              <View style={styles.addressRow}>
-                <Ionicons name="location" size={16} color="#FF3B30" />
-                <Text style={styles.address} numberOfLines={1}>
-                  إلى: {notification.delivery_address}
-                </Text>
-              </View>
-            )}
+            {/* عرض النقاط - هذا هو الشيء الرئيسي */}
+            {(() => {
+              let routePoints = notification.items;
+              
+              // إذا كان items نص JSON، نحاول تحويله
+              if (routePoints && typeof routePoints === 'string') {
+                try {
+                  routePoints = JSON.parse(routePoints);
+                } catch (e) {
+                  console.warn('⚠️ فشل تحويل items من JSON:', e);
+                  routePoints = null;
+                }
+              }
+              
+              const hasMultiplePoints = routePoints && 
+                Array.isArray(routePoints) && 
+                routePoints.length > 0;
+              
+              if (hasMultiplePoints) {
+                return (
+                  <>
+                    <View style={styles.routeHeader}>
+                      <Ionicons name="map" size={18} color="#007AFF" />
+                      <Text style={styles.routeTitle}>
+                        المسار ({routePoints.length} نقطة):
+                      </Text>
+                    </View>
+                    {routePoints.map((point: any, index: number) => {
+                      const pointObj = typeof point === 'object' ? point : { address: point, description: '' };
+                      const pointAddress = pointObj.address || pointObj || point || 'عنوان غير محدد';
+                      const pointDescription = pointObj.description || '';
+                      
+                      // تحديد نوع النقطة
+                      const isFirst = index === 0;
+                      const isLast = index === routePoints.length - 1;
+                      const isOnly = routePoints.length === 1;
+                      
+                      return (
+                        <View key={index} style={[styles.addressRow, styles.routePoint]}>
+                          <Ionicons 
+                            name={isFirst && !isOnly ? "play-circle" : isLast ? "checkmark-circle" : "ellipse"} 
+                            size={16} 
+                            color={isFirst && !isOnly ? "#34C759" : isLast ? "#FF3B30" : "#007AFF"} 
+                          />
+                          <View style={styles.pointContent}>
+                            <Text style={styles.pointLabel}>
+                              {isOnly ? 'النقطة' : isFirst ? 'نقطة الانطلاق' : isLast ? 'نقطة الوصول' : `نقطة ${index + 1}`}
+                            </Text>
+                            <Text style={styles.address} numberOfLines={2}>
+                              {pointDescription ? `${pointDescription}: ` : ''}
+                              {typeof pointAddress === 'string' ? pointAddress : JSON.stringify(pointAddress)}
+                            </Text>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </>
+                );
+              }
+              
+              // إذا لم يكن هناك items، نعرض العنوانين البسيطين
+              return (
+                <>
+                  {notification.pickup_address && (
+                    <View style={styles.addressRow}>
+                      <Ionicons name="location" size={16} color="#34C759" />
+                      <Text style={styles.address} numberOfLines={1}>
+                        من: {notification.pickup_address}
+                      </Text>
+                    </View>
+                  )}
+                  
+                  {notification.delivery_address && (
+                    <View style={styles.addressRow}>
+                      <Ionicons name="location" size={16} color="#FF3B30" />
+                      <Text style={styles.address} numberOfLines={1}>
+                        إلى: {notification.delivery_address}
+                      </Text>
+                    </View>
+                  )}
+                </>
+              );
+            })()}
           </View>
 
           {/* أزرار القبول والرفض */}
@@ -315,17 +343,53 @@ const getStyles = () => StyleSheet.create({
     fontWeight: 'bold',
     color: '#34C759',
   },
-  addressRow: {
+  routeHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    marginBottom: 12,
+    marginTop: 4,
+  },
+  routeTitle: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+  },
+  addressRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
     marginTop: 8,
+  },
+  routePoint: {
+    backgroundColor: '#f9f9f9',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#007AFF',
+  },
+  pointContent: {
+    flex: 1,
+  },
+  pointLabel: {
+    fontSize: responsive.getResponsiveFontSize(13),
+    fontWeight: '600',
+    color: '#007AFF',
+    marginBottom: 4,
+  },
+  addressLabel: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    fontWeight: '600',
+    color: '#007AFF',
+    marginBottom: 4,
   },
   address: {
     fontSize: responsive.getResponsiveFontSize(12),
     color: '#666',
     flex: 1,
     textAlign: 'right',
+    lineHeight: 18,
   },
   actions: {
     flexDirection: 'row',

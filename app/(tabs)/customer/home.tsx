@@ -104,7 +104,7 @@ export default function CustomerHomeScreen() {
       <View>
         <TouchableOpacity
           style={styles.card}
-          onPress={() => router.push('/customer/deliver-package')}
+          onPress={() => router.push('/orders/deliver-package')}
         >
           <View style={styles.cardIcon}>
             <Ionicons name="cube" size={48} color="#007AFF" />
@@ -117,7 +117,7 @@ export default function CustomerHomeScreen() {
 
         <TouchableOpacity
           style={styles.card}
-          onPress={() => router.push('/customer/outside-order')}
+          onPress={() => router.push('/orders/outside-order')}
         >
           <View style={styles.cardIcon}>
             <Ionicons name="cart" size={48} color="#34C759" />

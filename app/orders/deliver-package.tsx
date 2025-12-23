@@ -348,8 +348,14 @@ export default function DeliverPackageScreen() {
         ? 'تم إرسال طلبك بنجاح! جاري البحث عن سائق...'
         : 'تم إرسال طلبك بنجاح!';
       
-      // توجيه مباشر إلى قائمة الطلبات
-      router.replace('/(tabs)/customer/orders');
+      // التوجيه حسب دور المستخدم
+      if (user?.role === 'driver') {
+        router.replace('/(tabs)/driver/my-orders');
+      } else if (user?.role === 'admin') {
+        router.replace('/(tabs)/admin/my-orders');
+      } else {
+        router.replace('/(tabs)/customer/my-orders');
+      }
       
       // عرض رسالة النجاح بعد التوجيه
       setTimeout(() => {
@@ -499,13 +505,29 @@ export default function DeliverPackageScreen() {
         // جلب تفاصيل الطلب
         const { data: orderData } = await supabase
           .from('orders')
-          .select('order_type, pickup_address, delivery_address')
+          .select('order_type, pickup_address, delivery_address, items')
           .eq('id', orderId)
           .single();
 
+        // بناء رسالة الإشعار مع التركيز على النقاط
+        let title = 'مسار جديد متاح';
+        let message = '';
+        
+        // إذا كان الطلب يحتوي على عدة نقاط، نركز على النقاط
+        if (orderData?.items && Array.isArray(orderData.items) && orderData.items.length > 0) {
+          const firstPoint = orderData.items[0];
+          const lastPoint = orderData.items[orderData.items.length - 1];
+          const firstAddress = typeof firstPoint === 'object' ? (firstPoint.address || firstPoint.description || 'نقطة الانطلاق') : firstPoint;
+          const lastAddress = typeof lastPoint === 'object' ? (lastPoint.address || lastPoint.description || 'نقطة الوصول') : lastPoint;
+          
+          title = `مسار متعدد النقاط (${orderData.items.length} نقطة)`;
+          message = `من: ${firstAddress}\nإلى: ${lastAddress}\nالسعر: ${orderPrice} ج.م\nفي نطاق ${radius} كم`;
+        } else {
+          // طلب بسيط (نقطتان فقط)
+          message = `من: ${orderData?.pickup_address || 'نقطة الانطلاق'}\nإلى: ${orderData?.delivery_address || 'نقطة الوصول'}\nالسعر: ${orderPrice} ج.م\nفي نطاق ${radius} كم`;
+        }
+        
         // استخدام الدالة insert_notification_for_driver لتجاوز مشاكل RLS
-        const title = 'طلب جديد متاح';
-        const message = `يوجد طلب جديد متاح في نطاق ${radius} كم. السعر: ${orderPrice} ج.م`;
         const type = 'info';
 
         let successCount = 0;
@@ -554,7 +576,7 @@ export default function DeliverPackageScreen() {
 
       const initialDrivers = await findDriversInRadius(initialRadius);
       if (initialDrivers.length > 0) {
-        await notifyDrivers(initialDrivers, initialRadius);
+        await notifyDrivers(initialDrivers, initialRadius, orderId, orderPrice);
       } else {
         // إذا لم يتم العثور على سائقين في النطاق، نرسل إشعارات لجميع السائقين النشطين
         console.log('⚠️ لم يتم العثور على سائقين في النطاق الأولي، إرسال إشعارات لجميع السائقين النشطين');
@@ -671,7 +693,20 @@ export default function DeliverPackageScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity 
-          onPress={() => router.replace('/(tabs)/customer/home')}
+          onPress={() => {
+            if (router.canGoBack()) {
+              router.back();
+            } else {
+              // التوجيه حسب دور المستخدم
+              if (user?.role === 'driver') {
+                router.replace('/(tabs)/driver/dashboard');
+              } else if (user?.role === 'admin') {
+                router.replace('/(tabs)/admin/dashboard');
+              } else {
+                router.replace('/(tabs)/customer/home');
+              }
+            }
+          }}
         >
           <Ionicons name="arrow-back" size={24} color="#1a1a1a" />
         </TouchableOpacity>
@@ -729,7 +764,7 @@ export default function DeliverPackageScreen() {
           <>
             <View style={styles.section}>
               <View style={styles.labelRow}>
-                <Text style={styles.label}>{t('customer.pickupLocation')}</Text>
+                <Text style={styles.label}>عنوان الاستلام</Text>
                 <View style={styles.locationButtons}>
                   <TouchableOpacity
                     style={styles.locationButton}
@@ -764,7 +799,7 @@ export default function DeliverPackageScreen() {
 
             <View style={styles.section}>
               <View style={styles.labelRow}>
-                <Text style={styles.label}>{t('customer.deliveryLocation')}</Text>
+                <Text style={styles.label}>عنوان التوصيل</Text>
                 <View style={styles.locationButtons}>
                   <TouchableOpacity
                     style={styles.locationButton}
@@ -900,7 +935,7 @@ export default function DeliverPackageScreen() {
           {loading ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.submitButtonText}>{t('common.submit')}</Text>
+            <Text style={styles.submitButtonText}>إرسال الطلب</Text>
           )}
         </TouchableOpacity>
       </ScrollView>

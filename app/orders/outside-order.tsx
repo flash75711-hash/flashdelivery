@@ -31,6 +31,7 @@ import {
   findFarthestPlaceFromCustomer,
   orderPlacesByDistance,
 } from '@/lib/priceCalculation';
+import { calculateDistance } from '@/lib/locationUtils';
 import { createNotifications, notifyAllActiveDrivers } from '@/lib/notifications';
 
 interface Place {
@@ -615,13 +616,29 @@ export default function OutsideOrderScreen() {
         // جلب تفاصيل الطلب
         const { data: orderData } = await supabase
           .from('orders')
-          .select('order_type, pickup_address, delivery_address')
+          .select('order_type, pickup_address, delivery_address, items')
           .eq('id', orderId)
           .single();
 
+        // بناء رسالة الإشعار مع التركيز على النقاط
+        let title = 'مسار جديد متاح';
+        let message = '';
+        
+        // إذا كان الطلب يحتوي على عدة نقاط، نركز على النقاط
+        if (orderData?.items && Array.isArray(orderData.items) && orderData.items.length > 0) {
+          const firstPoint = orderData.items[0];
+          const lastPoint = orderData.items[orderData.items.length - 1];
+          const firstAddress = typeof firstPoint === 'object' ? (firstPoint.address || firstPoint.description || 'نقطة الانطلاق') : firstPoint;
+          const lastAddress = typeof lastPoint === 'object' ? (lastPoint.address || lastPoint.description || 'نقطة الوصول') : lastPoint;
+          
+          title = `مسار متعدد النقاط (${orderData.items.length} نقطة)`;
+          message = `من: ${firstAddress}\nإلى: ${lastAddress}\nالسعر: ${orderPrice} ج.م\nفي نطاق ${radius} كم`;
+        } else {
+          // طلب بسيط (نقطتان فقط)
+          message = `من: ${orderData?.pickup_address || 'نقطة الانطلاق'}\nإلى: ${orderData?.delivery_address || 'نقطة الوصول'}\nالسعر: ${orderPrice} ج.م\nفي نطاق ${radius} كم`;
+        }
+        
         // استخدام الدالة insert_notification_for_driver لتجاوز مشاكل RLS
-        const title = 'طلب جديد متاح';
-        const message = `يوجد طلب جديد متاح في نطاق ${radius} كم. السعر: ${orderPrice} ج.م`;
         const type = 'info';
 
         let successCount = 0;
@@ -906,7 +923,7 @@ export default function OutsideOrderScreen() {
   const handleOpenDirectory = (placeId: string) => {
     router.push({
       pathname: '/customer/places-directory',
-      params: { placeId, itemId: placeId, returnPath: '/customer/outside-order' }, // itemId للتوافق
+      params: { placeId, itemId: placeId, returnPath: '/orders/outside-order' }, // itemId للتوافق
     });
   };
 
@@ -1218,37 +1235,77 @@ export default function OutsideOrderScreen() {
         console.log('⚠️ لم يتم إيجاد أبعد مكان');
       }
 
-      // 5. إنشاء الطلبات مع السعر المختار
-      // لا نعين سائق الآن - سيتم البحث تلقائياً
-      const orders: any[] = [];
+      // 5. إنشاء طلب واحد يحتوي على جميع الأماكن كمسار متعدد النقاط
+      // ترتيب الأماكن حسب المسافة من العميل (من الأبعد للأقرب)
+      // استخدام placesArray وترتيبها بنفس ترتيب placesOrdered
+      const placesWithDistance = placesArray
+        .filter(p => p.latitude && p.longitude)
+        .map(place => ({
+          place,
+          distance: calculateDistance(
+            customerLocation.lat,
+            customerLocation.lon,
+            place.latitude!,
+            place.longitude!
+          )
+        }));
       
-      Object.values(itemsByPlace).forEach(({ place, items: placeItems }) => {
-        const deliveryAddr = customerAddressText;
-        const itemNames = placeItems.map(item => item.name);
-        const itemImages = placeItems
-          .map(item => item.imageUrl)
-          .filter((url): url is string => !!url);
-        
-        orders.push({
-          customer_id: user?.id,
-          vendor_id: null,
-          driver_id: null, // سيتم البحث عن سائق تلقائياً
-          items: itemNames,
-          status: 'pending', // دائماً pending حتى يظهر في قائمة الطلبات الجديدة ويتلقى السائق الإشعار
-          pickup_address: place.name + (place.address ? ` - ${place.address}` : ''),
-          delivery_address: deliveryAddr,
-          total_fee: selectedPrice, // استخدام السعر المختار
-          images: itemImages.length > 0 ? itemImages : null,
-        });
+      placesWithDistance.sort((a, b) => b.distance - a.distance); // ترتيب تنازلي (من الأبعد للأقرب)
+      
+      const routePoints = placesWithDistance
+        .map(({ place }) => {
+          const placeData = itemsByPlace[place.id];
+          if (!placeData) return null;
+          
+          const itemNames = placeData.items.map(item => item.name);
+          const itemImages = placeData.items
+            .map(item => item.imageUrl)
+            .filter((url): url is string => !!url);
+          
+          return {
+            address: place.name + (place.address ? ` - ${place.address}` : ''),
+            description: itemNames.join(', '), // أسماء العناصر مفصولة بفواصل
+            items: itemNames, // حفظ أسماء العناصر أيضاً
+            images: itemImages.length > 0 ? itemImages : null,
+          };
+        })
+        .filter((point): point is NonNullable<typeof point> => point !== null);
+      
+      if (routePoints.length === 0) {
+        throw new Error('لا توجد أماكن صالحة لإنشاء الطلب');
+      }
+      
+      // إضافة عنوان العميل كنقطة وصول نهائية
+      routePoints.push({
+        address: customerAddressText,
+        description: 'عنوان التوصيل',
+        items: [],
+        images: null,
       });
       
-      if (orders.length === 0) {
-        throw new Error('لا توجد طلبات للإرسال');
-      }
+      // جمع جميع الصور من جميع الأماكن
+      const allImages = routePoints
+        .map(point => point.images)
+        .filter((images): images is string[] => images !== null)
+        .flat();
+      
+      // إنشاء طلب واحد يحتوي على المسار الكامل
+      const orderData = {
+        customer_id: user?.id,
+        vendor_id: null,
+        driver_id: null, // سيتم البحث عن سائق تلقائياً
+        items: routePoints, // حفظ المسار الكامل في items
+        status: 'pending', // دائماً pending حتى يظهر في قائمة الطلبات الجديدة ويتلقى السائق الإشعار
+        pickup_address: routePoints[0]?.address || 'نقطة الانطلاق', // أول نقطة
+        delivery_address: routePoints[routePoints.length - 1]?.address || customerAddressText, // آخر نقطة (عنوان العميل)
+        total_fee: selectedPrice, // استخدام السعر المختار
+        images: allImages.length > 0 ? allImages : null,
+        order_type: 'outside', // تحديد نوع الطلب كطلب من خارج
+      };
       
       const { data, error } = await supabase
         .from('orders')
-        .insert(orders)
+        .insert(orderData)
         .select();
 
       if (error) throw error;
@@ -1256,54 +1313,52 @@ export default function OutsideOrderScreen() {
       // بدء البحث التلقائي عن السائقين
       // استخدام أبعد مكان كنقطة البحث
       if (farthestPlace && data && data.length > 0) {
-        // بدء البحث لكل طلب (نستخدم نفس أبعد مكان لجميع الطلبات)
-        const searchPromises = data.map(async (order) => {
-          try {
-            // تحديث حالة البحث
-            await supabase
-              .from('orders')
-              .update({
-                search_status: 'searching',
-                search_started_at: new Date().toISOString(),
-              })
-              .eq('id', order.id);
+        const order = data[0]; // طلب واحد فقط
+        try {
+          // تحديث حالة البحث
+          await supabase
+            .from('orders')
+            .update({
+              search_status: 'searching',
+              search_started_at: new Date().toISOString(),
+            })
+            .eq('id', order.id);
 
-            // جلب الإعدادات
-            const { data: settings } = await supabase
-              .from('order_search_settings')
-              .select('setting_key, setting_value');
+          // جلب الإعدادات
+          const { data: settings } = await supabase
+            .from('order_search_settings')
+            .select('setting_key, setting_value');
 
-            const initialRadius = parseFloat(
-              settings?.find(s => s.setting_key === 'initial_search_radius_km')?.setting_value || '3'
-            );
-            const expandedRadius = parseFloat(
-              settings?.find(s => s.setting_key === 'expanded_search_radius_km')?.setting_value || '6'
-            );
-            const initialDuration = parseFloat(
-              settings?.find(s => s.setting_key === 'initial_search_duration_seconds')?.setting_value || '10'
-            );
-            const expandedDuration = parseFloat(
-              settings?.find(s => s.setting_key === 'expanded_search_duration_seconds')?.setting_value || '10'
-            );
+          const initialRadius = parseFloat(
+            settings?.find(s => s.setting_key === 'initial_search_radius_km')?.setting_value || '3'
+          );
+          const expandedRadius = parseFloat(
+            settings?.find(s => s.setting_key === 'expanded_search_radius_km')?.setting_value || '6'
+          );
+          const initialDuration = parseFloat(
+            settings?.find(s => s.setting_key === 'initial_search_duration_seconds')?.setting_value || '10'
+          );
+          const expandedDuration = parseFloat(
+            settings?.find(s => s.setting_key === 'expanded_search_duration_seconds')?.setting_value || '10'
+          );
 
-            // بدء البحث
-            startOrderSearch(order.id, farthestPlace, initialRadius, expandedRadius, initialDuration, expandedDuration);
-          } catch (searchError) {
-            console.error(`Error starting search for order ${order.id}:`, searchError);
-          }
-        });
-
-        // لا ننتظر البحث - يتم في الخلفية
-        Promise.all(searchPromises).catch(err => {
-          console.error('Error starting searches:', err);
-        });
+          // بدء البحث
+          startOrderSearch(order.id, farthestPlace, initialRadius, expandedRadius, initialDuration, expandedDuration);
+        } catch (searchError) {
+          console.error(`Error starting search for order ${order.id}:`, searchError);
+        }
       }
 
-      const message = orders.length === 1
-        ? 'تم إرسال طلبك بنجاح! جاري البحث عن سائق...'
-        : `تم إرسال ${orders.length} طلب بنجاح! جاري البحث عن سائق...`;
+      const message = 'تم إرسال طلبك بنجاح! جاري البحث عن سائق...';
       
-      router.replace('/(tabs)/customer/orders');
+      // التوجيه حسب دور المستخدم
+      if (user?.role === 'driver') {
+        router.replace('/(tabs)/driver/my-orders');
+      } else if (user?.role === 'admin') {
+        router.replace('/(tabs)/admin/my-orders');
+      } else {
+        router.replace('/(tabs)/customer/my-orders');
+      }
       
       setTimeout(() => {
         Alert.alert('✅ نجح', message);
@@ -1323,7 +1378,14 @@ export default function OutsideOrderScreen() {
           if (router.canGoBack()) {
             router.back();
           } else {
-            router.replace('/(tabs)/customer/home');
+            // التوجيه حسب دور المستخدم
+            if (user?.role === 'driver') {
+              router.replace('/(tabs)/driver/dashboard');
+            } else if (user?.role === 'admin') {
+              router.replace('/(tabs)/admin/dashboard');
+            } else {
+              router.replace('/(tabs)/customer/home');
+            }
           }
         }}>
           <Ionicons name="arrow-back" size={24} color="#1a1a1a" />
@@ -1351,7 +1413,7 @@ export default function OutsideOrderScreen() {
           router.push({
             pathname: '/customer/places-directory',
             params: { 
-              returnPath: '/customer/outside-order',
+              returnPath: '/orders/outside-order',
               fromLocationDisplay: 'true' // معرف خاص للتمييز
             },
           });
@@ -1526,7 +1588,7 @@ export default function OutsideOrderScreen() {
           {loading ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.submitButtonText}>{t('common.submit')}</Text>
+            <Text style={styles.submitButtonText}>إرسال الطلب</Text>
           )}
         </TouchableOpacity>
       </ScrollView>
