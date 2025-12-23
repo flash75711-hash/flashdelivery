@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "638617300776",
+    "project_id": "emerald-spring-479408-u8",
+    "storage_bucket": "emerald-spring-479408-u8.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:638617300776:android:3a6c14ff68f44f07d2ea1d",
+        "android_client_info": {
+          "package_name": "com.flash.delivery"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "638617300776-ad01p1ml04d407bbpjnv3fs3un9brttn.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDT3FMYFB3m73omJTAODkPlflopD9I_ClQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "638617300776-ad01p1ml04d407bbpjnv3fs3un9brttn.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
