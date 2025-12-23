@@ -148,17 +148,22 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
     return null;
   }
   
+    // أضف هذا التعديل في ملف usePushNotifications.ts
   try {
-    // استخدم الـ ID الخاص بمشروعك مباشرة لضمان أعلى استقرار
     const projectId = "7911787e-4e04-41da-aa13-d05501daea9c";
     
+    // قبل طلب التوكين، نتأكد أننا على أندرويد وأننا لا نستدعي الدالة إذا كان هناك خلل في الإعدادات
+    if (Platform.OS === 'android' && !Constants.expoConfig?.android?.googleServicesFile) {
+      console.warn('Google Services file is missing in config');
+      // لا تكمل التنفيذ لتجنب الـ Crash
+      return null; 
+    }
+
     token = (await Notifications.getExpoPushTokenAsync({
       projectId: projectId,
     })).data;
     
-    console.log('✅ Expo Push Token:', token);
   } catch (e) {
-    // في حالة حدوث أي خطأ، التطبيق لن ينهار (No Crash) بل سيكتفي بطباعة الخطأ
     console.error('Error getting Expo push token:', e);
     token = null;
   }
