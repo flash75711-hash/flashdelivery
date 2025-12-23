@@ -67,7 +67,9 @@
           "mode": "production"
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-localization",
+      "expo-secure-store"
     ],
     "notification": {
       "icon": "./assets/icon.png",
