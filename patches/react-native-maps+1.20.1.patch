@@ -1,0 +1,24 @@
+diff --git a/node_modules/react-native-maps/lib/MapMarkerNativeComponent.js b/node_modules/react-native-maps/lib/MapMarkerNativeComponent.js
+index 919f6d5..b58db1f 100644
+--- a/node_modules/react-native-maps/lib/MapMarkerNativeComponent.js
++++ b/node_modules/react-native-maps/lib/MapMarkerNativeComponent.js
+@@ -1,17 +1,5 @@
+ "use strict";
+-var __importDefault = (this && this.__importDefault) || function (mod) {
+-    return (mod && mod.__esModule) ? mod : { "default": mod };
+-};
+ Object.defineProperty(exports, "__esModule", { value: true });
+ exports.Commands = void 0;
+-const codegenNativeCommands_1 = __importDefault(require("react-native/Libraries/Utilities/codegenNativeCommands"));
+-exports.Commands = (0, codegenNativeCommands_1.default)({
+-    supportedCommands: [
+-        'showCallout',
+-        'hideCallout',
+-        'redrawCallout',
+-        'animateMarkerToCoordinate',
+-        'redraw',
+-        'setCoordinates',
+-    ],
+-});
++// Mocking codegenNativeCommands for web
++exports.Commands = {}; // Provide an empty object or a mock for web

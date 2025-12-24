@@ -92,7 +92,7 @@ export default function RootLayout() {
   return (
     <I18nextProvider i18n={i18n}>
       <AuthProvider>
-        <PushNotificationHandler />
+                {Platform.OS !== 'web' && <PushNotificationHandler />} {/* Conditionally render */}
         <DeepLinkHandler />
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="(auth)" />

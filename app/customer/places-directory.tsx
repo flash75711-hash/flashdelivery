@@ -20,18 +20,21 @@ import { Linking } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // استيراد react-native-maps فقط على الموبايل
-let MapView: any = null;
-let Marker: any = null;
+const [MapView, setMapView] = useState<any>(null);
+const [Marker, setMarker] = useState<any>(null);
 
-if (Platform.OS === 'ios' || Platform.OS === 'android') {
-  try {
-    const maps = require('react-native-maps');
-    MapView = maps.default;
-    Marker = maps.Marker;
-  } catch (e) {
-    console.warn('react-native-maps not available:', e);
+useEffect(() => {
+  if (Platform.OS === 'ios' || Platform.OS === 'android') {
+    import('react-native-maps')
+      .then((maps) => {
+        setMapView(maps.default);
+        setMarker(maps.Marker);
+      })
+      .catch((e) => {
+        console.warn('react-native-maps dynamic import failed:', e);
+      });
   }
-}
+}, []);
 
 // Map Component - react-native-maps for mobile, iframe for web
 const MapComponent = ({ 
@@ -93,8 +96,8 @@ const MapComponent = ({
       index,
       lat: place.latitude,
       lon: place.longitude,
-      name: (place.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/\n/g, ' '),
-      address: (place.address || '').replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/\n/g, ' '),
+      name: (place.name || '').replace(/'/g, "\'").replace(/"/g, '&quot;').replace(/\n/g, ' '),
+      address: (place.address || '').replace(/'/g, "\'").replace(/"/g, '&quot;').replace(/\n/g, ' '),
       id: place.id
     }));
     
@@ -1523,4 +1526,3 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
 });
-
