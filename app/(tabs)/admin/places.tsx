@@ -8,7 +8,6 @@ import {
   SafeAreaView,
   FlatList,
   ActivityIndicator,
-  Alert,
   Modal,
   ScrollView,
   Platform,
@@ -19,6 +18,7 @@ import { getLocationWithAddress } from '@/lib/webLocationUtils';
 import { useAuth } from '@/contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { requestLocationPermission, getCurrentLocation } from '@/lib/webUtils';
+import { showSimpleAlert, showConfirm } from '@/lib/alert';
 import responsive from '@/utils/responsive';
 
 // استيراد react-native-maps فقط على الموبايل
@@ -525,7 +525,7 @@ export default function AdminPlacesScreen() {
       setPlaces(data || []);
     } catch (error: any) {
       console.error('Error loading places:', error);
-      Alert.alert('خطأ', 'فشل تحميل الأماكن');
+      await showSimpleAlert('خطأ', 'فشل تحميل الأماكن', 'error');
     } finally {
       setLoading(false);
     }
@@ -551,7 +551,7 @@ export default function AdminPlacesScreen() {
       });
     } catch (error: any) {
       console.error('Error getting location:', error);
-      Alert.alert('خطأ', error.message || 'فشل جلب الموقع');
+      await showSimpleAlert('خطأ', error.message || 'فشل جلب الموقع', 'error');
     } finally {
       setGettingLocation(false);
     }
@@ -595,7 +595,7 @@ export default function AdminPlacesScreen() {
       setShowMapModal(true);
     } catch (error) {
       console.error('Error opening map:', error);
-      Alert.alert('خطأ', 'فشل فتح الخريطة');
+      await showSimpleAlert('خطأ', 'فشل فتح الخريطة', 'error');
     }
   };
 
@@ -656,7 +656,7 @@ export default function AdminPlacesScreen() {
 
   const handleSave = async () => {
     if (!formData.name.trim()) {
-      Alert.alert('خطأ', 'الرجاء إدخال اسم المكان');
+      await showSimpleAlert('خطأ', 'الرجاء إدخال اسم المكان', 'warning');
       return;
     }
 
@@ -692,7 +692,7 @@ export default function AdminPlacesScreen() {
           .eq('id', editingPlace.id);
 
         if (error) throw error;
-        Alert.alert('نجح', 'تم تحديث المكان بنجاح');
+        await showSimpleAlert('نجح', 'تم تحديث المكان بنجاح', 'success');
       } else {
         // إضافة جديد
         const { error } = await supabase
@@ -700,7 +700,7 @@ export default function AdminPlacesScreen() {
           .insert(placeData);
 
         if (error) throw error;
-        Alert.alert('نجح', 'تم إضافة المكان بنجاح');
+        await showSimpleAlert('نجح', 'تم إضافة المكان بنجاح', 'success');
       }
 
       setShowAddModal(false);
@@ -708,7 +708,7 @@ export default function AdminPlacesScreen() {
       loadPlaces();
     } catch (error: any) {
       console.error('Error saving place:', error);
-      Alert.alert('خطأ', error.message || 'فشل حفظ المكان');
+      await showSimpleAlert('خطأ', error.message || 'فشل حفظ المكان', 'error');
     } finally {
       setSaving(false);
     }
@@ -728,28 +728,16 @@ export default function AdminPlacesScreen() {
     setShowAddModal(true);
   };
 
-  const handleDelete = (place: Place) => {
-    // على الويب، نستخدم window.confirm
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      const confirmed = window.confirm(`هل أنت متأكد من حذف "${place.name}"؟`);
-      if (confirmed) {
-        performDelete(place);
-      }
-      return;
-    }
-    
-    // على الموبايل، نستخدم Alert.alert
-    Alert.alert(
+  const handleDelete = async (place: Place) => {
+    const confirmed = await showConfirm(
       'تأكيد الحذف',
       `هل أنت متأكد من حذف "${place.name}"؟`,
-      [
-        { text: 'إلغاء', style: 'cancel' },
-        {
-          text: 'حذف',
-          style: 'destructive',
-          onPress: () => performDelete(place),
-        },
-      ]
+      {
+        confirmText: 'حذف',
+        cancelText: 'إلغاء',
+        type: 'warning',
+        onConfirm: () => performDelete(place),
+      }
     );
   };
 
@@ -818,22 +806,14 @@ export default function AdminPlacesScreen() {
               }
               
       // عرض رسالة نجاح
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        window.alert('تم حذف المكان بنجاح');
-      } else {
-              Alert.alert('نجح', 'تم حذف المكان بنجاح');
-      }
+      await showSimpleAlert('نجح', 'تم حذف المكان بنجاح', 'success');
       
               loadPlaces();
             } catch (error: any) {
               console.error('Error deleting place:', error);
       const errorMessage = error.message || error.code || 'فشل حذف المكان';
       
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        window.alert(`خطأ: ${errorMessage}`);
-      } else {
-        Alert.alert('خطأ', errorMessage);
-            }
+      await showSimpleAlert('خطأ', errorMessage, 'error');
     }
   };
 
