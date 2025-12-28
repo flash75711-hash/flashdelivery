@@ -14,22 +14,6 @@
     "assetBundlePatterns": [
       "**/*"
     ],
-    "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.flash.delivery"
-    },
-    "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
-      },
-      "package": "com.flash.delivery",
-      "permissions": [
-        "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.RECORD_AUDIO"
-      ]
-    },
     "web": {
       "favicon": "./assets/favicon.png",
       "bundler": "metro"
@@ -37,10 +21,7 @@
     "scheme": "flash-delivery",
     "extra": {
       "googleWebClientId": "1015830991386-1esj2s7gt6e1q7ori2bqjn0oq1p1rqrs.apps.googleusercontent.com",
-      "router": {},
-      "eas": {
-        "projectId": "7911787e-4e04-41da-aa13-d05501daea9c"
-      }
+      "router": {}
     },
     "plugins": [
       "expo-router",
@@ -70,13 +51,6 @@
       "expo-web-browser",
       "expo-localization",
       "expo-secure-store"
-    ],
-    "notification": {
-      "icon": "./assets/icon.png",
-      "color": "#007AFF",
-      "iosDisplayInForeground": true,
-      "androidMode": "default",
-      "androidCollapsedTitle": "#{unread_notifications} إشعارات جديدة"
-    }
+    ]
   }
 }

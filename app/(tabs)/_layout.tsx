@@ -81,13 +81,21 @@ export default function TabsLayout() {
         /* إخفاء الحاويات الفارغة */
         [role="tablist"] > div:empty,
         [role="tablist"] > div:has(button[style*="display: none"]),
-        [role="tablist"] > div:has(button[aria-hidden="true"]) {
+        [role="tablist"] > div:has(button[aria-hidden="true"]),
+        [role="tablist"] > div:has([role="tab"][style*="display: none"]),
+        [role="tablist"] > div:has([role="tab"][aria-hidden="true"]) {
           display: none !important;
           width: 0 !important;
           height: 0 !important;
           margin: 0 !important;
           padding: 0 !important;
           flex: 0 0 0 !important;
+        }
+        
+        /* إخفاء التبويبات التي تحتوي على نص admin أو setting باستخدام JavaScript */
+        [role="tablist"] [role="tab"],
+        [role="tablist"] button {
+          position: relative;
         }
         
         /* التبويبات المرئية - مسافات متساوية */
@@ -137,9 +145,87 @@ export default function TabsLayout() {
       `;
       document.head.appendChild(style);
       
+      // إخفاء التبويبات التي تحتوي على نص "admin" أو "setting"
+      const hideUnwantedTabs = () => {
+        const tabList = document.querySelector('[role="tablist"]');
+        if (!tabList) return;
+        
+        // البحث عن جميع التبويبات
+        const tabs = tabList.querySelectorAll('[role="tab"], button');
+        tabs.forEach((tab) => {
+          const text = (tab.textContent || '').toLowerCase();
+          const html = (tab.innerHTML || '').toLowerCase();
+          
+          // إخفاء التبويبات التي تحتوي على admin أو setting أو idmin
+          if (text.includes('admin') || 
+              text.includes('setting') ||
+              text.includes('idmin') ||
+              html.includes('admin') ||
+              html.includes('setting') ||
+              html.includes('idmin')) {
+            const element = tab as HTMLElement;
+            element.style.display = 'none';
+            element.style.width = '0';
+            element.style.height = '0';
+            element.style.margin = '0';
+            element.style.padding = '0';
+            element.style.opacity = '0';
+            element.style.visibility = 'hidden';
+            element.style.pointerEvents = 'none';
+            element.setAttribute('aria-hidden', 'true');
+            
+            // إخفاء الحاوية الأب أيضاً
+            const parent = element.parentElement;
+            if (parent && parent !== tabList) {
+              parent.style.display = 'none';
+              parent.style.width = '0';
+              parent.style.height = '0';
+              parent.style.margin = '0';
+              parent.style.padding = '0';
+            }
+          }
+        });
+        
+        // البحث عن الحاويات التي تحتوي على تبويبات مخفية
+        const containers = tabList.querySelectorAll('div');
+        containers.forEach((container) => {
+          const text = (container.textContent || '').toLowerCase();
+          if (text.includes('admin') || text.includes('setting') || text.includes('idmin')) {
+            const tabsInContainer = container.querySelectorAll('[role="tab"], button');
+            if (tabsInContainer.length > 0) {
+              const hasHiddenTab = Array.from(tabsInContainer).some(tab => {
+                const tabText = (tab.textContent || '').toLowerCase();
+                return tabText.includes('admin') || tabText.includes('setting') || tabText.includes('idmin');
+              });
+              if (hasHiddenTab) {
+                (container as HTMLElement).style.display = 'none';
+              }
+            }
+          }
+        });
+      };
+      
+      // تشغيل فوراً وبعد تحميل الصفحة
+      hideUnwantedTabs();
+      const intervals = [100, 300, 500, 1000, 2000];
+      intervals.forEach(delay => {
+        setTimeout(hideUnwantedTabs, delay);
+      });
+      
+      // مراقبة التغييرات في DOM
+      const observer = new MutationObserver(() => {
+        hideUnwantedTabs();
+      });
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+      
       return () => {
         const styleToRemove = document.getElementById(styleId);
         if (styleToRemove) styleToRemove.remove();
+        observer.disconnect();
       };
     }
   }, [tabBarHeight, tabBarGap, tabBarPadding, tabPadding, tabMargin, maxContentWidth]);

@@ -394,6 +394,29 @@ export default function AdminDashboardScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* قسم إعدادات الطلبات */}
+        <View style={styles.settingsSection}>
+          <Text style={styles.settingsTitle}>إعدادات الطلبات</Text>
+          
+          <TouchableOpacity
+            style={styles.managementCard}
+            onPress={() => {
+              router.push('/(tabs)/admin/settings');
+            }}
+          >
+            <View style={styles.managementInfo}>
+              <Ionicons name="settings" size={24} color="#FF9500" />
+              <View style={styles.managementTextContainer}>
+                <Text style={styles.managementLabel}>إعدادات الطلبات والمحاولات</Text>
+                <Text style={styles.managementDescription}>
+                  مدة الشريط الزمني • عدد المحاولات التلقائية • الفاصل الزمني
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={24} color="#999" />
+          </TouchableOpacity>
+        </View>
+
         {/* قسم إعدادات البحث عن السائقين */}
         <View style={styles.settingsSection}>
           <Text style={styles.settingsTitle}>إعدادات البحث عن السائقين</Text>
