@@ -18,7 +18,7 @@ import { supabase, reverseGeocode } from '@/lib/supabase';
 import { getLocationWithAddress } from '@/lib/webLocationUtils';
 import { useAuth } from '@/contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
+import { requestLocationPermission, getCurrentLocation } from '@/lib/webUtils';
 import responsive from '@/utils/responsive';
 
 // استيراد react-native-maps فقط على الموبايل
@@ -560,18 +560,25 @@ export default function AdminPlacesScreen() {
   const handleOpenMap = async () => {
     try {
       // جلب الموقع الحالي للخريطة
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('تنبيه', 'يجب السماح بالوصول للموقع لاستخدام الخريطة');
+      const permission = await requestLocationPermission();
+      if (permission !== 'granted') {
+        await showSimpleAlert('تنبيه', 'يجب السماح بالوصول للموقع لاستخدام الخريطة', 'warning');
         return;
       }
 
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
+      const location = await getCurrentLocation({
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
       });
 
-      const lat = location.coords.latitude;
-      const lon = location.coords.longitude;
+      if (!location) {
+        await showSimpleAlert('خطأ', 'فشل الحصول على الموقع', 'error');
+        return;
+      }
+
+      const lat = location.latitude;
+      const lon = location.longitude;
       
       // إذا كان هناك إحداثيات موجودة في النموذج، نستخدمها
       if (formData.latitude && formData.longitude) {
