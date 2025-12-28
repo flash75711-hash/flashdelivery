@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase, reverseGeocode } from '@/lib/supabase';
-import { getLocationWithAddress } from '@/lib/locationUtils';
+import { getLocationWithAddress } from '@/lib/webLocationUtils';
 import { useAuth } from '@/contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';

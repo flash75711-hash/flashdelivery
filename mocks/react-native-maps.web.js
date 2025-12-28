@@ -52,3 +52,4 @@ const styles = StyleSheet.create({
 export default MapView;
 export { Marker, Polyline, Polygon, Circle, ProviderConstants, AnimatedRegion };
 
+

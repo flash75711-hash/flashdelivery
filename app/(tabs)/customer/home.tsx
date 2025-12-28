@@ -39,9 +39,9 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     textAlign: 'right',
   },
   content: {
-    flex: 1,
     padding: responsive.getResponsivePadding(),
     gap: 20,
+    paddingBottom: responsive.getResponsivePadding() + 20,
     ...(responsive.isLargeScreen() && {
       maxWidth: responsive.getMaxContentWidth(),
       alignSelf: 'center',
@@ -97,7 +97,7 @@ export default function CustomerHomeScreen() {
 
       <CurrentLocationDisplay />
 
-      <ScrollView style={styles.content}>
+      <ScrollView contentContainerStyle={styles.content}>
         {/* قسم الإشعارات */}
         <NotificationCard />
 

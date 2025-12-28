@@ -4,21 +4,20 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { Platform } from 'react-native';
 import { useEffect } from 'react';
-import responsive from '@/utils/responsive';
-import FloatingOrderNotification from '@/components/FloatingOrderNotification';
-import { useFloatingOrderNotifications } from '@/hooks/useFloatingOrderNotifications';
+import responsive, { createShadowStyle } from '@/utils/responsive';
 import FloatingNotification from '@/components/FloatingNotification';
 import { useFloatingNotifications } from '@/hooks/useFloatingNotifications';
+import { useOrderNotifications } from '@/hooks/useOrderNotifications';
 
 export default function TabsLayout() {
   const { user, loading } = useAuth();
   const { t } = useTranslation();
   
-  // إشعارات الطلبات العائمة للسائقين
-  const floatingNotifications = useFloatingOrderNotifications();
-  
   // إشعارات عائمة عامة لجميع المستخدمين
   const generalFloatingNotifications = useFloatingNotifications();
+
+  // إشعارات الطلبات (إنشاء طلب جديد / تغيير حالة الطلب) - Web فقط
+  const orderNotifications = useOrderNotifications();
 
   // Responsive tab bar height
   const tabBarHeight = responsive.isTablet() ? 75 : 70;
@@ -78,18 +77,20 @@ export default function TabsLayout() {
           pointer-events: none !important;
         }
         
-        /* إخفاء الحاويات الفارغة */
-        [role="tablist"] > div:empty,
-        [role="tablist"] > div:has(button[style*="display: none"]),
-        [role="tablist"] > div:has(button[aria-hidden="true"]),
-        [role="tablist"] > div:has([role="tab"][style*="display: none"]),
-        [role="tablist"] > div:has([role="tab"][aria-hidden="true"]) {
-          display: none !important;
-          width: 0 !important;
-          height: 0 !important;
-          margin: 0 !important;
-          padding: 0 !important;
-          flex: 0 0 0 !important;
+        /* إخفاء الحاويات الفارغة - استخدام :has() فقط إذا كان مدعوماً */
+        @supports selector(:has(*)) {
+          [role="tablist"] > div:empty,
+          [role="tablist"] > div:has(button[style*="display: none"]),
+          [role="tablist"] > div:has(button[aria-hidden="true"]),
+          [role="tablist"] > div:has([role="tab"][style*="display: none"]),
+          [role="tablist"] > div:has([role="tab"][aria-hidden="true"]) {
+            display: none !important;
+            width: 0 !important;
+            height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            flex: 0 0 0 !important;
+          }
         }
         
         /* إخفاء التبويبات التي تحتوي على نص admin أو setting باستخدام JavaScript */
@@ -240,22 +241,18 @@ export default function TabsLayout() {
 
   return (
     <>
-      {/* إشعارات الطلبات العائمة للسائقين */}
-      {user?.role === 'driver' && (
-        <FloatingOrderNotification
-          visible={floatingNotifications.visible}
-          notification={floatingNotifications.notification}
-          onAccept={floatingNotifications.handleAccept}
-          onReject={floatingNotifications.handleReject}
-          onDismiss={floatingNotifications.dismiss}
-        />
-      )}
-      
       {/* إشعارات عائمة عامة لجميع المستخدمين */}
       <FloatingNotification
         visible={generalFloatingNotifications.visible}
         notification={generalFloatingNotifications.notification}
         onDismiss={generalFloatingNotifications.dismiss}
+      />
+      
+      {/* إشعارات الطلبات (إنشاء / تغيير حالة) - Web فقط */}
+      <FloatingNotification
+        visible={orderNotifications.visible}
+        notification={orderNotifications.notification}
+        onDismiss={orderNotifications.dismiss}
       />
     <Tabs
       screenOptions={{
@@ -289,11 +286,13 @@ export default function TabsLayout() {
           paddingRight: responsive.isTablet() ? 20 : 16,
           justifyContent: 'center',
           alignItems: 'center',
-          elevation: 8,
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: -2 },
-          shadowOpacity: 0.1,
-          shadowRadius: 8,
+          ...createShadowStyle({
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: -2 },
+            shadowOpacity: 0.1,
+            shadowRadius: 8,
+            elevation: 8,
+          }),
         },
         tabBarLabelStyle: {
           fontSize: tabBarFontSize,

@@ -10,6 +10,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/contexts/AuthContext';
 import responsive from '@/utils/responsive';
 
 export interface FloatingNotificationData {
@@ -35,6 +36,7 @@ export default function FloatingNotification({
   onPress,
 }: FloatingNotificationProps) {
   const router = useRouter();
+  const { user } = useAuth();
   const [slideAnim] = useState(new Animated.Value(-200));
   const [opacityAnim] = useState(new Animated.Value(0));
 
@@ -97,11 +99,18 @@ export default function FloatingNotification({
     if (onPress) {
       onPress();
     } else if (notification?.order_id) {
-      // إذا كان الإشعار مرتبط بطلب، انتقل إلى صفحة الطلب
-      router.push({
-        pathname: '/(tabs)/driver/trips',
-        params: { orderId: notification.order_id },
-      });
+      // إذا كان الإشعار مرتبط بطلب، انتقل إلى صفحة الطلب حسب دور المستخدم
+      if (user?.role === 'customer') {
+        router.push({
+          pathname: '/(tabs)/customer/my-orders',
+          params: { orderId: notification.order_id },
+        });
+      } else if (user?.role === 'driver') {
+        router.push({
+          pathname: '/(tabs)/driver/trips',
+          params: { orderId: notification.order_id },
+        });
+      }
     }
     handleDismiss();
   };

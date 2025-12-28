@@ -5,7 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
@@ -13,10 +12,10 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase, reverseGeocode } from '@/lib/supabase';
-import { getLocationWithAddress } from '@/lib/locationUtils';
+import { getLocationWithAddress } from '@/lib/webLocationUtils';
 import { Ionicons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
 import { notifyAllAdmins } from '@/lib/notifications';
+import { showSimpleAlert } from '@/lib/alert';
 
 interface Address {
   id?: string;

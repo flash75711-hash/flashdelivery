@@ -4,17 +4,10 @@ import { AuthProvider } from '@/contexts/AuthContext';
 import '@/i18n';
 import { I18nextProvider } from 'react-i18next';
 import i18n from '@/i18n';
-import { I18nManager, Platform } from 'react-native';
+import { Platform } from 'react-native';
 import * as Linking from 'expo-linking';
 import { supabase } from '@/lib/supabase';
 import responsive from '@/utils/responsive';
-import PushNotificationHandler from '@/components/PushNotificationHandler';
-
-// تفعيل RTL
-if (Platform.OS !== 'web') {
-  I18nManager.forceRTL(true);
-  I18nManager.allowRTL(true);
-}
 
 function DeepLinkHandler() {
   useEffect(() => {
@@ -92,7 +85,6 @@ export default function RootLayout() {
   return (
     <I18nextProvider i18n={i18n}>
       <AuthProvider>
-                {Platform.OS !== 'web' && <PushNotificationHandler />} {/* Conditionally render */}
         <DeepLinkHandler />
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="(auth)" />

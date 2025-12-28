@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, Modal, ScrollView, Platform } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, Modal, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
-import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { reverseGeocode, supabase } from '../lib/supabase';
-import { findNearestPlaceInDirectory, getLocationWithHighAccuracy, getAddressFromCoordinates } from '../lib/locationUtils';
+import { findNearestPlaceInDirectory, getLocationWithHighAccuracy, getAddressFromCoordinates } from '../lib/webLocationUtils';
 
 interface CurrentLocationDisplayProps {
   onLocationUpdate?: (location: { lat: number; lon: number; address: string } | null) => void;
@@ -227,25 +226,27 @@ export default function CurrentLocationDisplay({ onLocationUpdate, onOpenPlacesD
       // استخدام الدالة المشتركة لجلب الموقع مع WiFi
       const currentLocation = await getLocationWithHighAccuracy();
       
-      const lat = currentLocation.coords.latitude;
-      const lon = currentLocation.coords.longitude;
-      const accuracy = currentLocation.coords.accuracy; // دقة الموقع بالمتر
+      const lat = currentLocation.latitude;
+      const lon = currentLocation.longitude;
+      const accuracy = currentLocation.accuracy; // دقة الموقع بالمتر
       
       console.log('✅ Location fetched:', { lat, lon, accuracy });
       
       // تسجيل الإحداثيات الفعلية مع معلومات عن مصدر الموقع
-      const locationSource = Platform.OS === 'web' 
-        ? (accuracy && accuracy < 100 ? 'GPS/WiFi' : accuracy && accuracy < 1000 ? 'Network (WiFi/Cellular)' : 'IP-based')
-        : 'GPS/WiFi/Cellular';
+      const locationSource = accuracy && accuracy < 100 
+        ? 'GPS/WiFi' 
+        : accuracy && accuracy < 1000 
+        ? 'Network (WiFi/Cellular)' 
+        : 'IP-based';
       
-      console.log('Location Coordinates (using WiFi + GPS):', { 
+      console.log('Location Coordinates (using Web Geolocation API):', { 
         lat, 
         lon, 
         accuracy: `${accuracy?.toFixed(0)}m` || 'unknown',
         source: locationSource,
-        altitude: currentLocation.coords.altitude,
-        heading: currentLocation.coords.heading,
-        speed: currentLocation.coords.speed,
+        altitude: currentLocation.altitude,
+        heading: currentLocation.heading,
+        speed: currentLocation.speed,
       });
       
       // التحقق من دقة الموقع - إذا كانت الدقة سيئة جداً (أكثر من 5000 متر = 5 كم)
@@ -331,9 +332,9 @@ export default function CurrentLocationDisplay({ onLocationUpdate, onOpenPlacesD
       // استخدام الدالة المشتركة لجلب الموقع مع WiFi
       const currentLocation = await getLocationWithHighAccuracy();
       
-      const lat = currentLocation.coords.latitude;
-      const lon = currentLocation.coords.longitude;
-      const accuracy = currentLocation.coords.accuracy;
+      const lat = currentLocation.latitude;
+      const lon = currentLocation.longitude;
+      const accuracy = currentLocation.accuracy;
       
       console.log('Manual refresh GPS Coordinates:', { 
         lat, 
@@ -378,9 +379,10 @@ export default function CurrentLocationDisplay({ onLocationUpdate, onOpenPlacesD
     const startLocationTracking = async () => {
       try {
         console.log('🔄 Starting location tracking...');
-        // طلب إذن الوصول للموقع
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') {
+        // طلب إذن الوصول للموقع (Web API)
+        const { requestLocationPermission } = await import('../lib/webUtils');
+        const hasPermission = await requestLocationPermission();
+        if (!hasPermission) {
           console.error('❌ Location permission denied');
           if (mounted) {
             setError('لم يتم السماح بالوصول للموقع');

@@ -1,25 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Linking from 'expo-linking';
-import * as WebBrowser from 'expo-web-browser';
-import { Platform } from 'react-native';
-
-// إكمال جلسة المتصفح لـ OAuth
-WebBrowser.maybeCompleteAuthSession();
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
 
 // التحقق من وجود متغيرات البيئة
 if (!supabaseUrl || !supabaseAnonKey) {
-  const errorMessage = Platform.OS === 'web' 
-    ? '⚠️ متغيرات البيئة غير معرّفة!\n\nيرجى إضافة Environment Variables في Vercel:\n- EXPO_PUBLIC_SUPABASE_URL\n- EXPO_PUBLIC_SUPABASE_ANON_KEY\n\nراجع: VERCEL_SECRETS.md'
-    : '⚠️ متغيرات البيئة غير معرّفة!\n\nيرجى إضافة EXPO_PUBLIC_SUPABASE_URL و EXPO_PUBLIC_SUPABASE_ANON_KEY في ملف .env';
+  const errorMessage = '⚠️ متغيرات البيئة غير معرّفة!\n\nيرجى إضافة Environment Variables في Vercel:\n- EXPO_PUBLIC_SUPABASE_URL\n- EXPO_PUBLIC_SUPABASE_ANON_KEY\n\nراجع: VERCEL_SECRETS.md';
   
   console.error(errorMessage);
   
   // في المتصفح، عرض رسالة خطأ واضحة
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+  if (typeof window !== 'undefined') {
     console.error('Supabase configuration error:', {
       hasUrl: !!supabaseUrl,
       hasKey: !!supabaseAnonKey,
@@ -29,13 +20,9 @@ if (!supabaseUrl || !supabaseAnonKey) {
   }
 }
 
-// استخدام AsyncStorage في التطبيق فقط
-// في المتصفح، نترك Supabase يستخدم localStorage مباشرة
-const storage = Platform.OS === 'web' ? undefined : AsyncStorage;
-
+// على الويب، Supabase يستخدم localStorage تلقائياً
 export const supabase = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseAnonKey || 'placeholder-key', {
   auth: {
-    ...(storage && { storage: storage as any }),
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: true,

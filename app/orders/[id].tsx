@@ -10,7 +10,6 @@ import {
   Platform,
   Modal,
   TextInput,
-  Alert,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,6 +17,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import responsive from '@/utils/responsive';
 import { createNotification } from '@/lib/notifications';
+import { showAlert, showSimpleAlert, showConfirm } from '@/lib/alert';
 
 interface Order {
   id: string;
@@ -34,6 +34,7 @@ interface Order {
   customer_proposed_price?: number;
   customer_id: string;
   driver_id?: string | null;
+  search_status?: string;
 }
 
 export default function OrderDetailScreen() {
@@ -44,12 +45,29 @@ export default function OrderDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [showNegotiation, setShowNegotiation] = useState(false);
   const [proposedPrice, setProposedPrice] = useState('');
+  const [isRestarting, setIsRestarting] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
 
   useEffect(() => {
     loadOrder();
   }, [id]);
 
-  const loadOrder = async () => {
+  // Debug: تسجيل حالة الطلب عند التحديث
+  useEffect(() => {
+    if (order) {
+      console.log('🔍 OrderDetail - Order state updated:', {
+        orderId: order.id,
+        status: order.status,
+        search_status: order.search_status,
+        customer_id: order.customer_id,
+        user_id: user?.id,
+        isCustomer: user?.id === order.customer_id,
+        willShowButtons: user?.id === order.customer_id && order.search_status === 'stopped' && order.status === 'pending',
+      });
+    }
+  }, [order, user]);
+
+      const loadOrder = async () => {
     if (!id) return;
 
     try {
@@ -60,10 +78,19 @@ export default function OrderDetailScreen() {
         .single();
 
       if (error) throw error;
+      
+      // Debug: تسجيل حالة الطلب للتحقق
+      console.log('🔍 OrderDetail - Loaded order:', {
+        orderId: data?.id,
+        status: data?.status,
+        search_status: data?.search_status,
+        customer_id: data?.customer_id,
+      });
+      
       setOrder(data);
     } catch (error) {
       console.error('Error loading order:', error);
-      Alert.alert('خطأ', 'فشل تحميل تفاصيل الطلب');
+      showSimpleAlert('خطأ', 'فشل تحميل تفاصيل الطلب', 'error');
     } finally {
       setLoading(false);
     }
@@ -95,12 +122,108 @@ export default function OrderDetailScreen() {
         });
       }
 
-      Alert.alert('نجح', 'تم قبول اقتراح السائق');
+      showSimpleAlert('نجح', 'تم قبول اقتراح السائق', 'success');
       setShowNegotiation(false);
       loadOrder();
     } catch (error: any) {
       console.error('Error accepting proposal:', error);
-      Alert.alert('خطأ', error.message || 'فشل قبول الاقتراح');
+      showSimpleAlert('خطأ', error.message || 'فشل قبول الاقتراح', 'error');
+    }
+  };
+
+  // دالة إعادة البحث عن سائق
+  const handleRestartSearch = async () => {
+    console.log('🔄 handleRestartSearch called');
+    if (!order) {
+      console.log('❌ No order found');
+      return;
+    }
+
+    const confirmed = await showConfirm(
+      'إعادة البحث عن سائق',
+      'هل تريد إعادة البحث عن سائق لهذا الطلب؟',
+      {
+        confirmText: 'نعم، إعادة البحث',
+        cancelText: 'إلغاء',
+        type: 'question',
+      }
+    );
+
+    if (!confirmed) return;
+
+    setIsRestarting(true);
+    try {
+      const { error: updateError } = await supabase
+        .from('orders')
+        .update({
+          search_status: 'searching',
+          search_started_at: new Date().toISOString(),
+          search_expanded_at: null,
+          driver_id: null,
+        })
+        .eq('id', order.id);
+
+      if (updateError) {
+        showSimpleAlert('خطأ', 'فشل تحديث حالة البحث', 'error');
+        setIsRestarting(false);
+        return;
+      }
+
+      await showSimpleAlert('نجح', 'تم بدء البحث عن سائق جديد. سيتم البحث تلقائياً.', 'success');
+      router.back();
+    } catch (error: any) {
+      console.error('Error restarting search:', error);
+      showSimpleAlert('خطأ', error.message || 'فشل إعادة البحث', 'error');
+      setIsRestarting(false);
+    }
+  };
+
+  // دالة إلغاء الطلب
+  const handleCancelOrder = async () => {
+    console.log('🗑️ handleCancelOrder called');
+    if (!order) {
+      console.log('❌ No order found');
+      return;
+    }
+
+    const confirmed = await showConfirm(
+      'إلغاء الطلب',
+      'هل أنت متأكد من إلغاء هذا الطلب؟ لا يمكن التراجع عن هذه العملية.',
+      {
+        confirmText: 'نعم، إلغاء',
+        cancelText: 'إلغاء',
+        type: 'warning',
+      }
+    );
+
+    if (!confirmed) return;
+
+    setIsCancelling(true);
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({ status: 'cancelled' })
+        .eq('id', order.id);
+
+      if (error) throw error;
+
+      // إشعار السائق إذا كان الطلب مقبولاً
+      if (order.driver_id) {
+        await createNotification({
+          user_id: order.driver_id,
+          title: 'تم إلغاء الطلب',
+          message: `تم إلغاء الطلب رقم ${order.id.slice(0, 8)}`,
+          type: 'warning',
+          order_id: order.id,
+        });
+      }
+
+      await showSimpleAlert('نجح', 'تم إلغاء الطلب بنجاح', 'success');
+      router.back();
+    } catch (error: any) {
+      console.error('Error cancelling order:', error);
+      showSimpleAlert('خطأ', error.message || 'فشل إلغاء الطلب', 'error');
+      setIsCancelling(false);
     }
   };
 
@@ -109,7 +232,7 @@ export default function OrderDetailScreen() {
 
     const price = parseFloat(proposedPrice);
     if (isNaN(price) || price <= 0) {
-      Alert.alert('خطأ', 'يرجى إدخال سعر صحيح');
+      showSimpleAlert('خطأ', 'يرجى إدخال سعر صحيح', 'error');
       return;
     }
 
@@ -141,13 +264,13 @@ export default function OrderDetailScreen() {
         }
       }
 
-      Alert.alert('نجح', 'تم إرسال اقتراحك');
+      showSimpleAlert('نجح', 'تم إرسال اقتراحك', 'success');
       setShowNegotiation(false);
       setProposedPrice('');
       loadOrder();
     } catch (error: any) {
       console.error('Error proposing price:', error);
-      Alert.alert('خطأ', error.message || 'فشل إرسال الاقتراح');
+      showSimpleAlert('خطأ', error.message || 'فشل إرسال الاقتراح', 'error');
     }
   };
 
@@ -195,7 +318,7 @@ export default function OrderDetailScreen() {
         <Text style={styles.title}>تفاصيل الطلب</Text>
       </View>
 
-      <ScrollView style={styles.content}>
+      <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Text style={styles.orderType}>
@@ -203,7 +326,7 @@ export default function OrderDetailScreen() {
             </Text>
             <View style={[styles.statusBadge, { backgroundColor: getStatusColor(order.status) + '20' }]}>
               <Text style={[styles.statusText, { color: getStatusColor(order.status) }]}>
-                {getStatusText(order.status)}
+                {getStatusText(order.status, order.search_status)}
               </Text>
             </View>
           </View>
@@ -249,6 +372,63 @@ export default function OrderDetailScreen() {
                 اقتراح سعر من السائق: {order.driver_proposed_price} ج.م
               </Text>
             </TouchableOpacity>
+          )}
+
+          {/* أزرار إعادة البحث وإلغاء الطلب للعميل عندما البحث متوقف */}
+          {(() => {
+            const shouldShow = isCustomer && order.search_status === 'stopped' && order.status === 'pending';
+            if (isCustomer && order.status === 'pending') {
+              console.log('🔍 OrderDetail - Button visibility check:', {
+                shouldShow,
+                isCustomer,
+                search_status: order.search_status,
+                status: order.status,
+                orderId: order.id,
+              });
+            }
+            return shouldShow;
+          })() && (
+            <View style={styles.actionsContainer}>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.restartSearchButton]}
+                onPress={() => {
+                  console.log('🔄 Restart button pressed in order details');
+                  handleRestartSearch();
+                }}
+                disabled={isRestarting}
+              >
+                {isRestarting ? (
+                  <ActivityIndicator color="#007AFF" />
+                ) : (
+                  <>
+                    <Ionicons name="refresh" size={20} color="#007AFF" />
+                    <Text style={styles.restartSearchButtonText}>
+                      إعادة البحث عن سائق
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.actionButton, styles.cancelOrderButton]}
+                onPress={() => {
+                  console.log('🗑️ Cancel button pressed');
+                  handleCancelOrder();
+                }}
+                disabled={isCancelling}
+              >
+                {isCancelling ? (
+                  <ActivityIndicator color="#FF3B30" />
+                ) : (
+                  <>
+                    <Ionicons name="close-circle" size={20} color="#FF3B30" />
+                    <Text style={styles.cancelOrderButtonText}>
+                      إلغاء الطلب
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
           )}
         </View>
       </ScrollView>
@@ -340,7 +520,12 @@ const getStatusColor = (status: string) => {
   }
 };
 
-const getStatusText = (status: string) => {
+const getStatusText = (status: string, searchStatus?: string) => {
+  // إذا كان البحث متوقفاً، عرض رسالة واضحة
+  if (searchStatus === 'stopped' && status === 'pending') {
+    return 'لم يتم العثور على سائق';
+  }
+  
   switch (status) {
     case 'pending':
       return 'قيد الانتظار';
@@ -381,8 +566,8 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   content: {
-    flex: 1,
     padding: responsive.getResponsivePadding(),
+    paddingBottom: responsive.getResponsivePadding() + 20,
   },
   card: {
     backgroundColor: '#fff',
@@ -565,6 +750,42 @@ const styles = StyleSheet.create({
   },
   negotiationActionButtonText: {
     color: '#fff',
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+  },
+  actionsContainer: {
+    marginTop: 20,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+    gap: 12,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    padding: 16,
+    borderRadius: 12,
+    minHeight: 50,
+  },
+  restartSearchButton: {
+    backgroundColor: '#E3F2FD',
+    borderWidth: 1,
+    borderColor: '#007AFF',
+  },
+  restartSearchButtonText: {
+    color: '#007AFF',
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+  },
+  cancelOrderButton: {
+    backgroundColor: '#FFEBEE',
+    borderWidth: 1,
+    borderColor: '#FF3B30',
+  },
+  cancelOrderButtonText: {
+    color: '#FF3B30',
     fontSize: responsive.getResponsiveFontSize(16),
     fontWeight: '600',
   },

@@ -17,9 +17,7 @@ import { useTranslation } from 'react-i18next';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, reverseGeocode } from '@/lib/supabase';
-import { getLocationWithAddress } from '@/lib/locationUtils';
-import * as Location from 'expo-location';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getLocationWithAddress } from '@/lib/webLocationUtils';
 import responsive from '@/utils/responsive';
 
 interface Address {
@@ -223,7 +221,7 @@ export default function CustomerProfileScreen() {
     useCallback(() => {
       const checkSelectedPlace = async () => {
         if (selectedAddressIndex !== null) {
-          const storedPlace = await AsyncStorage.getItem(`selected_place_address_${selectedAddressIndex}`);
+          const storedPlace = localStorage.getItem(`selected_place_address_${selectedAddressIndex}`);
           if (storedPlace) {
             const place = JSON.parse(storedPlace);
             // تحديث العنوان مباشرة
@@ -237,7 +235,7 @@ export default function CustomerProfileScreen() {
               }
               return newAddresses;
             });
-            await AsyncStorage.removeItem(`selected_place_address_${selectedAddressIndex}`);
+            localStorage.removeItem(`selected_place_address_${selectedAddressIndex}`);
             setSelectedAddressIndex(null);
           }
         }

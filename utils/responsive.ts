@@ -91,6 +91,59 @@ export const getTabBarBottomPadding = (): number => {
   return tabBarHeight + 10; // Add extra 10px for safe spacing
 };
 
+// Shadow utility to convert shadow properties to boxShadow on web
+// This eliminates the deprecation warning for shadow* props
+export interface ShadowOptions {
+  shadowColor?: string;
+  shadowOffset?: { width: number; height: number };
+  shadowOpacity?: number;
+  shadowRadius?: number;
+  elevation?: number; // For Android
+}
+
+// Helper to convert hex color to rgba
+const hexToRgba = (hex: string, opacity: number): string => {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (result) {
+    const r = parseInt(result[1], 16);
+    const g = parseInt(result[2], 16);
+    const b = parseInt(result[3], 16);
+    return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+  }
+  // If already rgba or invalid, return as is
+  return hex.includes('rgba') ? hex : `rgba(0, 0, 0, ${opacity})`;
+};
+
+export const createShadowStyle = (options: ShadowOptions) => {
+  if (Platform.OS === 'web') {
+    // Convert to CSS boxShadow for web
+    const {
+      shadowColor = '#000',
+      shadowOffset = { width: 0, height: 2 },
+      shadowOpacity = 0.1,
+      shadowRadius = 8,
+    } = options;
+
+    // Convert color to rgba
+    const rgbaColor = hexToRgba(shadowColor, shadowOpacity);
+
+    const boxShadow = `${shadowOffset.width}px ${shadowOffset.height}px ${shadowRadius}px ${rgbaColor}`;
+    
+    return {
+      boxShadow,
+    };
+  } else {
+    // Use native shadow properties for iOS/Android
+    return {
+      shadowColor: options.shadowColor || '#000',
+      shadowOffset: options.shadowOffset || { width: 0, height: 2 },
+      shadowOpacity: options.shadowOpacity ?? 0.1,
+      shadowRadius: options.shadowRadius ?? 8,
+      ...(Platform.OS === 'android' && options.elevation !== undefined && { elevation: options.elevation }),
+    };
+  }
+};
+
 export default {
   wp,
   hp,
@@ -103,6 +156,7 @@ export default {
   getMaxContentWidth,
   getCardWidth,
   getTabBarBottomPadding,
+  createShadowStyle,
   SCREEN_WIDTH,
   SCREEN_HEIGHT,
   BREAKPOINTS,

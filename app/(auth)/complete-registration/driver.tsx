@@ -5,7 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
@@ -16,9 +15,9 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { uploadImageToImgBB } from '@/lib/imgbb';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
-import * as ImageManipulator from 'expo-image-manipulator';
+import { pickImage } from '@/lib/webUtils';
 import { notifyAllAdmins } from '@/lib/notifications';
+import { showSimpleAlert } from '@/lib/alert';
 
 export default function CompleteDriverRegistration() {
   const { phone: phoneParam, email } = useLocalSearchParams<{ phone?: string; email?: string }>();
@@ -106,49 +105,30 @@ export default function CompleteDriverRegistration() {
     loadExistingProfile();
   }, [phoneParam]);
 
-  const pickImage = async (type: 'idCard' | 'selfie') => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('خطأ', 'نحتاج إلى إذن الوصول إلى الصور');
-      return;
-    }
+  const handlePickImage = async (type: 'idCard' | 'selfie') => {
+    try {
+      const images = await pickImage({
+        multiple: false,
+        accept: 'image/*',
+        maxSize: 10 * 1024 * 1024, // 10MB
+      });
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: type === 'idCard' ? [16, 9] : [1, 1],
-      quality: 0.8,
-    });
-
-    if (!result.canceled && result.assets[0]) {
-      try {
-        // تحويل الصورة إلى WebP لتقليل الحجم وتحسين الأداء
-        const manipulatedImage = await ImageManipulator.manipulateAsync(
-          result.assets[0].uri,
-          [
-            // تقليل الحجم إذا كانت الصورة كبيرة (أقصى عرض 1200px)
-            { resize: { width: 1200 } },
-          ],
-          {
-            compress: 0.8, // ضغط بنسبة 80%
-            format: ImageManipulator.SaveFormat.WEBP, // تحويل إلى WebP
-          }
-        );
-        
-        if (type === 'idCard') {
-          setIdCardImage(manipulatedImage.uri);
-        } else {
-          setSelfieImage(manipulatedImage.uri);
-        }
-      } catch (error: any) {
-        console.warn('Image manipulation failed, using original:', error);
-        // إذا فشل التحويل، نستخدم الصورة الأصلية
-      if (type === 'idCard') {
-        setIdCardImage(result.assets[0].uri);
-      } else {
-        setSelfieImage(result.assets[0].uri);
-        }
+      if (images.length === 0) {
+        return;
       }
+
+      const image = images[0];
+      
+      // على الويب، نستخدم blob URL مباشرة
+      // يمكن إضافة resize/compress لاحقاً إذا لزم الأمر
+      if (type === 'idCard') {
+        setIdCardImage(image.uri);
+      } else {
+        setSelfieImage(image.uri);
+      }
+    } catch (error: any) {
+      console.error('Error picking image:', error);
+      showSimpleAlert('خطأ', error.message || 'فشل اختيار الصورة', 'error');
     }
   };
 
@@ -378,7 +358,7 @@ export default function CompleteDriverRegistration() {
               </View>
             ) : (
               <TouchableOpacity
-                onPress={() => pickImage('idCard')}
+                onPress={() => handlePickImage('idCard')}
                 style={styles.imagePicker}
               >
                 <Ionicons name="camera" size={40} color="#007AFF" />
@@ -426,7 +406,7 @@ export default function CompleteDriverRegistration() {
               </View>
             ) : (
               <TouchableOpacity
-                onPress={() => pickImage('selfie')}
+                onPress={() => handlePickImage('selfie')}
                 style={styles.imagePicker}
               >
                 <Ionicons name="person" size={40} color="#007AFF" />

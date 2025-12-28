@@ -186,6 +186,7 @@ export default function DriverMyOrdersScreen() {
             onAccept={handleAcceptOrder}
             onNegotiate={handleNegotiateOrder}
             onCancel={handleCancelOrder}
+            onOrderUpdated={reload}
           />
         )}
         contentContainerStyle={styles.listContent}

@@ -123,7 +123,7 @@ export default function VendorStoreScreen() {
         <Text style={styles.title}>{t('vendor.store')}</Text>
       </View>
 
-      <ScrollView style={styles.content}>
+      <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.section}>
           <Text style={styles.label}>اسم المتجر</Text>
           <TextInput
@@ -224,8 +224,8 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     textAlign: 'right',
   },
   content: {
-    flex: 1,
     padding: responsive.getResponsivePadding(),
+    paddingBottom: responsive.getResponsivePadding() + 20,
     ...(responsive.isLargeScreen() && {
       maxWidth: responsive.getMaxContentWidth(),
       alignSelf: 'center',

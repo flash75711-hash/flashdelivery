@@ -8,7 +8,6 @@ import {
   ActivityIndicator,
   Switch,
   TouchableOpacity,
-  Alert,
   Platform,
   Image,
   Modal,
@@ -21,6 +20,7 @@ import CurrentLocationDisplay from '@/components/CurrentLocationDisplay';
 import { useRouter, useFocusEffect } from 'expo-router';
 import responsive from '@/utils/responsive';
 import NotificationCard from '@/components/NotificationCard';
+import { showSimpleAlert, showAlert } from '@/lib/alert';
 
 export default function DriverDashboardScreen() {
   console.log('DriverDashboard: Component rendered');
@@ -278,22 +278,14 @@ export default function DriverDashboardScreen() {
         ) {
           console.log('DriverDashboard: ✅ Approval detected in loadDriverProfile!');
           // تمت الموافقة!
-          if (Platform.OS === 'web') {
-            window.alert('🎉 تهانينا!\n\nتمت الموافقة على تسجيلك بنجاح!\n\nابدأ رحلاتك الآن واستقبل الطلبات.');
-          } else {
-            Alert.alert(
-              '🎉 تهانينا!',
-              'تمت الموافقة على تسجيلك بنجاح!\n\nابدأ رحلاتك الآن واستقبل الطلبات.',
-              [{ text: 'ابدأ الآن' }]
-            );
-          }
+          await showSimpleAlert(
+            '🎉 تهانينا!',
+            'تمت الموافقة على تسجيلك بنجاح!\n\nابدأ رحلاتك الآن واستقبل الطلبات.',
+            'success'
+          );
         } else if (previousStatus === 'pending' && currentStatus === 'rejected') {
           console.log('DriverDashboard: ❌ Rejection detected in loadDriverProfile!');
-          if (Platform.OS === 'web') {
-            window.alert('تم رفض طلبك\n\nيرجى التواصل مع الإدارة');
-          } else {
-            Alert.alert('تم رفض طلبك', 'يرجى التواصل مع الإدارة');
-          }
+          await showSimpleAlert('تم رفض طلبك', 'يرجى التواصل مع الإدارة', 'warning');
         }
         
         // حفظ الحالة الحالية للمقارنة في المرة القادمة (فقط إذا كانت موجودة)
@@ -318,12 +310,13 @@ export default function DriverDashboardScreen() {
       
       // إذا تمت الموافقة، عرض رسالة التهنئة
       if (profile?.approval_status === 'approved' && isComplete && !registrationComplete) {
-        setTimeout(() => {
-          Alert.alert(
+        setTimeout(async () => {
+          await showSimpleAlert(
             '🎉 تهانينا!',
             'تمت الموافقة على تسجيلك بنجاح!\n\nابدأ رحلاتك الآن واستقبل الطلبات.',
-            [{ text: 'ابدأ الآن', onPress: () => setShowApprovalAlert(false) }]
+            'success'
           );
+          setShowApprovalAlert(false);
         }, 500);
       }
     } catch (error) {
@@ -340,20 +333,20 @@ export default function DriverDashboardScreen() {
     
     // التحقق من الموافقة قبل السماح بالتفعيل
     if (driverProfile?.approval_status !== 'approved') {
-      Alert.alert(
+      await showSimpleAlert(
         '⏳ في انتظار الموافقة',
         'لا يمكنك تفعيل حالتك حتى يتم الموافقة على تسجيلك من قبل المدير.\n\nيرجى الانتظار حتى يتم مراجعة طلبك.',
-        [{ text: 'حسناً' }]
+        'warning'
       );
       return;
     }
 
     // التأكد من إكمال التسجيل
     if (!registrationComplete) {
-      Alert.alert(
+      await showSimpleAlert(
         '⚠️ التسجيل غير مكتمل',
         'يرجى إكمال بياناتك الشخصية أولاً.',
-        [{ text: 'حسناً' }]
+        'warning'
       );
       return;
     }
@@ -394,7 +387,7 @@ export default function DriverDashboardScreen() {
       }
     } catch (error: any) {
       console.error('Error toggling online status:', error);
-      Alert.alert('خطأ', 'فشل تحديث الحالة. يرجى المحاولة مرة أخرى.');
+      await showSimpleAlert('خطأ', 'فشل تحديث الحالة. يرجى المحاولة مرة أخرى.', 'error');
     } finally {
       setToggling(false);
     }
@@ -415,12 +408,17 @@ export default function DriverDashboardScreen() {
 
     try {
       // البحث عن سجل موجود بدون order_id
-      const { data: existingLocation } = await supabase
+      const { data: existingLocation, error: findError } = await supabase
         .from('driver_locations')
         .select('id')
         .eq('driver_id', user.id)
         .is('order_id', null)
-        .single();
+        .maybeSingle();
+      
+      if (findError && findError.code !== 'PGRST116') {
+        // PGRST116 = no rows returned (هذا طبيعي)
+        console.error('Error finding existing location:', findError);
+      }
 
       if (existingLocation) {
         // تحديث السجل الموجود
@@ -461,22 +459,15 @@ export default function DriverDashboardScreen() {
     }
   };
 
-  const handleLogout = () => {
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      const confirmed = window.confirm('هل أنت متأكد من تسجيل الخروج؟');
-      if (confirmed) {
+  const handleLogout = async () => {
+    await showAlert('تسجيل الخروج', 'هل أنت متأكد من تسجيل الخروج؟', {
+      type: 'question',
+      confirmText: 'تسجيل الخروج',
+      cancelText: 'إلغاء',
+      onConfirm: () => {
         performLogout();
-      }
-    } else {
-      Alert.alert('تسجيل الخروج', 'هل أنت متأكد من تسجيل الخروج؟', [
-        { text: 'إلغاء', style: 'cancel' },
-        {
-          text: 'تسجيل الخروج',
-          style: 'destructive',
-          onPress: performLogout,
-        },
-      ]);
-    }
+      },
+    });
   };
 
   const performLogout = async () => {
@@ -521,7 +512,7 @@ export default function DriverDashboardScreen() {
         <Text style={styles.title}>{t('driver.dashboard')}</Text>
       </View>
 
-      <ScrollView style={styles.content}>
+      <ScrollView contentContainerStyle={styles.content}>
         {/* قسم طلب جديد */}
         <View style={styles.newOrderSection}>
           <TouchableOpacity
@@ -861,8 +852,8 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     textAlign: 'right',
   },
   content: {
-    flex: 1,
     padding: responsive.getResponsivePadding(),
+    paddingBottom: responsive.getResponsivePadding() + 20,
     ...(responsive.isLargeScreen() && {
       maxWidth: responsive.getMaxContentWidth(),
       alignSelf: 'center',

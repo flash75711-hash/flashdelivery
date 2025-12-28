@@ -1,4 +1,4 @@
-import { calculateDistance } from './locationUtils';
+import { calculateDistance } from './webLocationUtils';
 
 /**
  * حساب سعر التوصيل بناءً على:

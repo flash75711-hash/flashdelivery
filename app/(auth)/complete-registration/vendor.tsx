@@ -14,7 +14,8 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
+import { getLocationWithAddress } from '@/lib/webLocationUtils';
+import { requestLocationPermission } from '@/lib/webUtils';
 
 interface LocationData {
   latitude: number;
@@ -42,32 +43,26 @@ export default function CompleteVendorRegistration() {
   const getCurrentLocation = async () => {
     setGettingLocation(true);
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
+      const hasPermission = await requestLocationPermission();
+      if (!hasPermission) {
         Alert.alert('خطأ', 'نحتاج إلى إذن الوصول إلى الموقع');
         setLocationSource('manual');
         return;
       }
 
-      const locationData = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-      });
+      const locationData = await getLocationWithAddress();
+
+      if (!locationData) {
+        Alert.alert('خطأ', 'فشل الحصول على الموقع. يمكنك تحديده يدوياً');
+        setLocationSource('manual');
+        return;
+      }
 
       setLocation({
-        latitude: locationData.coords.latitude,
-        longitude: locationData.coords.longitude,
+        latitude: locationData.lat,
+        longitude: locationData.lon,
+        address: locationData.address,
       });
-
-      // الحصول على العنوان من الإحداثيات
-      const [address] = await Location.reverseGeocodeAsync({
-        latitude: locationData.coords.latitude,
-        longitude: locationData.coords.longitude,
-      });
-
-      if (address) {
-        const fullAddress = `${address.street || ''} ${address.name || ''} ${address.city || ''}`.trim();
-        setLocation(prev => prev ? { ...prev, address: fullAddress } : null);
-      }
     } catch (error: any) {
       Alert.alert('خطأ', 'فشل الحصول على الموقع. يمكنك تحديده يدوياً');
       setLocationSource('manual');

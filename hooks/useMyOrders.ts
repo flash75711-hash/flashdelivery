@@ -17,6 +17,10 @@ export interface Order {
   customer_proposed_price?: number;
   customer_id?: string;
   driver_id?: string | null;
+  search_status?: string;
+  pickup_latitude?: number;
+  pickup_longitude?: number;
+  deadline?: string | null;
 }
 
 export function useMyOrders() {

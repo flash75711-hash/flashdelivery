@@ -13,11 +13,9 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase, reverseGeocode } from '@/lib/supabase';
-import { getLocationWithHighAccuracy } from '@/lib/locationUtils';
+import { getLocationWithHighAccuracy } from '@/lib/webLocationUtils';
 import { Ionicons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
-import { Linking } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { requestLocationPermission } from '@/lib/webUtils';
 
 // استيراد react-native-maps فقط على الموبايل
 const [MapView, setMapView] = useState<any>(null);
@@ -599,15 +597,15 @@ export default function PlacesDirectoryScreen() {
 
   const getUserLocation = async () => {
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;
+      const hasPermission = await requestLocationPermission();
+      if (!hasPermission) return;
 
       // استخدام الدالة المشتركة التي تستخدم WiFi
       const location = await getLocationWithHighAccuracy();
 
       setUserLocation({
-        lat: location.coords.latitude,
-        lon: location.coords.longitude,
+        lat: location.latitude,
+        lon: location.longitude,
       });
     } catch (error) {
       console.error('Error getting location:', error);
@@ -1047,20 +1045,20 @@ export default function PlacesDirectoryScreen() {
 
   const handleSelectPlace = async (place: Place) => {
     console.log('handleSelectPlace called with place:', place);
-    // حفظ المكان المختار في AsyncStorage
+    // حفظ المكان المختار في localStorage
     const currentPlaceId = placeId;
     if (currentPlaceId) {
-      await AsyncStorage.setItem(`selected_place_${currentPlaceId}`, JSON.stringify(place));
+      localStorage.setItem(`selected_place_${currentPlaceId}`, JSON.stringify(place));
     } else if (addressIndex !== undefined) {
       // إذا كان هناك addressIndex، نحفظ المكان للعنوان المحدد
-      await AsyncStorage.setItem(`selected_place_address_${addressIndex}`, JSON.stringify(place));
+      localStorage.setItem(`selected_place_address_${addressIndex}`, JSON.stringify(place));
     } else if (fromLocationDisplay) {
       // إذا تم فتح الدليل من CurrentLocationDisplay، نحفظ المكان لتحديث الموقع
-      await AsyncStorage.setItem('selected_place_for_location', JSON.stringify(place));
+      localStorage.setItem('selected_place_for_location', JSON.stringify(place));
     } else {
       // إذا لم يكن هناك placeId محدد، نحفظ المكان كـ "general_selection"
       // لاستخدامه في outside-order عند أول مكان فارغ
-      await AsyncStorage.setItem('selected_place_general', JSON.stringify(place));
+      localStorage.setItem('selected_place_general', JSON.stringify(place));
     }
     
     // التحقق من إمكانية الرجوع قبل استدعاء router.back()
@@ -1088,16 +1086,16 @@ export default function PlacesDirectoryScreen() {
       is_manual: false,
     };
     
-    // حفظ الموقع المختار في AsyncStorage
+    // حفظ الموقع المختار في localStorage
     const currentPlaceId = placeId;
     if (currentPlaceId) {
-      await AsyncStorage.setItem(`selected_place_${currentPlaceId}`, JSON.stringify(selectedPlace));
+      localStorage.setItem(`selected_place_${currentPlaceId}`, JSON.stringify(selectedPlace));
     } else if (addressIndex !== undefined) {
-      await AsyncStorage.setItem(`selected_place_address_${addressIndex}`, JSON.stringify(selectedPlace));
+      localStorage.setItem(`selected_place_address_${addressIndex}`, JSON.stringify(selectedPlace));
     } else if (fromLocationDisplay) {
-      await AsyncStorage.setItem('selected_place_for_location', JSON.stringify(selectedPlace));
+      localStorage.setItem('selected_place_for_location', JSON.stringify(selectedPlace));
     } else {
-      await AsyncStorage.setItem('selected_place_general', JSON.stringify(selectedPlace));
+      localStorage.setItem('selected_place_general', JSON.stringify(selectedPlace));
     }
     
     // التحقق من إمكانية الرجوع قبل استدعاء router.back()

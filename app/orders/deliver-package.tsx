@@ -13,12 +13,11 @@ import {
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import { calculateDistance, getLocationWithAddress } from '@/lib/locationUtils';
+import { calculateDistance, getLocationWithAddress } from '@/lib/webLocationUtils';
 import { geocodeAddress } from '@/lib/supabase';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
-import * as Linking from 'expo-linking';
+import { openURL } from '@/lib/webUtils';
 import { createNotification, notifyAllActiveDrivers } from '@/lib/notifications';
 import { calculateDeliveryPrice } from '@/lib/priceCalculation';
 
@@ -120,10 +119,10 @@ export default function DeliverPackageScreen() {
     try {
       // محاولة فتح Google Maps في التطبيق أولاً
       const mapsUrl = 'https://www.google.com/maps';
-      const canOpen = await Linking.canOpenURL(mapsUrl);
+      const canOpen = true; // على الويب، يمكن فتح أي URL
       
       if (canOpen) {
-        await Linking.openURL(mapsUrl);
+        openURL(mapsUrl);
         Alert.alert(
           'اختيار الموقع',
           'بعد اختيار الموقع من الخريطة:\n1. اضغط على الموقع\n2. انسخ العنوان\n3. الصقه في الحقل',
@@ -132,7 +131,7 @@ export default function DeliverPackageScreen() {
       } else {
         // إذا لم يكن Google Maps متاحاً، افتح في المتصفح
         const webUrl = 'https://www.google.com/maps';
-        await Linking.openURL(webUrl);
+        openURL(webUrl);
         Alert.alert(
           'اختيار الموقع',
           'تم فتح الخريطة في المتصفح. بعد اختيار الموقع، انسخ العنوان والصقه في الحقل',

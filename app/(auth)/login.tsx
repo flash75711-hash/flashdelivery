@@ -5,7 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
@@ -97,14 +96,14 @@ export default function LoginScreen() {
 
   const handleSendOtp = async () => {
     if (!phone) {
-      Alert.alert('تنبيه', 'الرجاء إدخال رقم الهاتف');
+      await showSimpleAlert('تنبيه', 'الرجاء إدخال رقم الهاتف', 'warning');
       return;
     }
 
     // التحقق من صحة رقم الهاتف (يجب أن يكون 11 رقم على الأقل)
     const cleaned = phone.replace(/\D/g, '');
     if (cleaned.length < 10) {
-      Alert.alert('تنبيه', 'الرجاء إدخال رقم هاتف صحيح');
+      await showSimpleAlert('تنبيه', 'الرجاء إدخال رقم هاتف صحيح', 'warning');
       return;
     }
 
@@ -126,21 +125,21 @@ export default function LoginScreen() {
         // معالجة خطأ 429 (Too Many Requests)
         if (error.status === 429 || error.message?.includes('40 seconds')) {
           setCooldownSeconds(40);
-          Alert.alert(
+          await showSimpleAlert(
             'تم تجاوز الحد المسموح',
             'لأسباب أمنية، يرجى الانتظار 40 ثانية قبل المحاولة مرة أخرى.',
-            [{ text: 'حسناً' }]
+            'warning'
           );
         } else {
-          Alert.alert('خطأ', error.message || 'فشل إرسال رمز التحقق');
+          await showSimpleAlert('خطأ', error.message || 'فشل إرسال رمز التحقق', 'error');
         }
       } else {
         setOtpSent(true);
-        Alert.alert('تم الإرسال', 'تم إرسال رمز التحقق إلى رقم هاتفك');
+        await showSimpleAlert('تم الإرسال', 'تم إرسال رمز التحقق إلى رقم هاتفك', 'success');
       }
     } catch (error: any) {
       console.error('Login: Error in send OTP:', error);
-      Alert.alert('خطأ', error.message || 'حدث خطأ أثناء إرسال رمز التحقق');
+      await showSimpleAlert('خطأ', error.message || 'حدث خطأ أثناء إرسال رمز التحقق', 'error');
     } finally {
       setSendingOtp(false);
     }
@@ -148,7 +147,7 @@ export default function LoginScreen() {
 
   const handleVerifyOtp = async () => {
     if (!otp || otp.length !== 6) {
-      Alert.alert('تنبيه', 'الرجاء إدخال رمز التحقق المكون من 6 أرقام');
+      await showSimpleAlert('تنبيه', 'الرجاء إدخال رمز التحقق المكون من 6 أرقام', 'warning');
       return;
     }
 
@@ -166,13 +165,13 @@ export default function LoginScreen() {
 
       if (error) {
         console.error('Login: Error verifying OTP:', error);
-        Alert.alert('خطأ', error.message || 'رمز التحقق غير صحيح');
+        await showSimpleAlert('خطأ', error.message || 'رمز التحقق غير صحيح', 'error');
         setLoading(false);
         return;
       }
 
       if (!data.session) {
-        Alert.alert('خطأ', 'فشل إنشاء الجلسة');
+        await showSimpleAlert('خطأ', 'فشل إنشاء الجلسة', 'error');
         setLoading(false);
         return;
       }
@@ -209,7 +208,7 @@ export default function LoginScreen() {
       
     } catch (error: any) {
       console.error('Login: Error in verify OTP:', error);
-      Alert.alert('خطأ', error.message || 'حدث خطأ أثناء التحقق من رمز التحقق');
+      await showSimpleAlert('خطأ', error.message || 'حدث خطأ أثناء التحقق من رمز التحقق', 'error');
     } finally {
       setLoading(false);
     }

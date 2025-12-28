@@ -171,7 +171,7 @@ export default function SearchSettingsScreen() {
         <Text style={styles.title}>إعدادات البحث عن السائقين</Text>
       </View>
 
-      <ScrollView style={styles.content}>
+      <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>نطاق البحث</Text>
           
@@ -285,8 +285,8 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     textAlign: 'right',
   },
   content: {
-    flex: 1,
     padding: 20,
+    paddingBottom: 40,
   },
   loadingContainer: {
     flex: 1,

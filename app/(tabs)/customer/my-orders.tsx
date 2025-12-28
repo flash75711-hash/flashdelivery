@@ -8,7 +8,6 @@ import {
   SafeAreaView,
   Platform,
   RefreshControl,
-  Alert,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,6 +18,7 @@ import CompletedOrdersCard from '@/components/CompletedOrdersCard';
 import responsive from '@/utils/responsive';
 import { supabase } from '@/lib/supabase';
 import { createNotification } from '@/lib/notifications';
+import { showAlert, showSimpleAlert, showConfirm } from '@/lib/alert';
 import type { Order } from '@/hooks/useMyOrders';
 
 export default function CustomerMyOrdersScreen() {
@@ -48,6 +48,45 @@ export default function CustomerMyOrdersScreen() {
     };
   }, [orders]);
 
+  // دالة إعادة البحث عن سائق
+  const handleRestartSearch = useCallback(async (order: Order) => {
+    const confirmed = await showConfirm(
+      'إعادة البحث عن سائق',
+      'هل تريد إعادة البحث عن سائق لهذا الطلب؟',
+      {
+        confirmText: 'نعم، إعادة البحث',
+        cancelText: 'إلغاء',
+        type: 'question',
+      }
+    );
+
+    if (!confirmed) return;
+
+    try {
+      // تحديث حالة البحث لإعادة التشغيل
+      const { error: updateError } = await supabase
+        .from('orders')
+        .update({
+          search_status: 'searching',
+          search_started_at: new Date().toISOString(),
+          search_expanded_at: null,
+          driver_id: null, // إزالة أي سائق معين سابقاً
+        })
+        .eq('id', order.id);
+
+      if (updateError) {
+        showSimpleAlert('خطأ', 'فشل تحديث حالة البحث', 'error');
+        return;
+      }
+
+      await showSimpleAlert('نجح', 'تم بدء البحث عن سائق جديد. سيتم البحث تلقائياً.', 'success');
+      reload();
+    } catch (error: any) {
+      console.error('Error restarting search:', error);
+      showSimpleAlert('خطأ', error.message || 'فشل إعادة البحث', 'error');
+    }
+  }, [reload]);
+
   // دالة إلغاء الطلب
   const handleCancelOrder = useCallback(async (order: Order) => {
     // منع الاستدعاءات المتكررة لنفس الطلب
@@ -58,74 +97,73 @@ export default function CustomerMyOrdersScreen() {
 
     console.log('🔄 [handleCancelOrder] Starting cancel process for order:', order.id);
     
-    Alert.alert(
+    const confirmed = await showConfirm(
       'إلغاء الطلب',
       'هل أنت متأكد من إلغاء هذا الطلب؟ لا يمكن التراجع عن هذه العملية.',
-      [
-        { text: 'إلغاء', style: 'cancel' },
-        {
-          text: 'نعم، إلغاء',
-          style: 'destructive',
-          onPress: async () => {
-            // تعيين حالة المعالجة
-            cancelingOrderIdRef.current = order.id;
-
-            try {
-              console.log('🔄 [handleCancelOrder] Updating order status to cancelled...');
-              const { data, error } = await supabase
-                .from('orders')
-                .update({ status: 'cancelled' })
-                .eq('id', order.id)
-                .select();
-
-              if (error) {
-                console.error('❌ [handleCancelOrder] Error updating order:', error);
-                throw error;
-              }
-
-              console.log('✅ [handleCancelOrder] Order updated successfully:', data);
-
-              // إشعار السائق إذا كان الطلب مقبولاً
-              if (order.driver_id) {
-                console.log('📨 [handleCancelOrder] Sending notification to driver:', order.driver_id);
-                const notificationResult = await createNotification({
-                  user_id: order.driver_id,
-                  title: 'تم إلغاء الطلب',
-                  message: `تم إلغاء الطلب رقم ${order.id.slice(0, 8)}`,
-                  type: 'warning',
-                  order_id: order.id,
-                });
-
-                if (!notificationResult.success) {
-                  console.error('⚠️ [handleCancelOrder] Failed to send notification:', notificationResult.error);
-                } else {
-                  console.log('✅ [handleCancelOrder] Notification sent successfully');
-                }
-              }
-
-              Alert.alert('نجح', 'تم إلغاء الطلب بنجاح');
-              console.log('🔄 [handleCancelOrder] Reloading orders...');
-              reload();
-            } catch (error: any) {
-              console.error('❌ [handleCancelOrder] Error cancelling order:', error);
-              Alert.alert('خطأ', error.message || 'فشل إلغاء الطلب');
-              if (error.details) {
-                console.error('Supabase Error Details:', error.details);
-              }
-              if (error.hint) {
-                console.error('Supabase Error Hint:', error.hint);
-              }
-              if (error.code) {
-                console.error('Supabase Error Code:', error.code);
-              }
-            } finally {
-              // إعادة تعيين حالة المعالجة بعد انتهاء العملية
-              cancelingOrderIdRef.current = null;
-            }
-          },
-        },
-      ]
+      {
+        confirmText: 'نعم، إلغاء',
+        cancelText: 'إلغاء',
+        type: 'warning',
+      }
     );
+
+    if (!confirmed) return;
+
+    // تعيين حالة المعالجة
+    cancelingOrderIdRef.current = order.id;
+
+    try {
+      console.log('🔄 [handleCancelOrder] Updating order status to cancelled...');
+      const { data, error } = await supabase
+        .from('orders')
+        .update({ status: 'cancelled' })
+        .eq('id', order.id)
+        .select();
+
+      if (error) {
+        console.error('❌ [handleCancelOrder] Error updating order:', error);
+        throw error;
+      }
+
+      console.log('✅ [handleCancelOrder] Order updated successfully:', data);
+
+      // إشعار السائق إذا كان الطلب مقبولاً
+      if (order.driver_id) {
+        console.log('📨 [handleCancelOrder] Sending notification to driver:', order.driver_id);
+        const notificationResult = await createNotification({
+          user_id: order.driver_id,
+          title: 'تم إلغاء الطلب',
+          message: `تم إلغاء الطلب رقم ${order.id.slice(0, 8)}`,
+          type: 'warning',
+          order_id: order.id,
+        });
+
+        if (!notificationResult.success) {
+          console.error('⚠️ [handleCancelOrder] Failed to send notification:', notificationResult.error);
+        } else {
+          console.log('✅ [handleCancelOrder] Notification sent successfully');
+        }
+      }
+
+      await showSimpleAlert('نجح', 'تم إلغاء الطلب بنجاح', 'success');
+      console.log('🔄 [handleCancelOrder] Reloading orders...');
+      reload();
+    } catch (error: any) {
+      console.error('❌ [handleCancelOrder] Error cancelling order:', error);
+      showSimpleAlert('خطأ', error.message || 'فشل إلغاء الطلب', 'error');
+      if (error.details) {
+        console.error('Supabase Error Details:', error.details);
+      }
+      if (error.hint) {
+        console.error('Supabase Error Hint:', error.hint);
+      }
+      if (error.code) {
+        console.error('Supabase Error Code:', error.code);
+      }
+    } finally {
+      // إعادة تعيين حالة المعالجة بعد انتهاء العملية
+      cancelingOrderIdRef.current = null;
+    }
   }, [reload]);
 
   if (loading) {
@@ -151,7 +189,12 @@ export default function CustomerMyOrdersScreen() {
         data={activeOrders}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-          <OrderCard order={item} onCancel={handleCancelOrder} />
+          <OrderCard 
+            order={item} 
+            onCancel={handleCancelOrder}
+            onRestartSearch={handleRestartSearch}
+            onOrderUpdated={onRefresh}
+          />
         )}
         contentContainerStyle={styles.listContent}
         ListHeaderComponent={

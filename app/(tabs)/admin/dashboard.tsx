@@ -220,7 +220,7 @@ export default function AdminDashboardScreen() {
       </View>
 
       <ScrollView
-        style={styles.content}
+        contentContainerStyle={styles.content}
         refreshControl={
           <RefreshControl refreshing={loading} onRefresh={loadStats} />
         }
@@ -540,8 +540,8 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     textAlign: 'right',
   },
   content: {
-    flex: 1,
     padding: 20,
+    paddingBottom: 40,
   },
   newOrderSection: {
     marginBottom: 20,

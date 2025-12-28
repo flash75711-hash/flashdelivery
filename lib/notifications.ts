@@ -10,32 +10,13 @@ export interface CreateNotificationParams {
 
 /**
  * إرسال Push Notification للمستخدم
+ * ⚠️ Web فقط: لا يتم إرسال Push Notifications (In-App فقط)
  */
 async function sendPushNotification(userId: string, title: string, message: string, data?: any) {
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      console.log('No session, skipping push notification');
-      return;
-    }
-
-    const response = await supabase.functions.invoke('send-push-notification', {
-      body: {
-        user_id: userId,
-        title: title,
-        message: message,
-        data: data || {},
-      },
-    });
-
-    if (response.error) {
-      console.error('Error sending push notification:', response.error);
-    } else {
-      console.log('✅ Push notification sent:', response.data);
-    }
-  } catch (error) {
-    console.error('Error in sendPushNotification:', error);
-  }
+  // على الويب، نستخدم In-App Notifications فقط (Supabase Realtime)
+  // لا حاجة لإرسال Push Notifications
+  console.log('🔔 [sendPushNotification] Skipping push notification (Web-only mode)');
+  return;
 }
 
 /**

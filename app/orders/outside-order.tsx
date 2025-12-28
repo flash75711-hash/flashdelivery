@@ -19,10 +19,7 @@ import { supabase, reverseGeocode } from '@/lib/supabase';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import CurrentLocationDisplay from '@/components/CurrentLocationDisplay';
-import * as Location from 'expo-location';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as ImagePicker from 'expo-image-picker';
-import * as ImageManipulator from 'expo-image-manipulator';
+import { pickImage } from '@/lib/webUtils';
 import { uploadImageToImgBB } from '@/lib/imgbb';
 import {
   calculateDeliveryPrice,
@@ -31,7 +28,7 @@ import {
   findFarthestPlaceFromCustomer,
   orderPlacesByDistance,
 } from '@/lib/priceCalculation';
-import { calculateDistance } from '@/lib/locationUtils';
+import { calculateDistance } from '@/lib/webLocationUtils';
 import { createNotifications, notifyAllActiveDrivers } from '@/lib/notifications';
 
 interface Place {
@@ -180,32 +177,9 @@ export default function OutsideOrderScreen() {
       let finalImageUri = imageUri;
       
       // على الويب، ImageManipulator قد لا يعمل بشكل صحيح مع blob URLs
-      // لذلك نستخدم الصورة مباشرة أو نحولها إلى base64
-      if (Platform.OS === 'web' && imageUri.startsWith('blob:')) {
-        // على الويب، نستخدم blob URL مباشرة
-        // يمكن تحويلها إلى base64 إذا لزم الأمر
-        finalImageUri = imageUri;
-      } else {
-        // على الموبايل: ضغط الصورة وتحسينها باستخدام ImageManipulator
-        try {
-      const manipulatedImage = await ImageManipulator.manipulateAsync(
-        imageUri,
-        [
-          // تقليل الحجم إذا كانت الصورة كبيرة (أقصى عرض 1200px)
-          { resize: { width: 1200 } },
-        ],
-        {
-          compress: 0.7, // ضغط بنسبة 70%
-          format: ImageManipulator.SaveFormat.JPEG,
-        }
-      );
-          finalImageUri = manipulatedImage.uri;
-        } catch (manipulatorError: any) {
-          console.warn('ImageManipulator failed, using original image:', manipulatorError);
-          // إذا فشل ImageManipulator، نستخدم الصورة الأصلية
-          finalImageUri = imageUri;
-        }
-      }
+      // على الويب، نستخدم blob URL أو data URL مباشرة
+      // يمكن تحويلها إلى base64 إذا لزم الأمر عند الرفع
+      finalImageUri = imageUri;
 
       setPlacesWithItems(placesWithItems.map(p => 
         p.id === placeId 
@@ -223,62 +197,20 @@ export default function OutsideOrderScreen() {
     }
   };
 
-  // فتح الكاميرا لالتقاط صورة
+  // فتح الكاميرا لالتقاط صورة (Web: استخدام file input مع capture)
   const openCamera = async (placeId: string, itemId: string) => {
     try {
-      console.log('openCamera called:', { placeId, itemId, platform: Platform.OS });
+      console.log('openCamera called:', { placeId, itemId });
       
-      // في Web، الكاميرا قد لا تعمل بشكل صحيح
-      if (Platform.OS === 'web') {
-        Alert.alert(
-          'تنبيه',
-          'الكاميرا غير متاحة في المتصفح. يرجى استخدام المعرض لاختيار صورة.',
-          [{ text: 'حسناً', onPress: () => openImageLibrary(placeId, itemId) }]
-        );
-        return;
-      }
-      
-      // طلب أذونات الكاميرا
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      console.log('Camera permission status:', status);
-      
-      if (status !== 'granted') {
-        Alert.alert(
-          'تنبيه',
-          'يجب السماح بالوصول إلى الكاميرا لالتقاط الصور',
-          [
-            {
-              text: 'إعدادات',
-              onPress: () => {
-                // يمكن فتح إعدادات التطبيق هنا
-                console.log('Open settings');
-              },
-            },
-            {
-              text: 'إلغاء',
-              style: 'cancel',
-            },
-          ]
-        );
-        return;
-      }
-
-      console.log('Launching camera...');
-      // @ts-ignore - MediaTypeOptions deprecated but still works
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [4, 3],
-        quality: 0.8,
+      // على الويب، نستخدم file input مع capture attribute
+      const images = await pickImage({
+        multiple: false,
+        accept: 'image/*',
+        maxSize: 10 * 1024 * 1024, // 10MB
       });
 
-      console.log('Camera result:', { canceled: result.canceled, hasAssets: !!result.assets?.[0] });
-
-      if (!result.canceled && result.assets && result.assets[0]) {
-        console.log('Processing image from camera...');
-        await processSelectedImage(result.assets[0].uri, placeId, itemId);
-      } else {
-        console.log('Camera was canceled or no image selected');
+      if (images.length > 0) {
+        await processSelectedImage(images[0].uri, placeId, itemId);
       }
     } catch (error: any) {
       console.error('Error opening camera:', error);
@@ -289,93 +221,16 @@ export default function OutsideOrderScreen() {
   // فتح المعرض لاختيار صورة
   const openImageLibrary = async (placeId: string, itemId: string) => {
     try {
-      console.log('openImageLibrary called:', { placeId, itemId, platform: Platform.OS });
+      console.log('openImageLibrary called:', { placeId, itemId });
       
-      // معالجة خاصة للويب
-      if (Platform.OS === 'web' && typeof document !== 'undefined') {
-        return new Promise<void>((resolve) => {
-          const input = document.createElement('input');
-          input.type = 'file';
-          input.accept = 'image/*';
-          input.style.display = 'none';
-          
-          input.onchange = async (e: any) => {
-            const file = e.target.files?.[0];
-            if (file) {
-              try {
-                // إنشاء URL محلي للصورة
-                const imageUri = URL.createObjectURL(file);
-                console.log('File selected on web:', file.name);
-                await processSelectedImage(imageUri, placeId, itemId);
-                resolve();
-              } catch (error: any) {
-                console.error('Error processing file on web:', error);
-                Alert.alert('خطأ', `فشل معالجة الصورة: ${error.message || 'خطأ غير معروف'}`);
-                resolve();
-              }
-            } else {
-              console.log('No file selected on web');
-              resolve();
-            }
-            if (document.body.contains(input)) {
-              document.body.removeChild(input);
-            }
-          };
-          
-          input.oncancel = () => {
-            console.log('File picker canceled on web');
-            if (document.body.contains(input)) {
-              document.body.removeChild(input);
-            }
-            resolve();
-          };
-          
-          document.body.appendChild(input);
-          input.click();
-        });
-      }
-      
-      // للموبايل: استخدام expo-image-picker
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      console.log('Media library permission status:', status);
-      
-      if (status !== 'granted') {
-        Alert.alert(
-          'تنبيه',
-          'يجب السماح بالوصول إلى الصور لاختيار صورة',
-          [
-            {
-              text: 'إعدادات',
-              onPress: () => {
-                console.log('Open settings');
-              },
-            },
-            {
-              text: 'إلغاء',
-              style: 'cancel',
-            },
-          ]
-        );
-      return;
-    }
-    
-      console.log('Launching image library...');
-      // @ts-ignore - MediaTypeOptions deprecated but still works
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [4, 3],
-        quality: 0.8,
-        allowsMultipleSelection: false,
+      const images = await pickImage({
+        multiple: false,
+        accept: 'image/*',
+        maxSize: 10 * 1024 * 1024, // 10MB
       });
 
-      console.log('Image library result:', { canceled: result.canceled, hasAssets: !!result.assets?.[0] });
-
-      if (!result.canceled && result.assets && result.assets[0]) {
-        console.log('Processing image from library...');
-        await processSelectedImage(result.assets[0].uri, placeId, itemId);
-        } else {
-        console.log('Image library was canceled or no image selected');
+      if (images.length > 0) {
+        await processSelectedImage(images[0].uri, placeId, itemId);
       }
     } catch (error: any) {
       console.error('Error opening image library:', error);
@@ -940,7 +795,7 @@ export default function OutsideOrderScreen() {
         let hasChanges = false;
         
         // أولاً: التحقق من المكان المختار لتحديث الموقع (من CurrentLocationDisplay)
-        const locationPlace = await AsyncStorage.getItem('selected_place_for_location');
+        const locationPlace = localStorage.getItem('selected_place_for_location');
         if (locationPlace) {
           const place = JSON.parse(locationPlace);
           console.log('Found selected_place_for_location:', place);
@@ -964,7 +819,7 @@ export default function OutsideOrderScreen() {
               // لا نستدعي handleLocationUpdate هنا لأننا لا نريد أن يتم استبداله لاحقاً
             }
           }
-          await AsyncStorage.removeItem('selected_place_for_location');
+          localStorage.removeItem('selected_place_for_location');
         }
         
         if (!isMounted) return;
@@ -972,17 +827,17 @@ export default function OutsideOrderScreen() {
         // ثانياً: التحقق من الأماكن المحددة لكل placeId
         for (let i = 0; i < updatedPlaces.length; i++) {
           const placeWithItems = updatedPlaces[i];
-          const storedPlace = await AsyncStorage.getItem(`selected_place_${placeWithItems.id}`);
+          const storedPlace = localStorage.getItem(`selected_place_${placeWithItems.id}`);
           if (storedPlace) {
             const place = JSON.parse(storedPlace);
             updatedPlaces[i] = { ...placeWithItems, place };
-            await AsyncStorage.removeItem(`selected_place_${placeWithItems.id}`);
+            localStorage.removeItem(`selected_place_${placeWithItems.id}`);
             hasChanges = true;
           }
         }
         
         // ثالثاً: التحقق من الاختيار العام (من أزرار اختيار المكان في القائمة)
-        const generalPlace = await AsyncStorage.getItem('selected_place_general');
+        const generalPlace = localStorage.getItem('selected_place_general');
         if (generalPlace) {
           const place = JSON.parse(generalPlace);
           // إضافة المكان إلى أول مكان فارغ
@@ -999,7 +854,7 @@ export default function OutsideOrderScreen() {
             });
             hasChanges = true;
           }
-          await AsyncStorage.removeItem('selected_place_general');
+          localStorage.removeItem('selected_place_general');
         }
         
         if (hasChanges && isMounted) {
