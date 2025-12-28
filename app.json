@@ -25,32 +25,7 @@
     },
     "plugins": [
       "expo-router",
-      [
-        "expo-location",
-        {
-          "locationAlwaysAndWhenInUsePermission": "نحتاج إلى موقعك لتتبع الطلبات"
-        }
-      ],
-      [
-        "expo-image-picker",
-        {
-          "photosPermission": "نحتاج إلى الوصول إلى الصور لرفع المستندات"
-        }
-      ],
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/icon.png",
-          "color": "#007AFF",
-          "sounds": [
-            "./assets/notification.wav"
-          ],
-          "mode": "production"
-        }
-      ],
-      "expo-web-browser",
-      "expo-localization",
-      "expo-secure-store"
+      "expo-localization"
     ]
   }
 }
