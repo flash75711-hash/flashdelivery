@@ -238,7 +238,8 @@ export function pickImage(options: ImagePickerOptions = {}): Promise<ImageFile[]
     input.onchange = (event) => {
       const files = (event.target as HTMLInputElement).files;
       if (!files || files.length === 0) {
-        reject(new Error('لم يتم اختيار أي ملف'));
+        // إرجاع مصفوفة فارغة بدلاً من رفض الـ Promise
+        resolve([]);
         return;
       }
 
@@ -288,7 +289,9 @@ export function pickImage(options: ImagePickerOptions = {}): Promise<ImageFile[]
     };
 
     input.oncancel = () => {
-      reject(new Error('تم إلغاء اختيار الملف'));
+      // إرجاع مصفوفة فارغة عند الإلغاء بدلاً من رفض الـ Promise
+      // هذا يمنع ظهور خطأ في console عند إلغاء المستخدم
+      resolve([]);
     };
 
     input.click();
