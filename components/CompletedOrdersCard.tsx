@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import responsive from '@/utils/responsive';
+import responsive, { createShadowStyle } from '@/utils/responsive';
 import type { Order } from '@/hooks/useMyOrders';
 import OrderCard from './OrderCard';
 
@@ -83,11 +83,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 16,
     marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 4,
+    }),
     overflow: 'hidden',
   },
   header: {

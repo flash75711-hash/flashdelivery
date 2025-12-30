@@ -15,7 +15,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import responsive from '@/utils/responsive';
+import responsive, { createShadowStyle } from '@/utils/responsive';
 import { createNotification } from '@/lib/notifications';
 import { showAlert, showSimpleAlert, showConfirm } from '@/lib/alert';
 
@@ -573,11 +573,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 4,
+    }),
   },
   cardHeader: {
     flexDirection: 'row',

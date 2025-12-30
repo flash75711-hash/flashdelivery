@@ -18,7 +18,7 @@ import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/contexts/AuthContext';
-import responsive from '@/utils/responsive';
+import responsive, { createShadowStyle } from '@/utils/responsive';
 import NotificationCard from '@/components/NotificationCard';
 
 interface DashboardStats {
@@ -553,11 +553,13 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 4,
+    }),
   },
   newOrderTextContainer: {
     flex: 1,
@@ -583,11 +585,13 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 4,
+    }),
   },
   statIcon: {
     width: 64,
@@ -622,11 +626,13 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 4,
+    }),
   },
   settingHeader: {
     marginBottom: 16,
@@ -730,11 +736,13 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 4,
+    }),
   },
   managementInfo: {
     flexDirection: 'row',
@@ -772,11 +780,13 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     borderWidth: 1,
     borderColor: '#FF3B30',
     gap: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 4,
+    }),
   },
   logoutText: {
     color: '#FF3B30',

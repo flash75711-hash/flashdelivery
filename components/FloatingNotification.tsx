@@ -11,7 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import responsive from '@/utils/responsive';
+import responsive, { createShadowStyle } from '@/utils/responsive';
 
 export interface FloatingNotificationData {
   id: string;
@@ -218,11 +218,13 @@ const getStyles = () => StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 5,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.25,
+      shadowRadius: 8,
+      elevation: 5,
+    }),
     borderLeftWidth: 4,
     borderLeftColor: '#007AFF',
   },

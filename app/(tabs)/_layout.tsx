@@ -550,6 +550,15 @@ export default function TabsLayout() {
           tabBarButton: () => null, // إخفاء من الـ navbar
         }}
       />
+      <Tabs.Screen
+        name="admin/users"
+        options={{
+          title: 'المستخدمين',
+          tabBarLabel: 'المستخدمين',
+          tabBarIcon: ({ color }) => <Ionicons name="people" size={tabBarIconSize} color={color} />,
+          tabBarButton: shouldHideTab(['admin']) ? () => null : undefined,
+        }}
+      />
     </Tabs>
     </>
   );

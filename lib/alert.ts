@@ -6,12 +6,12 @@
 import Swal from 'sweetalert2';
 
 /**
- * Toast notification - للإشعارات الداخلية السريعة
+ * Toast notification - للإشعارات الداخلية السريعة (خفيف، لا يغطي الشاشة)
  */
 export function showToast(
   message: string,
   type: 'success' | 'error' | 'warning' | 'info' = 'info',
-  duration: number = 3000
+  duration: number = 2000
 ): void {
   const iconMap: Record<string, 'success' | 'error' | 'warning' | 'info'> = {
     success: 'success',
@@ -28,9 +28,16 @@ export function showToast(
     showConfirmButton: false,
     timer: duration,
     timerProgressBar: true,
+    width: 'auto',
+    padding: '0.75rem 1rem',
+    background: '#fff',
     didOpen: (toast) => {
       toast.addEventListener('mouseenter', Swal.stopTimer);
       toast.addEventListener('mouseleave', Swal.resumeTimer);
+    },
+    customClass: {
+      popup: 'swal2-toast-light',
+      title: 'swal2-toast-title-light',
     },
   });
 }

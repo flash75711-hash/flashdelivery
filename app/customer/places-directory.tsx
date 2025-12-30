@@ -16,6 +16,7 @@ import { supabase, reverseGeocode } from '@/lib/supabase';
 import { getLocationWithHighAccuracy } from '@/lib/webLocationUtils';
 import { Ionicons } from '@expo/vector-icons';
 import { requestLocationPermission } from '@/lib/webUtils';
+import { createShadowStyle } from '@/utils/responsive';
 
 // استيراد react-native-maps فقط على الموبايل
 const [MapView, setMapView] = useState<any>(null);
@@ -1468,11 +1469,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.25,
+      shadowRadius: 3.84,
+      elevation: 5,
+    }),
   },
   mapLocationTitle: {
     fontSize: 18,

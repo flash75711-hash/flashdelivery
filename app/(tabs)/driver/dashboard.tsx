@@ -18,7 +18,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase, isRegistrationComplete } from '@/lib/supabase';
 import CurrentLocationDisplay from '@/components/CurrentLocationDisplay';
 import { useRouter, useFocusEffect } from 'expo-router';
-import responsive from '@/utils/responsive';
+import responsive, { createShadowStyle } from '@/utils/responsive';
 import NotificationCard from '@/components/NotificationCard';
 import { showSimpleAlert, showAlert } from '@/lib/alert';
 
@@ -874,11 +874,13 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 4,
+    }),
   },
   newOrderTextContainer: {
     flex: 1,
@@ -908,11 +910,13 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 4,
+    }),
   },
   statusHeader: {
     flexDirection: 'row',
@@ -991,11 +995,13 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 4,
+    }),
   },
   statNumber: {
     fontSize: 32,
@@ -1057,11 +1063,13 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 4,
+    }),
   },
   profileHeader: {
     flexDirection: 'row',
@@ -1223,11 +1231,13 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     padding: 24,
     width: '100%',
     maxWidth: 500,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 8,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 12,
+      elevation: 8,
+    }),
   },
   modalHeader: {
     flexDirection: 'row',

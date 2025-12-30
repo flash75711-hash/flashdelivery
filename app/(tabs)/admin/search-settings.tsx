@@ -14,7 +14,7 @@ import {
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
-import responsive from '@/utils/responsive';
+import responsive, { createShadowStyle } from '@/utils/responsive';
 
 interface SearchSettings {
   initialRadius: string;
@@ -303,11 +303,13 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 4,
+    }),
   },
   sectionTitle: {
     fontSize: responsive.getResponsiveFontSize(18),

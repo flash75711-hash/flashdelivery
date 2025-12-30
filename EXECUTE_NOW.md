@@ -1,66 +1,136 @@
-# ⚡ تنفيذ الإعداد الآن
+# 🚀 تنفيذ الآن - خطوات مباشرة
 
-## 🎯 الطريقة الأسرع (موصى به)
+## الخطوة 1: Migration SQL
 
-### استخدام Node.js (جاهز الآن):
+**افتح Supabase → SQL Editor → انسخ والصق:**
 
-```bash
-# تم تثبيت المكتبة بالفعل
-node run_setup.js
+```sql
+-- ============================================
+-- Flash Delivery - Migration to PIN Authentication
+-- ============================================
+
+-- 1. إضافة أعمدة PIN
+ALTER TABLE profiles 
+ADD COLUMN IF NOT EXISTS pin_hash TEXT,
+ADD COLUMN IF NOT EXISTS failed_attempts INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP WITH TIME ZONE;
+
+-- 2. إنشاء index
+CREATE INDEX IF NOT EXISTS idx_profiles_phone ON profiles(phone) WHERE phone IS NOT NULL;
+
+-- 3. Functions لإدارة failed_attempts
+CREATE OR REPLACE FUNCTION increment_failed_attempts(user_phone TEXT)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  current_attempts INTEGER;
+  lock_duration INTERVAL := '30 minutes';
+BEGIN
+  UPDATE profiles
+  SET 
+    failed_attempts = failed_attempts + 1,
+    locked_until = CASE 
+      WHEN failed_attempts + 1 >= 5 THEN NOW() + lock_duration
+      ELSE locked_until
+    END
+  WHERE phone = user_phone
+  RETURNING failed_attempts INTO current_attempts;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION reset_failed_attempts(user_phone TEXT)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  UPDATE profiles
+  SET 
+    failed_attempts = 0,
+    locked_until = NULL
+  WHERE phone = user_phone;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION is_account_locked(user_phone TEXT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  lock_time TIMESTAMP WITH TIME ZONE;
+BEGIN
+  SELECT locked_until INTO lock_time
+  FROM profiles
+  WHERE phone = user_phone;
+  
+  IF lock_time IS NULL THEN
+    RETURN FALSE;
+  END IF;
+  
+  IF lock_time > NOW() THEN
+    RETURN TRUE;
+  ELSE
+    UPDATE profiles
+    SET locked_until = NULL, failed_attempts = 0
+    WHERE phone = user_phone;
+    RETURN FALSE;
+  END IF;
+END;
+$$;
 ```
 
-## 🔄 أو استخدام Python (إذا كان pip3 متوفر):
+**✅ اضغط Run**
+
+---
+
+## الخطوة 2: إنشاء Admin
+
+**في Terminal:**
 
 ```bash
-# تثبيت المكتبة
-pip3 install psycopg2-binary
-
-# تشغيل السكريبت
-python3 run_setup.py
+# تأكد من وجود .env أو متغيرات البيئة
+node scripts/create-admin.js
 ```
 
-## 📋 أو النسخ اليدوي (الأسهل والأضمن):
+**أو يدوياً:**
 
-1. افتح ملف `supabase_setup.sql`
-2. انسخ جميع المحتوى (Ctrl+A ثم Ctrl+C)
-3. افتح [Supabase Dashboard](https://supabase.com/dashboard)
-4. اذهب إلى **SQL Editor** → **New Query**
-5. الصق المحتوى (Ctrl+V)
-6. اضغط **Run**
+1. Supabase → Authentication → Users → Add User
+   - Phone: `+201200006637`
+   - Email: `admin@flash.local`
+   - Password: (أي شيء)
 
-## ⚙️ بعد التنفيذ:
+2. SQL Editor:
+   ```sql
+   -- أولاً احصل على hash من الكود أو استخدم:
+   -- node -e "const bcrypt=require('bcryptjs'); bcrypt.hash('000000',10).then(h=>console.log(h))"
+   
+   UPDATE profiles
+   SET 
+     pin_hash = '$2b$10$YOUR_HASH_HERE',
+     role = 'admin',
+     status = 'active',
+     failed_attempts = 0,
+     locked_until = NULL
+   WHERE phone = '+201200006637';
+   ```
 
-### 1. تفعيل Realtime:
-- في Supabase Dashboard
-- **Database** → **Replication**
-- فعّل Realtime لـ:
-  - ✅ `orders`
-  - ✅ `profiles`
-  - ✅ `wallets`
+---
 
-### 2. التحقق:
-```bash
-node -e "
-const { Client } = require('pg');
-const client = new Client({
-  connectionString: 'postgresql://postgres:FlashExtra@321@db.tnwrmybyvimlsamnputn.supabase.co:5432/postgres'
-});
-client.connect().then(() => {
-  return client.query(\"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('profiles', 'vendors', 'orders', 'wallets', 'driver_locations') ORDER BY table_name\");
-}).then(res => {
-  console.log('✅ الجداول المنشأة:', res.rows.map(r => r.table_name).join(', '));
-  client.end();
-}).catch(err => {
-  console.error('❌ خطأ:', err.message);
-  process.exit(1);
-});
-"
-```
+## الخطوة 3: اختبار
 
-## ✅ جاهز!
-
-بعد التنفيذ، شغّل التطبيق:
 ```bash
 npm start
 ```
 
+**افتح:** `http://localhost:8081`
+
+**تسجيل الدخول:**
+- Phone: `01200006637`
+- PIN: `000000`
+
+---
+
+✅ **تم!**

@@ -12,7 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import responsive from '@/utils/responsive';
+import responsive, { createShadowStyle } from '@/utils/responsive';
 
 interface OrderNotification {
   id: string;
@@ -290,11 +290,13 @@ const getStyles = () => StyleSheet.create({
     marginHorizontal: responsive.isLargeScreen() ? 'auto' : 16,
     borderRadius: 20,
     padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 8,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 12,
+      elevation: 8,
+    }),
     maxWidth: responsive.isLargeScreen() ? responsive.getMaxContentWidth() - 32 : '100%',
     width: responsive.isLargeScreen() ? responsive.getMaxContentWidth() - 32 : 'auto',
   },

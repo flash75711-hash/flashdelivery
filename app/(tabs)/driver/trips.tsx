@@ -15,7 +15,7 @@ import { useTranslation } from 'react-i18next';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { getCurrentLocation, requestLocationPermission } from '@/lib/webUtils';
-import responsive from '@/utils/responsive';
+import responsive, { createShadowStyle } from '@/utils/responsive';
 import { createNotification } from '@/lib/notifications';
 import OrderCard from '@/components/OrderCard';
 import { showSimpleAlert } from '@/lib/alert';
@@ -620,11 +620,13 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     borderRadius: 16,
     padding: responsive.isTablet() ? 24 : 20,
     marginBottom: responsive.isTablet() ? 20 : 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 4,
+    }),
     ...(responsive.isLargeScreen() && {
       maxWidth: responsive.getMaxContentWidth() - (responsive.getResponsivePadding() * 2),
       alignSelf: 'center',

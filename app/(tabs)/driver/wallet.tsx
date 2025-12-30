@@ -12,7 +12,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
-import responsive from '@/utils/responsive';
+import responsive, { createShadowStyle } from '@/utils/responsive';
 
 interface WalletTransaction {
   id: string;
@@ -199,11 +199,13 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     marginBottom: 12,
     padding: responsive.isTablet() ? 20 : 16,
     borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.1,
+      shadowRadius: 4,
+      elevation: 2,
+    }),
     ...(responsive.isLargeScreen() && {
       maxWidth: responsive.getMaxContentWidth() - (responsive.getResponsivePadding() * 2),
       alignSelf: 'center',

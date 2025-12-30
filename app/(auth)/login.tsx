@@ -1,3 +1,8 @@
+/**
+ * Login Screen - PIN Authentication
+ * شاشة تسجيل الدخول باستخدام رقم الموبايل و PIN
+ */
+
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -13,212 +18,103 @@ import {
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
-import { supabase } from '@/lib/supabase';
-import { showSimpleAlert } from '@/lib/alert';
+import { loginWithPin, formatPhone, isValidPhone } from '@/lib/pinAuth';
+import { showToast } from '@/lib/alert';
+import { vibrateError, vibrateSuccess } from '@/lib/vibration';
+import PinInput from '@/components/PinInput';
 import responsive from '@/utils/responsive';
 
 export default function LoginScreen() {
-  // رقم هاتف افتراضي للاختبار
-  const [phone, setPhone] = useState('01200006637');
-  const [otp, setOtp] = useState('');
-  const [otpSent, setOtpSent] = useState(false);
+  const [phone, setPhone] = useState('');
+  const [pin, setPin] = useState('');
   const [loading, setLoading] = useState(false);
-  const [sendingOtp, setSendingOtp] = useState(false);
-  const [cooldownSeconds, setCooldownSeconds] = useState(0);
-  const [otpVerified, setOtpVerified] = useState(false);
+  const [showPinInput, setShowPinInput] = useState(false);
   const router = useRouter();
   const { t } = useTranslation();
-  const { user, loading: authLoading, loadUser } = useAuth();
+  const { user, loading: authLoading, loginWithPin: authLogin } = useAuth();
   
-  // Responsive styles
   const styles = getStyles();
 
   // إذا كان المستخدم مسجل دخول بالفعل، نعيد التوجيه
   useEffect(() => {
     if (!authLoading && user) {
-      console.log('Login: User detected, navigating to tabs...');
       router.replace('/(tabs)');
     }
   }, [user, authLoading, router]);
 
-  // بعد التحقق من OTP، نستمع لتحديث حالة المستخدم
-  useEffect(() => {
-    if (otpVerified && !authLoading && user) {
-      console.log('Login: OTP verified and user loaded, navigating...', {
-        otpVerified,
-        authLoading,
-        userId: user?.id,
-        userRole: user?.role
-      });
-      setOtpVerified(false);
-      // استخدام setTimeout لضمان تحديث state
-      setTimeout(() => {
-        router.replace('/(tabs)');
-      }, 100);
-    } else if (otpVerified && !authLoading && !user) {
-      console.warn('Login: OTP verified but user is still null, waiting...', {
-        otpVerified,
-        authLoading
-      });
-    }
-  }, [otpVerified, user, authLoading, router]);
-
-  // عداد تنازلي للانتظار
-  useEffect(() => {
-    if (cooldownSeconds > 0) {
-      const timer = setTimeout(() => {
-        setCooldownSeconds(cooldownSeconds - 1);
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [cooldownSeconds]);
-
-  // تنسيق رقم الهاتف
-  const formatPhoneNumber = (text: string) => {
-    // إزالة جميع الأحرف غير الرقمية
-    const cleaned = text.replace(/\D/g, '');
-    
-    // إذا بدأ بـ 0، نستبدله بـ +20
-    if (cleaned.startsWith('0')) {
-      return '+20' + cleaned.substring(1);
-    }
-    
-    // إذا لم يبدأ بـ +، نضيف +20
-    if (!cleaned.startsWith('20')) {
-      return '+20' + cleaned;
-    }
-    
-    return '+' + cleaned;
-  };
-
-  // رقم هاتف للاختبار (في development mode)
-  const TEST_PHONE = '+201200006637'; // يمكن تغييره
-  const TEST_OTP = '123456'; // OTP ثابت للاختبار
-
-  const handleSendOtp = async () => {
-    if (!phone) {
-      await showSimpleAlert('تنبيه', 'الرجاء إدخال رقم الهاتف', 'warning');
+  const handlePhoneSubmit = async () => {
+    if (!phone.trim()) {
+      showToast('الرجاء إدخال رقم الموبايل', 'warning');
       return;
     }
 
-    // التحقق من صحة رقم الهاتف (يجب أن يكون 11 رقم على الأقل)
-    const cleaned = phone.replace(/\D/g, '');
-    if (cleaned.length < 10) {
-      await showSimpleAlert('تنبيه', 'الرجاء إدخال رقم هاتف صحيح', 'warning');
+    if (!isValidPhone(phone)) {
+      showToast('رقم الموبايل غير صحيح', 'error');
       return;
     }
 
-    setSendingOtp(true);
-    console.log('Login: Sending OTP to phone:', phone);
-    
-    try {
-      const formattedPhone = formatPhoneNumber(phone);
-      console.log('Login: Formatted phone:', formattedPhone);
-      
-      // إرسال OTP فعلياً (حتى لرقم الاختبار)
-      const { error } = await supabase.auth.signInWithOtp({
-        phone: formattedPhone,
-      });
-
-      if (error) {
-        console.error('Login: Error sending OTP:', error);
-        
-        // معالجة خطأ 429 (Too Many Requests)
-        if (error.status === 429 || error.message?.includes('40 seconds')) {
-          setCooldownSeconds(40);
-          await showSimpleAlert(
-            'تم تجاوز الحد المسموح',
-            'لأسباب أمنية، يرجى الانتظار 40 ثانية قبل المحاولة مرة أخرى.',
-            'warning'
-          );
-        } else {
-          await showSimpleAlert('خطأ', error.message || 'فشل إرسال رمز التحقق', 'error');
-        }
-      } else {
-        setOtpSent(true);
-        await showSimpleAlert('تم الإرسال', 'تم إرسال رمز التحقق إلى رقم هاتفك', 'success');
-      }
-    } catch (error: any) {
-      console.error('Login: Error in send OTP:', error);
-      await showSimpleAlert('خطأ', error.message || 'حدث خطأ أثناء إرسال رمز التحقق', 'error');
-    } finally {
-      setSendingOtp(false);
-    }
+    setShowPinInput(true);
   };
 
-  const handleVerifyOtp = async () => {
-    if (!otp || otp.length !== 6) {
-      await showSimpleAlert('تنبيه', 'الرجاء إدخال رمز التحقق المكون من 6 أرقام', 'warning');
+  const handlePinComplete = async (completedPin: string) => {
+    if (completedPin.length !== 6) {
+      return;
+    }
+
+    await handleLogin(completedPin);
+  };
+
+  const handleLogin = async (pinValue?: string) => {
+    const pinToUse = pinValue || pin;
+    
+    if (!phone.trim() || !isValidPhone(phone)) {
+      showToast('الرجاء إدخال رقم الموبايل صحيح', 'warning');
+      return;
+    }
+
+    if (!pinToUse || pinToUse.length !== 6) {
+      showToast('الرجاء إدخال رمز PIN مكون من 6 أرقام', 'warning');
       return;
     }
 
     setLoading(true);
-    console.log('Login: Verifying OTP...');
-    
+
     try {
-      const formattedPhone = formatPhoneNumber(phone);
-      
-      const { data, error } = await supabase.auth.verifyOtp({
-        phone: formattedPhone,
-        token: otp,
-        type: 'sms',
-      });
+      const result = await loginWithPin(phone, pinToUse);
 
-      if (error) {
-        console.error('Login: Error verifying OTP:', error);
-        await showSimpleAlert('خطأ', error.message || 'رمز التحقق غير صحيح', 'error');
-        setLoading(false);
-        return;
-      }
-
-      if (!data.session) {
-        await showSimpleAlert('خطأ', 'فشل إنشاء الجلسة', 'error');
-        setLoading(false);
-        return;
-      }
-
-        console.log('Login: OTP verified successfully, session created');
-      
-      // تعيين flag للتحقق من OTP
-      setOtpVerified(true);
-      
-      // استدعاء loadUser مباشرة لتحديث حالة المستخدم
-      try {
-        console.log('Login: Calling loadUser...');
-        await loadUser();
-        console.log('Login: User loaded successfully');
+      if (result.success && result.user) {
+        vibrateSuccess();
+        showToast('تم تسجيل الدخول بنجاح', 'success');
         
-        // الانتظار قليلاً لضمان تحديث state
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // استخدام AuthContext للدخول
+        if (authLogin) {
+          await authLogin(result.user);
+        }
         
-        // محاولة جلب user مرة أخرى من AuthContext
-        // (نستخدم setTimeout لضمان تحديث state)
+        // التنقل بعد تأخير قصير
         setTimeout(() => {
-          if (user) {
-            console.log('Login: User found, navigating to tabs...');
-            router.replace('/(tabs)');
-          } else {
-            console.warn('Login: User still null after loadUser, waiting for useEffect...');
-          }
-        }, 1000);
-      } catch (loadError) {
-        console.error('Login: Error loading user:', loadError);
-        // نتابع حتى لو فشل loadUser لأن الجلسة موجودة
-        // useEffect سيتعامل مع التوجيه عندما يصبح user موجوداً
+          router.replace('/(tabs)');
+        }, 500);
+      } else {
+        vibrateError();
+        showToast(result.error || 'فشل تسجيل الدخول', 'error');
+        
+        // إعادة تعيين PIN عند الخطأ
+        setPin('');
       }
-      
     } catch (error: any) {
-      console.error('Login: Error in verify OTP:', error);
-      await showSimpleAlert('خطأ', error.message || 'حدث خطأ أثناء التحقق من رمز التحقق', 'error');
+      console.error('Login error:', error);
+      vibrateError();
+      showToast(error.message || 'حدث خطأ أثناء تسجيل الدخول', 'error');
+      setPin('');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleResendOtp = async () => {
-    setOtpSent(false);
-    setOtp('');
-    await handleSendOtp();
+  const handleBackToPhone = () => {
+    setShowPinInput(false);
+    setPin('');
   };
 
   return (
@@ -226,91 +122,90 @@ export default function LoginScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
     >
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView 
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={styles.title}>Flash Delivery</Text>
-        <Text style={styles.subtitle}>تسجيل الدخول برقم الهاتف</Text>
+        <Text style={styles.subtitle}>
+          {showPinInput ? 'أدخل رمز PIN' : 'تسجيل الدخول برقم الموبايل'}
+        </Text>
 
-        {/* ملاحظة للاختبار */}
-        <View style={styles.testNote}>
-          <Text style={styles.testNoteText}>
-            ⚠️ مهم: يجب إضافة Test Phone Numbers في Supabase أولاً{'\n'}
-            💡 للاختبار: استخدم رقم {TEST_PHONE.replace('+20', '0')} مع OTP: {TEST_OTP}{'\n'}
-            📋 في Supabase: Phone settings → Test Phone Numbers → أدخل: +201200006637=123456
-          </Text>
-        </View>
-
-        <TextInput
-          style={styles.input}
-          placeholder="رقم الهاتف (مثال: 01234567890)"
-          value={phone}
-          onChangeText={setPhone}
-          keyboardType="phone-pad"
-          placeholderTextColor="#999"
-          textAlign="right"
-          editable={!otpSent}
-        />
-
-        {otpSent && (
+        {!showPinInput ? (
           <>
-            <TextInput
-              style={styles.input}
-              placeholder="رمز التحقق (6 أرقام)"
-              value={otp}
-              onChangeText={setOtp}
-              keyboardType="number-pad"
-              maxLength={6}
-              placeholderTextColor="#999"
-              textAlign="center"
-              autoFocus
-            />
-
-            <TouchableOpacity
-              onPress={handleResendOtp}
-              style={styles.resendButton}
-              disabled={cooldownSeconds > 0}
-            >
-              <Text style={[styles.resendText, cooldownSeconds > 0 && styles.resendTextDisabled]}>
-                {cooldownSeconds > 0 
-                  ? `إعادة الإرسال بعد ${cooldownSeconds} ثانية`
-                  : 'إعادة إرسال رمز التحقق'}
-              </Text>
-            </TouchableOpacity>
+            <View style={styles.inputContainer}>
+              <TextInput
+                style={styles.input}
+                placeholder="رقم الموبايل (مثال: 01234567890)"
+                value={phone}
+                onChangeText={setPhone}
+                keyboardType="phone-pad"
+                placeholderTextColor="#999"
+                textAlign="right"
+                autoFocus
+                onSubmitEditing={handlePhoneSubmit}
+              />
+            </View>
 
             <TouchableOpacity
               style={[styles.button, loading && styles.buttonDisabled]}
-              onPress={handleVerifyOtp}
+              onPress={handlePhoneSubmit}
               disabled={loading}
             >
               {loading ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.buttonText}>تحقق من الرمز</Text>
+                <Text style={styles.buttonText}>متابعة</Text>
+              )}
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <View style={styles.phoneDisplayContainer}>
+              <Text style={styles.phoneDisplayLabel}>رقم الموبايل:</Text>
+              <Text style={styles.phoneDisplay}>{formatPhone(phone)}</Text>
+              <TouchableOpacity onPress={handleBackToPhone} style={styles.changePhoneButton}>
+                <Text style={styles.changePhoneText}>تغيير</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.pinContainer}>
+              <PinInput
+                value={pin}
+                onChange={setPin}
+                onComplete={handlePinComplete}
+                disabled={loading}
+                error={false}
+                autoFocus
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[styles.button, (loading || pin.length !== 6) && styles.buttonDisabled]}
+              onPress={() => handleLogin()}
+              disabled={loading || pin.length !== 6}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.buttonText}>تسجيل الدخول</Text>
               )}
             </TouchableOpacity>
           </>
         )}
 
-        {!otpSent && (
-          <TouchableOpacity
-            style={[styles.button, (sendingOtp || cooldownSeconds > 0) && styles.buttonDisabled]}
-            onPress={handleSendOtp}
-            disabled={sendingOtp || cooldownSeconds > 0}
-          >
-            {sendingOtp ? (
-              <ActivityIndicator color="#fff" />
-            ) : cooldownSeconds > 0 ? (
-              <Text style={styles.buttonText}>انتظر {cooldownSeconds} ثانية</Text>
-            ) : (
-              <Text style={styles.buttonText}>إرسال رمز التحقق</Text>
-            )}
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity
+          onPress={() => router.push('/(auth)/forgot-pin')}
+          style={styles.forgotPinButton}
+        >
+          <Text style={styles.forgotPinText}>نسيت رمز الدخول؟</Text>
+        </TouchableOpacity>
 
         <TouchableOpacity
           onPress={() => router.replace('/(auth)/register')}
-          style={styles.linkButton}
+          style={styles.registerButton}
         >
-          <Text style={styles.linkText}>
+          <Text style={styles.registerText}>
             ليس لديك حساب؟ إنشاء حساب جديد
           </Text>
         </TouchableOpacity>
@@ -347,12 +242,45 @@ const getStyles = () => StyleSheet.create({
     marginBottom: 40,
     color: '#666',
   },
+  inputContainer: {
+    marginBottom: 20,
+  },
   input: {
     backgroundColor: '#f5f5f5',
     borderRadius: 12,
     padding: responsive.isTablet() ? 18 : 16,
-    marginBottom: 16,
     fontSize: responsive.getResponsiveFontSize(16),
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  phoneDisplayContainer: {
+    alignItems: 'center',
+    marginBottom: 30,
+    padding: 20,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+  },
+  phoneDisplayLabel: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#666',
+    marginBottom: 8,
+  },
+  phoneDisplay: {
+    fontSize: responsive.getResponsiveFontSize(18),
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 12,
+  },
+  changePhoneButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  changePhoneText: {
+    color: '#007AFF',
+    fontSize: responsive.getResponsiveFontSize(14),
+  },
+  pinContainer: {
+    marginVertical: 20,
   },
   button: {
     backgroundColor: '#007AFF',
@@ -369,36 +297,20 @@ const getStyles = () => StyleSheet.create({
     fontSize: responsive.getResponsiveFontSize(18),
     fontWeight: '600',
   },
-  linkButton: {
+  forgotPinButton: {
     marginTop: 20,
     alignItems: 'center',
   },
-  linkText: {
-    color: '#007AFF',
-    fontSize: responsive.getResponsiveFontSize(16),
-  },
-  resendButton: {
-    alignSelf: 'center',
-    marginBottom: 16,
-  },
-  resendText: {
+  forgotPinText: {
     color: '#007AFF',
     fontSize: responsive.getResponsiveFontSize(14),
   },
-  resendTextDisabled: {
-    color: '#999',
+  registerButton: {
+    marginTop: 20,
+    alignItems: 'center',
   },
-  testNote: {
-    backgroundColor: '#E3F2FD',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 16,
-    borderLeftWidth: 3,
-    borderLeftColor: '#2196F3',
-  },
-  testNoteText: {
-    fontSize: 12,
-    color: '#1976D2',
-    textAlign: 'right',
+  registerText: {
+    color: '#007AFF',
+    fontSize: responsive.getResponsiveFontSize(16),
   },
 });

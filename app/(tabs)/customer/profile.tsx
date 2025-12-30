@@ -18,7 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase, reverseGeocode } from '@/lib/supabase';
 import { getLocationWithAddress } from '@/lib/webLocationUtils';
 import { showConfirm, showSimpleAlert } from '@/lib/alert';
-import responsive from '@/utils/responsive';
+import responsive, { createShadowStyle } from '@/utils/responsive';
 
 interface Address {
   id?: string;
@@ -220,23 +220,27 @@ export default function CustomerProfileScreen() {
   useFocusEffect(
     useCallback(() => {
       const checkSelectedPlace = async () => {
-        if (selectedAddressIndex !== null) {
-          const storedPlace = localStorage.getItem(`selected_place_address_${selectedAddressIndex}`);
-          if (storedPlace) {
-            const place = JSON.parse(storedPlace);
-            // تحديث العنوان مباشرة
-            setAddresses(prevAddresses => {
-              const newAddresses = [...prevAddresses];
-              if (newAddresses[selectedAddressIndex]) {
-                newAddresses[selectedAddressIndex] = {
-                  ...newAddresses[selectedAddressIndex],
-                  place_name: place.name
-                };
-              }
-              return newAddresses;
-            });
-            localStorage.removeItem(`selected_place_address_${selectedAddressIndex}`);
-            setSelectedAddressIndex(null);
+        if (selectedAddressIndex !== null && Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
+          try {
+            const storedPlace = localStorage.getItem(`selected_place_address_${selectedAddressIndex}`);
+            if (storedPlace) {
+              const place = JSON.parse(storedPlace);
+              // تحديث العنوان مباشرة
+              setAddresses(prevAddresses => {
+                const newAddresses = [...prevAddresses];
+                if (newAddresses[selectedAddressIndex]) {
+                  newAddresses[selectedAddressIndex] = {
+                    ...newAddresses[selectedAddressIndex],
+                    place_name: place.name
+                  };
+                }
+                return newAddresses;
+              });
+              localStorage.removeItem(`selected_place_address_${selectedAddressIndex}`);
+              setSelectedAddressIndex(null);
+            }
+          } catch (error) {
+            console.error('Error reading from localStorage:', error);
           }
         }
       };
@@ -357,7 +361,7 @@ export default function CustomerProfileScreen() {
       {
         confirmText: 'تسجيل الخروج',
         cancelText: 'إلغاء',
-        confirmButtonColor: '#FF3B30',
+        type: 'question',
       }
     );
     
@@ -645,11 +649,13 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     padding: 24,
     alignItems: 'center',
     marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 4,
+    }),
   },
   avatar: {
     width: 100,

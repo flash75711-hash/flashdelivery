@@ -1,4 +1,9 @@
-import React, { useState, useEffect } from 'react';
+/**
+ * Register Screen - PIN Authentication
+ * شاشة التسجيل باستخدام رقم الموبايل و PIN
+ */
+
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -11,353 +16,395 @@ import {
   ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useAuth } from '@/contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
-import { UserRole, supabase } from '@/lib/supabase';
-import { showSimpleAlert } from '@/lib/alert';
+import { registerWithPin, formatPhone, isValidPhone, type UserRole } from '@/lib/pinAuth';
+import { showToast } from '@/lib/alert';
+import { vibrateError, vibrateSuccess } from '@/lib/vibration';
+import PinInput from '@/components/PinInput';
+import responsive from '@/utils/responsive';
 
 export default function RegisterScreen() {
-  // رقم هاتف افتراضي للاختبار
-  const [phone, setPhone] = useState('01200006637');
-  const [otp, setOtp] = useState('');
-  const [role, setRole] = useState<UserRole>('customer');
-  const [otpSent, setOtpSent] = useState(false);
+  const [phone, setPhone] = useState('');
+  const [pin, setPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [selectedRole, setSelectedRole] = useState<UserRole>('customer');
   const [loading, setLoading] = useState(false);
-  const [sendingOtp, setSendingOtp] = useState(false);
-  const [cooldownSeconds, setCooldownSeconds] = useState(0);
+  const [step, setStep] = useState<'role' | 'phone' | 'pin' | 'confirmPin'>('role');
   const router = useRouter();
   const { t } = useTranslation();
+  
+  const styles = getStyles();
 
-  // عداد تنازلي للانتظار
-  useEffect(() => {
-    if (cooldownSeconds > 0) {
-      const timer = setTimeout(() => {
-        setCooldownSeconds(cooldownSeconds - 1);
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [cooldownSeconds]);
+  const roles: { value: UserRole; label: string; icon: string }[] = [
+    { value: 'customer', label: 'عميل', icon: '👤' },
+    { value: 'driver', label: 'سائق', icon: '🚗' },
+    { value: 'vendor', label: 'مزود خدمة', icon: '🏪' },
+  ];
 
-  // تنسيق رقم الهاتف
-  const formatPhoneNumber = (text: string) => {
-    // إزالة جميع الأحرف غير الرقمية
-    const cleaned = text.replace(/\D/g, '');
-    
-    // إذا بدأ بـ 0، نستبدله بـ +20
-    if (cleaned.startsWith('0')) {
-      return '+20' + cleaned.substring(1);
-    }
-    
-    // إذا لم يبدأ بـ +، نضيف +20
-    if (!cleaned.startsWith('20')) {
-      return '+20' + cleaned;
-    }
-    
-    return '+' + cleaned;
+  const handleRoleSelect = (role: UserRole) => {
+    setSelectedRole(role);
+    setStep('phone');
   };
 
-  const handleSendOtp = async () => {
-    if (!phone) {
-      await showSimpleAlert('تنبيه', 'الرجاء إدخال رقم الهاتف', 'warning');
+  const handlePhoneSubmit = () => {
+    if (!phone.trim()) {
+      showToast('الرجاء إدخال رقم الموبايل', 'warning');
       return;
     }
 
-    // التحقق من صحة رقم الهاتف
-    const cleaned = phone.replace(/\D/g, '');
-    if (cleaned.length < 10) {
-      await showSimpleAlert('تنبيه', 'الرجاء إدخال رقم هاتف صحيح', 'warning');
+    if (!isValidPhone(phone)) {
+      showToast('رقم الموبايل غير صحيح', 'error');
       return;
     }
 
-    setSendingOtp(true);
-    console.log('Register: Sending OTP to phone:', phone);
-    
-    try {
-      const formattedPhone = formatPhoneNumber(phone);
-      console.log('Register: Formatted phone:', formattedPhone);
-      
-      const { error } = await supabase.auth.signInWithOtp({
-        phone: formattedPhone,
-      });
+    setStep('pin');
+  };
 
-      if (error) {
-        console.error('Register: Error sending OTP:', error);
-        
-        // معالجة خطأ 429 (Too Many Requests)
-        if (error.status === 429 || error.message?.includes('40 seconds')) {
-          setCooldownSeconds(40);
-          await showSimpleAlert(
-            'تم تجاوز الحد المسموح',
-            'لأسباب أمنية، يرجى الانتظار 40 ثانية قبل المحاولة مرة أخرى.',
-            'warning'
-          );
-        } else {
-          await showSimpleAlert('خطأ', error.message || 'فشل إرسال رمز التحقق', 'error');
-        }
-      } else {
-        setOtpSent(true);
-        await showSimpleAlert('تم الإرسال', 'تم إرسال رمز التحقق إلى رقم هاتفك', 'success');
-      }
-    } catch (error: any) {
-      console.error('Register: Error in send OTP:', error);
-      await showSimpleAlert('خطأ', error.message || 'حدث خطأ أثناء إرسال رمز التحقق', 'error');
-    } finally {
-      setSendingOtp(false);
+  const handlePinComplete = (completedPin: string) => {
+    if (completedPin.length === 6) {
+      setStep('confirmPin');
     }
   };
 
-  const handleVerifyOtp = async () => {
-    if (!otp || otp.length !== 6) {
-      await showSimpleAlert('تنبيه', 'الرجاء إدخال رمز التحقق المكون من 6 أرقام', 'warning');
+  const handleConfirmPinComplete = async (completedPin: string) => {
+    if (completedPin.length !== 6) {
+      return;
+    }
+
+    if (pin !== completedPin) {
+      vibrateError();
+      showToast('رمز PIN غير متطابق', 'error');
+      setConfirmPin('');
+      return;
+    }
+
+    await handleRegister();
+  };
+
+  const handleRegister = async () => {
+    if (!phone.trim() || !isValidPhone(phone)) {
+      showToast('الرجاء إدخال رقم الموبايل صحيح', 'warning');
+      return;
+    }
+
+    if (!pin || pin.length !== 6) {
+      showToast('الرجاء إدخال رمز PIN مكون من 6 أرقام', 'warning');
+      return;
+    }
+
+    if (pin !== confirmPin) {
+      vibrateError();
+      showToast('رمز PIN غير متطابق', 'error');
       return;
     }
 
     setLoading(true);
-    console.log('Register: Verifying OTP...');
-    
+
     try {
-      const formattedPhone = formatPhoneNumber(phone);
-      
-      const { data, error } = await supabase.auth.verifyOtp({
-        phone: formattedPhone,
-        token: otp,
-        type: 'sms',
-      });
+      const result = await registerWithPin(phone, pin, selectedRole);
 
-      if (error) {
-        console.error('Register: Error verifying OTP:', error);
-        await showSimpleAlert('خطأ', error.message || 'رمز التحقق غير صحيح', 'error');
-      } else if (data.session && data.user) {
-        console.log('Register: OTP verified successfully, user:', data.user.id);
+      if (result.success && result.user) {
+        vibrateSuccess();
+        showToast('تم إنشاء الحساب بنجاح', 'success');
         
-        // إنشاء أو تحديث ملف المستخدم
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .upsert({
-            id: data.user.id,
-            phone: formattedPhone,
-            role,
-          }, {
-            onConflict: 'id',
-          });
-
-        if (profileError) {
-          console.error('Register: Error creating/updating profile:', profileError);
-          // لا نرمي الخطأ هنا لأن المستخدم تم تسجيل دخوله بالفعل
-        }
-
-        // الانتظار قليلاً لضمان تحديث حالة المصادقة
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        console.log('Register: Registration successful, navigating to tabs...');
-        // للعملاء: التوجيه مباشرة للصفحة الرئيسية (يمكنهم إضافة الاسم والعنوان من الصفحة الشخصية)
-        // للباقي: التوجيه لصفحة إكمال التسجيل
-        if (role === 'customer') {
-          router.replace('/(tabs)');
-        } else {
-          router.replace(`/(auth)/complete-registration/${role}?phone=${encodeURIComponent(formattedPhone)}`);
-        }
+        // التنقل لصفحة تسجيل الدخول
+        setTimeout(() => {
+          router.replace('/(auth)/login');
+        }, 1000);
       } else {
-        await showSimpleAlert('خطأ', 'فشل إنشاء الجلسة', 'error');
+        vibrateError();
+        showToast(result.error || 'فشل إنشاء الحساب', 'error');
       }
     } catch (error: any) {
-      console.error('Register: Error in verify OTP:', error);
-      await showSimpleAlert('خطأ', error.message || 'حدث خطأ أثناء التحقق من رمز التحقق', 'error');
+      console.error('Registration error:', error);
+      vibrateError();
+      showToast(error.message || 'حدث خطأ أثناء التسجيل', 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleResendOtp = async () => {
-    setOtpSent(false);
-    setOtp('');
-    await handleSendOtp();
+  const handleBack = () => {
+    if (step === 'phone') {
+      setStep('role');
+    } else if (step === 'pin') {
+      setStep('phone');
+    } else if (step === 'confirmPin') {
+      setStep('pin');
+      setConfirmPin('');
+    }
   };
-
-  const roles: { value: UserRole; label: string }[] = [
-    { value: 'customer', label: t('roles.customer') },
-    { value: 'driver', label: t('roles.driver') },
-    { value: 'vendor', label: t('roles.vendor') },
-  ];
 
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
     >
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView 
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={styles.title}>إنشاء حساب جديد</Text>
+        <Text style={styles.subtitle}>
+          {step === 'role' && 'اختر نوع الحساب'}
+          {step === 'phone' && 'أدخل رقم الموبايل'}
+          {step === 'pin' && 'أنشئ رمز PIN (6 أرقام)'}
+          {step === 'confirmPin' && 'أكد رمز PIN'}
+        </Text>
 
-        <Text style={styles.subtitle}>أدخل رقم هاتفك واختر نوع الحساب</Text>
-
-        <TextInput
-          style={styles.input}
-          placeholder="رقم الهاتف (مثال: 01234567890)"
-          value={phone}
-          onChangeText={setPhone}
-          keyboardType="phone-pad"
-          placeholderTextColor="#999"
-          textAlign="right"
-          editable={!otpSent}
-        />
-
-        <Text style={styles.label}>اختر نوع الحساب:</Text>
-        <View style={styles.roleContainer}>
-          {roles.map((r) => (
-            <TouchableOpacity
-              key={r.value}
-              style={[
-                styles.roleButton,
-                role === r.value && styles.roleButtonActive,
-              ]}
-              onPress={() => setRole(r.value)}
-              disabled={otpSent}
-            >
-              <Text
+        {step === 'role' && (
+          <View style={styles.rolesContainer}>
+            {roles.map((role) => (
+              <TouchableOpacity
+                key={role.value}
                 style={[
-                  styles.roleButtonText,
-                  role === r.value && styles.roleButtonTextActive,
+                  styles.roleCard,
+                  selectedRole === role.value && styles.roleCardSelected,
                 ]}
+                onPress={() => handleRoleSelect(role.value)}
               >
-                {r.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+                <Text style={styles.roleIcon}>{role.icon}</Text>
+                <Text
+                  style={[
+                    styles.roleLabel,
+                    selectedRole === role.value && styles.roleLabelSelected,
+                  ]}
+                >
+                  {role.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
 
-        {otpSent && (
+        {step === 'phone' && (
           <>
-            <TextInput
-              style={styles.input}
-              placeholder="رمز التحقق (6 أرقام)"
-              value={otp}
-              onChangeText={setOtp}
-              keyboardType="number-pad"
-              maxLength={6}
-              placeholderTextColor="#999"
-              textAlign="center"
-              autoFocus
-            />
-
-            <TouchableOpacity
-              onPress={handleResendOtp}
-              style={styles.resendButton}
-              disabled={cooldownSeconds > 0}
-            >
-              <Text style={[styles.resendText, cooldownSeconds > 0 && styles.resendTextDisabled]}>
-                {cooldownSeconds > 0 
-                  ? `إعادة الإرسال بعد ${cooldownSeconds} ثانية`
-                  : 'إعادة إرسال رمز التحقق'}
+            <View style={styles.selectedRoleContainer}>
+              <Text style={styles.selectedRoleText}>
+                نوع الحساب: {roles.find((r) => r.value === selectedRole)?.label}
               </Text>
-            </TouchableOpacity>
+            </View>
+
+            <View style={styles.inputContainer}>
+              <TextInput
+                style={styles.input}
+                placeholder="رقم الموبايل (مثال: 01234567890)"
+                value={phone}
+                onChangeText={setPhone}
+                keyboardType="phone-pad"
+                placeholderTextColor="#999"
+                textAlign="right"
+                autoFocus
+                onSubmitEditing={handlePhoneSubmit}
+              />
+            </View>
 
             <TouchableOpacity
               style={[styles.button, loading && styles.buttonDisabled]}
-              onPress={handleVerifyOtp}
+              onPress={handlePhoneSubmit}
               disabled={loading}
+            >
+              <Text style={styles.buttonText}>متابعة</Text>
+            </TouchableOpacity>
+          </>
+        )}
+
+        {step === 'pin' && (
+          <>
+            <View style={styles.phoneDisplayContainer}>
+              <Text style={styles.phoneDisplayLabel}>رقم الموبايل:</Text>
+              <Text style={styles.phoneDisplay}>{formatPhone(phone)}</Text>
+            </View>
+
+            <View style={styles.pinContainer}>
+              <Text style={styles.pinLabel}>أنشئ رمز PIN (6 أرقام)</Text>
+              <PinInput
+                value={pin}
+                onChange={setPin}
+                onComplete={handlePinComplete}
+                disabled={loading}
+                autoFocus
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[styles.button, (loading || pin.length !== 6) && styles.buttonDisabled]}
+              onPress={() => {
+                if (pin.length === 6) {
+                  setStep('confirmPin');
+                }
+              }}
+              disabled={loading || pin.length !== 6}
+            >
+              <Text style={styles.buttonText}>متابعة</Text>
+            </TouchableOpacity>
+          </>
+        )}
+
+        {step === 'confirmPin' && (
+          <>
+            <View style={styles.pinContainer}>
+              <Text style={styles.pinLabel}>أكد رمز PIN</Text>
+              <PinInput
+                value={confirmPin}
+                onChange={setConfirmPin}
+                onComplete={handleConfirmPinComplete}
+                disabled={loading}
+                autoFocus
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.button,
+                (loading || confirmPin.length !== 6 || pin !== confirmPin) && styles.buttonDisabled,
+              ]}
+              onPress={handleRegister}
+              disabled={loading || confirmPin.length !== 6 || pin !== confirmPin}
             >
               {loading ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.buttonText}>تحقق وإنشاء الحساب</Text>
+                <Text style={styles.buttonText}>إنشاء الحساب</Text>
               )}
             </TouchableOpacity>
           </>
         )}
 
-        {!otpSent && (
-          <TouchableOpacity
-            style={[styles.button, (sendingOtp || cooldownSeconds > 0) && styles.buttonDisabled]}
-            onPress={handleSendOtp}
-            disabled={sendingOtp || cooldownSeconds > 0}
-          >
-            {sendingOtp ? (
-              <ActivityIndicator color="#fff" />
-            ) : cooldownSeconds > 0 ? (
-              <Text style={styles.buttonText}>انتظر {cooldownSeconds} ثانية</Text>
-            ) : (
-              <Text style={styles.buttonText}>إرسال رمز التحقق</Text>
-            )}
+        {(step === 'phone' || step === 'pin' || step === 'confirmPin') && (
+          <TouchableOpacity onPress={handleBack} style={styles.backButton}>
+            <Text style={styles.backText}>← رجوع</Text>
           </TouchableOpacity>
         )}
 
         <TouchableOpacity
           onPress={() => router.replace('/(auth)/login')}
-          style={styles.linkButton}
+          style={styles.loginButton}
         >
-          <Text style={styles.linkText}>لديك حساب بالفعل؟ تسجيل الدخول</Text>
+          <Text style={styles.loginText}>
+            لديك حساب بالفعل؟ تسجيل الدخول
+          </Text>
         </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = () => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
   },
   content: {
-    padding: 20,
-    paddingTop: 60,
+    flex: 1,
+    justifyContent: 'center',
+    padding: responsive.getResponsivePadding(),
+    ...(responsive.isLargeScreen() && {
+      maxWidth: 500,
+      alignSelf: 'center',
+      width: '100%',
+    }),
   },
   title: {
-    fontSize: 28,
+    fontSize: responsive.getResponsiveFontSize(32),
     fontWeight: 'bold',
     textAlign: 'center',
     marginBottom: 10,
     color: '#1a1a1a',
   },
   subtitle: {
-    fontSize: 14,
+    fontSize: responsive.getResponsiveFontSize(18),
     textAlign: 'center',
-    marginBottom: 30,
+    marginBottom: 40,
     color: '#666',
+  },
+  rolesContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 16,
+    marginBottom: 20,
+  },
+  roleCard: {
+    width: responsive.isTablet() ? 140 : 110,
+    height: responsive.isTablet() ? 140 : 110,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  roleCardSelected: {
+    borderColor: '#007AFF',
+    backgroundColor: '#F0F7FF',
+  },
+  roleIcon: {
+    fontSize: responsive.getResponsiveFontSize(40),
+    marginBottom: 8,
+  },
+  roleLabel: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+    color: '#666',
+  },
+  roleLabelSelected: {
+    color: '#007AFF',
+  },
+  selectedRoleContainer: {
+    alignItems: 'center',
+    marginBottom: 20,
+    padding: 12,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+  },
+  selectedRoleText: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+    color: '#1a1a1a',
+  },
+  inputContainer: {
+    marginBottom: 20,
   },
   input: {
     backgroundColor: '#f5f5f5',
     borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    fontSize: 16,
-  },
-  label: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 12,
-    color: '#1a1a1a',
-    textAlign: 'right',
-  },
-  roleContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 24,
-    gap: 12,
-  },
-  roleButton: {
-    flex: 1,
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 2,
+    padding: responsive.isTablet() ? 18 : 16,
+    fontSize: responsive.getResponsiveFontSize(16),
+    borderWidth: 1,
     borderColor: '#e0e0e0',
+  },
+  phoneDisplayContainer: {
     alignItems: 'center',
+    marginBottom: 30,
+    padding: 20,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
   },
-  roleButtonActive: {
-    borderColor: '#007AFF',
-    backgroundColor: '#007AFF',
-  },
-  roleButtonText: {
-    fontSize: 14,
+  phoneDisplayLabel: {
+    fontSize: responsive.getResponsiveFontSize(14),
     color: '#666',
-    fontWeight: '600',
+    marginBottom: 8,
   },
-  roleButtonTextActive: {
-    color: '#fff',
+  phoneDisplay: {
+    fontSize: responsive.getResponsiveFontSize(18),
+    fontWeight: '600',
+    color: '#1a1a1a',
+  },
+  pinContainer: {
+    marginVertical: 20,
+  },
+  pinLabel: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    textAlign: 'center',
+    marginBottom: 16,
+    color: '#666',
   },
   button: {
     backgroundColor: '#007AFF',
     borderRadius: 12,
-    padding: 16,
+    padding: responsive.isTablet() ? 18 : 16,
     alignItems: 'center',
     marginTop: 8,
   },
@@ -366,26 +413,23 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: responsive.getResponsiveFontSize(18),
     fontWeight: '600',
   },
-  linkButton: {
+  backButton: {
     marginTop: 20,
     alignItems: 'center',
   },
-  linkText: {
+  backText: {
     color: '#007AFF',
-    fontSize: 16,
+    fontSize: responsive.getResponsiveFontSize(14),
   },
-  resendButton: {
-    alignSelf: 'center',
-    marginBottom: 16,
+  loginButton: {
+    marginTop: 20,
+    alignItems: 'center',
   },
-  resendText: {
+  loginText: {
     color: '#007AFF',
-    fontSize: 14,
-  },
-  resendTextDisabled: {
-    color: '#999',
+    fontSize: responsive.getResponsiveFontSize(16),
   },
 });

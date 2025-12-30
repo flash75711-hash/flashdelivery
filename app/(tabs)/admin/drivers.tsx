@@ -17,7 +17,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
-import responsive from '@/utils/responsive';
+import responsive, { createShadowStyle } from '@/utils/responsive';
 import { createNotification, notifyAllAdmins } from '@/lib/notifications';
 
 interface Driver {
@@ -1267,11 +1267,13 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     margin: responsive.isTablet() ? 20 : 16,
     padding: responsive.isTablet() ? 20 : 16,
     borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 4,
+      elevation: 3,
+    }),
     ...(responsive.isLargeScreen() && {
       maxWidth: responsive.getMaxContentWidth() - (responsive.getResponsivePadding() * 2),
       alignSelf: 'center',

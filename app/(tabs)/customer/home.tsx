@@ -12,7 +12,7 @@ import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import CurrentLocationDisplay from '@/components/CurrentLocationDisplay';
-import responsive from '@/utils/responsive';
+import responsive, { createShadowStyle } from '@/utils/responsive';
 import NotificationCard from '@/components/NotificationCard';
 
 const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
@@ -57,11 +57,13 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     borderRadius: 16,
     padding: responsive.isTablet() ? 32 : 24,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 4,
+    }),
     ...(responsive.isLargeScreen() && {
       maxWidth: 600,
       alignSelf: 'center',

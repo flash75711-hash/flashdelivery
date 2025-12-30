@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { useRouter } from 'expo-router';
-import responsive from '@/utils/responsive';
+import responsive, { createShadowStyle } from '@/utils/responsive';
 
 export default function OrderTypeCards() {
   const { t } = useTranslation();
@@ -46,11 +46,13 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: responsive.isTablet() ? 32 : 24,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 4,
+    }),
     ...(responsive.isLargeScreen() && {
       maxWidth: 600,
       alignSelf: 'center',

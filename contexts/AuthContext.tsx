@@ -14,6 +14,7 @@ interface AuthContextType {
   signUp: (email: string, password: string, role: UserRole) => Promise<void>;
   signOut: () => Promise<void>;
   loadUser: () => Promise<void>;
+  loginWithPin: (userData: { id: string; phone: string; role: UserRole; full_name?: string | null; email?: string | null }) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -398,6 +399,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     console.log('signUp: Registration completed successfully');
   };
 
+  const loginWithPin = async (userData: { id: string; phone: string; role: UserRole; full_name?: string | null; email?: string | null }) => {
+    try {
+      console.log('loginWithPin: Logging in with PIN for user:', userData.id);
+      
+      // إنشاء user object للـ context
+      const user: User = {
+        id: userData.id,
+        email: userData.email || '',
+        role: userData.role,
+        full_name: userData.full_name,
+        phone: userData.phone,
+      };
+      
+      // تحديث user state مباشرة
+      setUser(user);
+      
+      // محاولة الحصول على session من Supabase Auth (إذا كان موجوداً)
+      // ملاحظة: في نظام PIN، قد لا يكون هناك session في auth.users
+      // لذلك سنستخدم user مباشرة من profiles
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (session) {
+        setSession(session);
+      } else {
+        // إذا لم يكن هناك session، ننشئ session مؤقتة
+        // أو نستخدم user مباشرة بدون session
+        setSession(null);
+      }
+      
+      console.log('loginWithPin: Login successful');
+    } catch (error: any) {
+      console.error('loginWithPin: Error:', error);
+      throw error;
+    }
+  };
+
   const signOut = async () => {
     try {
       console.log('signOut: Starting sign out...');
@@ -420,7 +457,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ session, user, loading, signIn, signInWithGoogle, signUp, signOut, loadUser }}>
+    <AuthContext.Provider value={{ session, user, loading, signIn, signInWithGoogle, signUp, signOut, loadUser, loginWithPin }}>
       {children}
     </AuthContext.Provider>
   );

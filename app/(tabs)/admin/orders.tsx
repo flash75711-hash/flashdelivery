@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '@/lib/supabase';
-import responsive from '@/utils/responsive';
+import responsive, { createShadowStyle } from '@/utils/responsive';
 
 interface Order {
   id: string;
@@ -47,11 +47,13 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     margin: responsive.getResponsivePadding(),
     padding: responsive.getResponsivePadding(),
     borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 4,
+      elevation: 3,
+    }),
   },
   orderHeader: {
     flexDirection: 'row',
