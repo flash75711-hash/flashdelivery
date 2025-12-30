@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="NONE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="e1761100-9559-42e5-9cc9-39d92adac4e4" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/BULKSMS_REVIEW.md" beforeDir="false" afterPath="$PROJECT_DIR$/BULKSMS_REVIEW.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/CREATE_CUSTOMER_ADDRESSES_TABLE.md" beforeDir="false" afterPath="$PROJECT_DIR$/CREATE_CUSTOMER_ADDRESSES_TABLE.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/FREE_SMS_COMPARISON.md" beforeDir="false" afterPath="$PROJECT_DIR$/FREE_SMS_COMPARISON.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/MESSAGEBIRD_FIELDS_REQUIRED.md" beforeDir="false" afterPath="$PROJECT_DIR$/MESSAGEBIRD_FIELDS_REQUIRED.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/MESSAGEBIRD_REVIEW.md" beforeDir="false" afterPath="$PROJECT_DIR$/MESSAGEBIRD_REVIEW.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/MESSAGEBIRD_SETUP_COMPLETE.md" beforeDir="false" afterPath="$PROJECT_DIR$/MESSAGEBIRD_SETUP_COMPLETE.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/MESSAGEBIRD_STEP_BY_STEP.md" beforeDir="false" afterPath="$PROJECT_DIR$/MESSAGEBIRD_STEP_BY_STEP.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/SMS_ALTERNATIVES.md" beforeDir="false" afterPath="$PROJECT_DIR$/SMS_ALTERNATIVES.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/SOLUTION_PRODUCTION_SMS.md" beforeDir="false" afterPath="$PROJECT_DIR$/SOLUTION_PRODUCTION_SMS.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/VERIFY_PHONE_TWILIO.md" beforeDir="false" afterPath="$PROJECT_DIR$/VERIFY_PHONE_TWILIO.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/(tabs)/index.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/(tabs)/index.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/delete_all_orders_and_trips.sql" beforeDir="false" afterPath="$PROJECT_DIR$/delete_all_orders_and_trips.sql" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/hooks/useOrderCountdown.ts" beforeDir="false" afterPath="$PROJECT_DIR$/hooks/useOrderCountdown.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mocks/react-native-maps.web.js" beforeDir="false" afterPath="$PROJECT_DIR$/mocks/react-native-maps.web.js" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="ClangdSettings">
+    <option name="formatViaClangd" value="false" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="ProjectColorInfo">{
+  &quot;customColor&quot;: &quot;&quot;,
+  &quot;associatedIndex&quot;: 8
+}</component>
+  <component name="ProjectId" id="37VmSI23WkY25Z0kuEPHqDxYe8X" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.cidr.known.project.marker": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.readMode.enableVisualFormatting": "true",
+    "cf.first.check.clang-format": "false",
+    "cidr.known.project.marker": "true",
+    "git-widget-placeholder": "main",
+    "kotlin-language-version-configured": "true",
+    "last_opened_file_path": "/home/zero/Desktop/flash-delivery-webview-app"
+  }
+}]]></component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="e1761100-9559-42e5-9cc9-39d92adac4e4" name="Changes" comment="" />
+      <created>1766996614063</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1766996614063</updated>
+    </task>
+    <servers />
+  </component>
+</project>

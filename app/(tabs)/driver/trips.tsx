@@ -297,13 +297,13 @@ export default function DriverTripsScreen() {
           enableHighAccuracy: true,
           timeout: 5000,
         });
-        await supabase.from('driver_locations').upsert({
-          driver_id: user?.id,
-          order_id: orderId,
+      await supabase.from('driver_locations').upsert({
+        driver_id: user?.id,
+        order_id: orderId,
           latitude: location.latitude,
           longitude: location.longitude,
-          updated_at: new Date().toISOString(),
-        });
+        updated_at: new Date().toISOString(),
+      });
       } catch (error) {
         console.error('Error updating driver location:', error);
       }
@@ -415,7 +415,7 @@ export default function DriverTripsScreen() {
         console.error('Error loading active order:', error);
         return;
       }
-      
+
       // تصفية الطلبات في حالة التفاوض (لا نعرضها كرحلة نشطة)
       // الرحلة النشطة تبدأ فقط عندما negotiation_status = 'accepted' (تم الاتفاق على السعر)
       const filteredData = data?.filter((order: any) => {
@@ -563,8 +563,8 @@ export default function DriverTripsScreen() {
               search_status: order.search_status,
               deadline: order.deadline, // إضافة deadline للعد التنازلي
             };
-
-            return (
+                    
+                    return (
               <OrderCard
                 key={order.id}
                 order={orderCardData}
@@ -586,10 +586,14 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     paddingBottom: tabBarBottomPadding,
   },
   header: {
-    backgroundColor: '#fff',
-    padding: responsive.getResponsivePadding(),
+    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.95)' : '#fff',
+    padding: responsive.getResponsiveHeaderPadding(),
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: 'rgba(0, 0, 0, 0.08)',
+    ...(Platform.OS === 'web' && {
+      backdropFilter: 'blur(10px)',
+      WebkitBackdropFilter: 'blur(10px)',
+    }),
     ...(responsive.isLargeScreen() && {
       maxWidth: responsive.getMaxContentWidth(),
       alignSelf: 'center',

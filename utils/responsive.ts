@@ -58,6 +58,17 @@ export const getResponsivePadding = (): number => {
   }
 };
 
+// Get responsive header padding (أقل من padding العادي)
+export const getResponsiveHeaderPadding = (): number => {
+  if (isLargeScreen()) {
+    return 16;
+  } else if (isTablet()) {
+    return 12;
+  } else {
+    return 10;
+  }
+};
+
 // Get responsive font size
 export const getResponsiveFontSize = (baseSize: number): number => {
   if (isLargeScreen()) {
@@ -152,6 +163,7 @@ export default {
   isSmallScreen,
   isLargeScreen,
   getResponsivePadding,
+  getResponsiveHeaderPadding,
   getResponsiveFontSize,
   getMaxContentWidth,
   getCardWidth,

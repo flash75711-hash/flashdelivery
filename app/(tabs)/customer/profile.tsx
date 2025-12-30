@@ -17,7 +17,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, reverseGeocode } from '@/lib/supabase';
 import { getLocationWithAddress } from '@/lib/webLocationUtils';
-import { showConfirm } from '@/lib/alert';
+import { showConfirm, showSimpleAlert } from '@/lib/alert';
 import responsive from '@/utils/responsive';
 
 interface Address {
@@ -171,7 +171,7 @@ export default function CustomerProfileScreen() {
       
       setAddresses(newAddresses);
     } else {
-      Alert.alert('تنبيه', 'يجب أن يكون لديك عنوان واحد على الأقل');
+      showSimpleAlert('تنبيه', 'يجب أن يكون لديك عنوان واحد على الأقل', 'warning');
     }
   };
 
@@ -261,10 +261,10 @@ export default function CustomerProfileScreen() {
 
         updateAddress(index, 'place_name', placeName);
 
-        Alert.alert('نجح', 'تم جلب العنوان بنجاح');
+        showSimpleAlert('نجح', 'تم جلب العنوان بنجاح', 'success');
     } catch (error: any) {
       console.error('Error getting location:', error);
-      Alert.alert('خطأ', error.message || 'فشل جلب الموقع');
+      showSimpleAlert('خطأ', error.message || 'فشل جلب الموقع', 'error');
     } finally {
       setGettingLocation(null);
     }
@@ -274,7 +274,7 @@ export default function CustomerProfileScreen() {
     if (!user) return;
 
     if (addresses.some(addr => !addr.place_name)) {
-      Alert.alert('خطأ', 'الرجاء إدخال اسم المكان العام لجميع العناوين');
+      showSimpleAlert('خطأ', 'الرجاء إدخال اسم المكان العام لجميع العناوين', 'warning');
       return;
     }
 
@@ -339,10 +339,10 @@ export default function CustomerProfileScreen() {
       await loadProfileData();
       
       setEditingName(false);
-      Alert.alert('نجح', 'تم حفظ البيانات بنجاح');
+      showSimpleAlert('نجح', 'تم حفظ البيانات بنجاح', 'success');
     } catch (error: any) {
       console.error('Error saving profile:', error);
-      Alert.alert('خطأ', error.message || 'فشل حفظ البيانات');
+      showSimpleAlert('خطأ', error.message || 'فشل حفظ البيانات', 'error');
     } finally {
       setSaving(false);
     }
@@ -605,10 +605,14 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     flex: 1,
   },
   header: {
-    backgroundColor: '#fff',
-    padding: responsive.getResponsivePadding(),
+    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.95)' : '#fff',
+    padding: responsive.getResponsiveHeaderPadding(),
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: 'rgba(0, 0, 0, 0.08)',
+    ...(Platform.OS === 'web' && {
+      backdropFilter: 'blur(10px)',
+      WebkitBackdropFilter: 'blur(10px)',
+    }),
     ...(responsive.isLargeScreen() && {
       maxWidth: responsive.getMaxContentWidth(),
       alignSelf: 'center',

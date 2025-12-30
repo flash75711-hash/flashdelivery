@@ -8,13 +8,13 @@ import {
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import responsive from '@/utils/responsive';
+import { showSimpleAlert } from '@/lib/alert';
 
 interface Setting {
   id: string;
@@ -57,11 +57,7 @@ export default function AdminSettingsScreen() {
       setEditedValues(initialValues);
     } catch (error: any) {
       console.error('Error loading settings:', error);
-      if (Platform.OS === 'web') {
-        alert(`خطأ في تحميل الإعدادات: ${error.message}`);
-      } else {
-        Alert.alert('خطأ', `فشل تحميل الإعدادات: ${error.message}`);
-      }
+      showSimpleAlert('خطأ', `فشل تحميل الإعدادات: ${error.message}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -90,20 +86,12 @@ export default function AdminSettingsScreen() {
 
       await Promise.all(updates);
 
-      if (Platform.OS === 'web') {
-        alert('✅ تم حفظ الإعدادات بنجاح');
-      } else {
-        Alert.alert('نجح', '✅ تم حفظ الإعدادات بنجاح');
-      }
+      showSimpleAlert('نجح', '✅ تم حفظ الإعدادات بنجاح', 'success');
 
       loadSettings();
     } catch (error: any) {
       console.error('Error saving settings:', error);
-      if (Platform.OS === 'web') {
-        alert(`خطأ: ${error.message}`);
-      } else {
-        Alert.alert('خطأ', error.message);
-      }
+      showSimpleAlert('خطأ', error.message || 'فشل حفظ الإعدادات', 'error');
     } finally {
       setSaving(false);
     }
@@ -116,11 +104,7 @@ export default function AdminSettingsScreen() {
     });
     setEditedValues(initialValues);
     
-    if (Platform.OS === 'web') {
-      alert('تم إعادة تعيين القيم');
-    } else {
-      Alert.alert('تم', 'تم إعادة تعيين القيم');
-    }
+    showSimpleAlert('تم', 'تم إعادة تعيين القيم', 'success');
   };
 
   const renderSetting = (setting: Setting) => {

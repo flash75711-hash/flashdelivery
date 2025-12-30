@@ -835,10 +835,14 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     paddingBottom: tabBarBottomPadding,
   },
   header: {
-    backgroundColor: '#fff',
-    padding: responsive.getResponsivePadding(),
+    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.95)' : '#fff',
+    padding: responsive.getResponsiveHeaderPadding(),
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: 'rgba(0, 0, 0, 0.08)',
+    ...(Platform.OS === 'web' && {
+      backdropFilter: 'blur(10px)',
+      WebkitBackdropFilter: 'blur(10px)',
+    }),
     ...(responsive.isLargeScreen() && {
       maxWidth: responsive.getMaxContentWidth(),
       alignSelf: 'center',

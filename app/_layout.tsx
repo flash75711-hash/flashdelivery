@@ -76,6 +76,31 @@ export default function RootLayout() {
               font-size: 16px;
             }
           }
+          
+          /* تحسين الـ Headers - تقليل الارتفاع وجعله شفاف جزئيًا */
+          /* تطبيق على جميع الـ headers التي تحتوي على borderBottom */
+          [style*="borderBottomWidth"],
+          [style*="border-bottom"] {
+            padding-top: ${responsive.getResponsiveHeaderPadding()}px !important;
+            padding-bottom: ${responsive.getResponsiveHeaderPadding()}px !important;
+          }
+          
+          /* تطبيق gradient overlay على الـ headers البيضاء */
+          [style*="backgroundColor: rgb(255, 255, 255)"],
+          [style*="backgroundColor: #fff"] {
+            background: linear-gradient(to bottom, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.85) 100%) !important;
+            backdrop-filter: blur(10px) !important;
+            -webkit-backdrop-filter: blur(10px) !important;
+          }
+          
+          /* تطبيق خاص على الـ headers التي تحتوي على borderBottom */
+          [style*="borderBottomWidth"][style*="backgroundColor: rgb(255, 255, 255)"],
+          [style*="borderBottomWidth"][style*="backgroundColor: #fff"],
+          [style*="border-bottom"][style*="backgroundColor: rgb(255, 255, 255)"],
+          [style*="border-bottom"][style*="backgroundColor: #fff"] {
+            border-bottom-color: rgba(0, 0, 0, 0.08) !important;
+            border-bottom-width: 1px !important;
+          }
         `;
         document.head.appendChild(style);
       }

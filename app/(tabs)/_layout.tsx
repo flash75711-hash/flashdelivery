@@ -166,23 +166,35 @@ export default function TabsLayout() {
       `;
       document.head.appendChild(style);
       
-      // إخفاء التبويبات التي تحتوي على نص "admin" أو "setting"
+      // إخفاء التبويبات غير المرغوبة (لكن نسمح بظهور admin/settings للمستخدمين الذين لديهم دور admin)
       const hideUnwantedTabs = () => {
         const tabList = document.querySelector('[role="tablist"]');
         if (!tabList) return;
+        
+        // التحقق من دور المستخدم
+        const userRole = user?.role || '';
+        const isAdmin = userRole === 'admin';
         
         // البحث عن جميع التبويبات
         const tabs = tabList.querySelectorAll('[role="tab"], button');
         tabs.forEach((tab) => {
           const text = (tab.textContent || '').toLowerCase();
           const html = (tab.innerHTML || '').toLowerCase();
+          const href = (tab as HTMLElement).getAttribute('href') || '';
           
-          // إخفاء التبويبات التي تحتوي على admin أو setting أو idmin
-          if (text.includes('admin') || 
-              text.includes('setting') ||
+          // السماح بظهور admin/settings للمستخدمين الذين لديهم دور admin
+          const isAdminSettingsTab = href.includes('admin/settings') || href.includes('admin%2Fsettings');
+          if (isAdminSettingsTab && isAdmin) {
+            // السماح بظهور التبويب
+            return;
+          }
+          
+          // إخفاء التبويبات التي تحتوي على admin أو setting أو idmin (لكن نستثني admin/settings للمستخدمين الذين لديهم دور admin)
+          if ((text.includes('admin') && !isAdminSettingsTab) || 
+              (text.includes('setting') && !isAdminSettingsTab && !href.includes('admin/settings')) ||
               text.includes('idmin') ||
-              html.includes('admin') ||
-              html.includes('setting') ||
+              (html.includes('admin') && !isAdminSettingsTab) ||
+              (html.includes('setting') && !isAdminSettingsTab && !href.includes('admin/settings')) ||
               html.includes('idmin')) {
             const element = tab as HTMLElement;
             element.style.display = 'none';
@@ -211,12 +223,21 @@ export default function TabsLayout() {
         const containers = tabList.querySelectorAll('div');
         containers.forEach((container) => {
           const text = (container.textContent || '').toLowerCase();
-          if (text.includes('admin') || text.includes('setting') || text.includes('idmin')) {
+          const href = (container.querySelector('[role="tab"], button, a') as HTMLElement)?.getAttribute('href') || '';
+          const isAdminSettingsContainer = href.includes('admin/settings') || href.includes('admin%2Fsettings');
+          
+          if ((text.includes('admin') && !isAdminSettingsContainer) || 
+              (text.includes('setting') && !isAdminSettingsContainer && !href.includes('admin/settings')) || 
+              text.includes('idmin')) {
             const tabsInContainer = container.querySelectorAll('[role="tab"], button');
             if (tabsInContainer.length > 0) {
               const hasHiddenTab = Array.from(tabsInContainer).some(tab => {
                 const tabText = (tab.textContent || '').toLowerCase();
-                return tabText.includes('admin') || tabText.includes('setting') || tabText.includes('idmin');
+                const tabHref = (tab as HTMLElement).getAttribute('href') || '';
+                const isAdminSettings = tabHref.includes('admin/settings') || tabHref.includes('admin%2Fsettings');
+                return (tabText.includes('admin') && !isAdminSettings) || 
+                       (tabText.includes('setting') && !isAdminSettings && !tabHref.includes('admin/settings')) || 
+                       tabText.includes('idmin');
               });
               if (hasHiddenTab) {
                 (container as HTMLElement).style.display = 'none';
@@ -249,7 +270,7 @@ export default function TabsLayout() {
         observer.disconnect();
       };
     }
-  }, [tabBarHeight, tabBarGap, tabBarPadding, tabPadding, tabMargin, maxContentWidth]);
+  }, [tabBarHeight, tabBarGap, tabBarPadding, tabPadding, tabMargin, maxContentWidth, user?.role]);
   
   // إعادة تقييم التبويبات عند تغيير user.role
   useEffect(() => {
@@ -519,6 +540,12 @@ export default function TabsLayout() {
       />
       <Tabs.Screen
         name="admin/search-settings"
+        options={{
+          tabBarButton: () => null, // إخفاء من الـ navbar
+        }}
+      />
+      <Tabs.Screen
+        name="admin/settings"
         options={{
           tabBarButton: () => null, // إخفاء من الـ navbar
         }}

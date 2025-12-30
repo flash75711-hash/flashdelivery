@@ -7,7 +7,6 @@ import {
   StyleSheet,
   SafeAreaView,
   ScrollView,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -17,9 +16,10 @@ import { calculateDistance, getLocationWithAddress } from '@/lib/webLocationUtil
 import { geocodeAddress } from '@/lib/supabase';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
-import { openURL } from '@/lib/webUtils';
+import { openURL, getCurrentLocation } from '@/lib/webUtils';
 import { createNotification, notifyAllActiveDrivers } from '@/lib/notifications';
 import { calculateDeliveryPrice } from '@/lib/priceCalculation';
+import { showSimpleAlert } from '@/lib/alert';
 
 interface DeliveryPoint {
   id: string;
@@ -65,7 +65,7 @@ export default function DeliverPackageScreen() {
 
   const removeDeliveryPoint = (id: string) => {
     if (deliveryPoints.length <= 2) {
-      Alert.alert('تنبيه', 'يجب أن يكون هناك على الأقل نقطة انطلاق ونقطة وصول');
+      showSimpleAlert('تنبيه', 'يجب أن يكون هناك على الأقل نقطة انطلاق ونقطة وصول', 'warning');
       return;
     }
     setDeliveryPoints(deliveryPoints.filter(point => point.id !== id));
@@ -105,10 +105,10 @@ export default function DeliverPackageScreen() {
           updateDeliveryPoint(target, 'address', placeName);
         }
 
-        Alert.alert('نجح', 'تم جلب العنوان بنجاح');
+        showSimpleAlert('نجح', 'تم جلب العنوان بنجاح', 'success');
     } catch (error: any) {
       console.error('Error getting location:', error);
-      Alert.alert('خطأ', error.message || 'فشل جلب الموقع');
+      showSimpleAlert('خطأ', error.message || 'فشل جلب الموقع', 'error');
     } finally {
       setGettingLocation(null);
     }
@@ -123,42 +123,42 @@ export default function DeliverPackageScreen() {
       
       if (canOpen) {
         openURL(mapsUrl);
-        Alert.alert(
+        showSimpleAlert(
           'اختيار الموقع',
           'بعد اختيار الموقع من الخريطة:\n1. اضغط على الموقع\n2. انسخ العنوان\n3. الصقه في الحقل',
-          [{ text: 'حسناً' }]
+          'info'
         );
       } else {
         // إذا لم يكن Google Maps متاحاً، افتح في المتصفح
         const webUrl = 'https://www.google.com/maps';
         openURL(webUrl);
-        Alert.alert(
+        showSimpleAlert(
           'اختيار الموقع',
           'تم فتح الخريطة في المتصفح. بعد اختيار الموقع، انسخ العنوان والصقه في الحقل',
-          [{ text: 'حسناً' }]
+          'info'
         );
       }
     } catch (error: any) {
       console.error('Error opening map:', error);
-      Alert.alert('خطأ', 'فشل فتح الخريطة. يمكنك إدخال العنوان يدوياً');
+      showSimpleAlert('خطأ', 'فشل فتح الخريطة. يمكنك إدخال العنوان يدوياً', 'error');
     }
   };
 
   const handleSubmit = async () => {
     if (deliveryMode === 'simple') {
       if (!pickupAddress || !deliveryAddress) {
-        Alert.alert('خطأ', 'الرجاء إدخال عنوان الاستلام والتسليم');
+        showSimpleAlert('خطأ', 'الرجاء إدخال عنوان الاستلام والتسليم', 'warning');
         return;
       }
     } else {
       // التحقق من أن جميع النقاط لها عناوين
       const emptyPoints = deliveryPoints.filter(point => !point.address.trim());
       if (emptyPoints.length > 0) {
-        Alert.alert('خطأ', 'الرجاء إدخال عنوان لجميع النقاط');
+        showSimpleAlert('خطأ', 'الرجاء إدخال عنوان لجميع النقاط', 'warning');
         return;
       }
       if (deliveryPoints.length < 2) {
-        Alert.alert('خطأ', 'يجب أن يكون هناك على الأقل نقطة انطلاق ونقطة وصول');
+        showSimpleAlert('خطأ', 'يجب أن يكون هناك على الأقل نقطة انطلاق ونقطة وصول', 'warning');
         return;
       }
     }
@@ -296,11 +296,8 @@ export default function DeliverPackageScreen() {
         console.error('Error getting search point location:', locationError);
         // إذا فشل الحصول على الموقع، نحاول استخدام موقع العميل الحالي
         try {
-          const { status } = await Location.requestForegroundPermissionsAsync();
-          if (status === 'granted') {
-            const location = await Location.getCurrentPositionAsync({});
-            searchPoint = { lat: location.coords.latitude, lon: location.coords.longitude };
-          }
+          const location = await getCurrentLocation({ enableHighAccuracy: true });
+          searchPoint = { lat: location.latitude, lon: location.longitude };
         } catch (err) {
           console.error('Error getting current location:', err);
         }
@@ -358,10 +355,10 @@ export default function DeliverPackageScreen() {
       
       // عرض رسالة النجاح بعد التوجيه
       setTimeout(() => {
-        Alert.alert('✅ نجح', message);
+        showSimpleAlert('✅ نجح', message, 'success');
       }, 300);
     } catch (error: any) {
-      Alert.alert('خطأ', error.message || 'فشل إرسال الطلب');
+      showSimpleAlert('خطأ', error.message || 'فشل إرسال الطلب', 'error');
     } finally {
       setLoading(false);
     }
