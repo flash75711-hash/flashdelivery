@@ -54,16 +54,7 @@ export async function getUserWithRoleFromSession(session: { user: any } | null):
   console.log('getUserWithRoleFromSession: Got user from session:', session.user.id);
   const user = session.user;
   
-  // إرجاع بيانات أساسية أولاً (سريع)
-  const basicUserData: User = {
-    id: user.id,
-    email: user.email || '',
-    role: 'customer' as UserRole, // افتراضي
-    full_name: user.user_metadata?.full_name || user.user_metadata?.name || null,
-    avatar_url: user.user_metadata?.avatar_url || null,
-  };
-  
-  // محاولة جلب profile مع timeout قصير (غير متزامن)
+  // محاولة جلب profile مع timeout أطول (5 ثوانٍ) لضمان الحصول على البيانات الصحيحة
   try {
     console.log('getUserWithRoleFromSession: Fetching profile from database (with timeout)...');
     const profilePromise = supabase
@@ -72,8 +63,9 @@ export async function getUserWithRoleFromSession(session: { user: any } | null):
       .eq('id', user.id)
       .single();
     
+    // زيادة timeout إلى 5 ثوانٍ لضمان الحصول على البيانات
     const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Profile fetch timeout after 2 seconds')), 2000)
+      setTimeout(() => reject(new Error('Profile fetch timeout after 5 seconds')), 5000)
     );
     
     const result = await Promise.race([profilePromise, timeoutPromise]) as any;
@@ -94,13 +86,52 @@ export async function getUserWithRoleFromSession(session: { user: any } | null):
       };
     }
     
-    // إذا لم يكن هناك ملف أو حدث خطأ، نرجع البيانات الأساسية
-    console.log('getUserWithRoleFromSession: Using basic user data (no profile or error)');
-    return basicUserData;
+    // إذا لم يكن هناك ملف، نرجع بيانات أساسية مع role: 'customer' كافتراضي
+    // لكن هذا يجب أن يكون نادراً جداً
+    console.log('getUserWithRoleFromSession: No profile found, using basic user data');
+    return {
+      id: user.id,
+      email: user.email || '',
+      role: 'customer' as UserRole, // افتراضي فقط إذا لم يكن هناك profile
+      full_name: user.user_metadata?.full_name || user.user_metadata?.name || null,
+      avatar_url: user.user_metadata?.avatar_url || null,
+    };
   } catch (error) {
-    console.warn('getUserWithRoleFromSession: Profile fetch failed or timed out, using basic data:', error);
-    // في حالة الخطأ أو timeout، نرجع بيانات أساسية من auth
-    return basicUserData;
+    console.warn('getUserWithRoleFromSession: Profile fetch failed or timed out:', error);
+    // في حالة timeout أو خطأ، نحاول مرة أخرى بدون timeout
+    try {
+      console.log('getUserWithRoleFromSession: Retrying profile fetch without timeout...');
+      const { data: profile, error: retryError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+      
+      if (!retryError && profile) {
+        console.log('getUserWithRoleFromSession: Profile found on retry, role:', profile?.role);
+        return {
+          id: user.id,
+          email: user.email || '',
+          role: (profile?.role as UserRole) || 'customer',
+          full_name: profile?.full_name,
+          phone: profile?.phone,
+          avatar_url: profile?.avatar_url,
+          registration_complete: profile?.registration_complete,
+        };
+      }
+    } catch (retryError) {
+      console.error('getUserWithRoleFromSession: Retry also failed:', retryError);
+    }
+    
+    // كحل أخير، نرجع بيانات أساسية
+    console.warn('getUserWithRoleFromSession: Using basic user data as fallback');
+    return {
+      id: user.id,
+      email: user.email || '',
+      role: 'customer' as UserRole, // افتراضي فقط كحل أخير
+      full_name: user.user_metadata?.full_name || user.user_metadata?.name || null,
+      avatar_url: user.user_metadata?.avatar_url || null,
+    };
   }
 }
 

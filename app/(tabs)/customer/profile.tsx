@@ -6,7 +6,6 @@ import {
   StyleSheet,
   SafeAreaView,
   TouchableOpacity,
-  Alert,
   ActivityIndicator,
   ScrollView,
   KeyboardAvoidingView,
@@ -18,6 +17,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, reverseGeocode } from '@/lib/supabase';
 import { getLocationWithAddress } from '@/lib/webLocationUtils';
+import { showConfirm } from '@/lib/alert';
 import responsive from '@/utils/responsive';
 
 interface Address {
@@ -348,24 +348,21 @@ export default function CustomerProfileScreen() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     console.log('Profile: handleLogout called');
     
-    // على الويب، Alert قد لا يعمل بشكل صحيح، لذا نستخدم confirm
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      const confirmed = window.confirm('هل أنت متأكد من تسجيل الخروج؟');
-      if (confirmed) {
-        performLogout();
-      }
-    } else {
-    Alert.alert('تسجيل الخروج', 'هل أنت متأكد من تسجيل الخروج؟', [
-      { text: 'إلغاء', style: 'cancel' },
+    const confirmed = await showConfirm(
+      'تسجيل الخروج',
+      'هل أنت متأكد من تسجيل الخروج؟',
       {
-        text: 'تسجيل الخروج',
-        style: 'destructive',
-          onPress: performLogout,
-      },
-    ]);
+        confirmText: 'تسجيل الخروج',
+        cancelText: 'إلغاء',
+        confirmButtonColor: '#FF3B30',
+      }
+    );
+    
+    if (confirmed) {
+      performLogout();
     }
   };
 

@@ -8,10 +8,23 @@ import responsive, { createShadowStyle } from '@/utils/responsive';
 import FloatingNotification from '@/components/FloatingNotification';
 import { useFloatingNotifications } from '@/hooks/useFloatingNotifications';
 import { useOrderNotifications } from '@/hooks/useOrderNotifications';
+import { UserRole } from '@/lib/supabase';
 
 export default function TabsLayout() {
   const { user, loading } = useAuth();
   const { t } = useTranslation();
+  
+  // دالة لإخفاء التبويبات بناءً على الدور - مع useMemo لضمان التحديث عند تغيير الدور
+  const shouldHideTab = useMemo(() => {
+    return (allowedRoles: UserRole[]) => {
+      // إذا لم يكن هناك user أو role، نخفي التبويب
+      if (!user || !user.role) {
+        return true;
+      }
+      // إخفاء التبويب إذا كان الدور غير مسموح
+      return !allowedRoles.includes(user.role);
+    };
+  }, [user?.role]); // يعتمد على user.role فقط
   
   // إشعارات عائمة عامة لجميع المستخدمين
   const generalFloatingNotifications = useFloatingNotifications();
@@ -31,15 +44,6 @@ export default function TabsLayout() {
   const tabMargin = responsive.isTablet() ? '8px' : '6px';
   const maxContentWidth = responsive.getMaxContentWidth();
 
-  // Helper function to determine if a tab should be hidden
-  const shouldHideTab = useMemo(() => {
-    if (!user?.role) return () => true; // Hide all if no user
-    
-    return (allowedRoles: string[]) => {
-      return !allowedRoles.includes(user.role);
-    };
-  }, [user?.role]);
-
   // CSS بسيط للويب فقط
   useEffect(() => {
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
@@ -50,24 +54,6 @@ export default function TabsLayout() {
       const style = document.createElement('style');
       style.id = styleId;
       style.textContent = `
-        [role="tablist"] {
-          position: fixed !important;
-          bottom: 0 !important;
-          left: 0 !important;
-          right: 0 !important;
-          background: #fff !important;
-          border-top: 1px solid #e0e0e0 !important;
-          height: ${tabBarHeight}px !important;
-          z-index: 1000 !important;
-          display: flex !important;
-          justify-content: center !important;
-          align-items: center !important;
-          align-content: center !important;
-          gap: ${tabBarGap} !important;
-          padding: 0 ${tabBarPadding} !important;
-          box-sizing: border-box !important;
-        }
-        
         /* إخفاء التبويبات المخفية - تحسين */
         [role="tablist"] [role="tab"][style*="display: none"],
         [role="tablist"] [role="tab"][aria-hidden="true"],
@@ -108,103 +94,97 @@ export default function TabsLayout() {
           position: relative;
         }
         
+        /* التبويبات المرئية - توزيع متساوي */
+        [role="tablist"] {
+          display: flex !important;
+          justify-content: space-around !important;
+          align-items: center !important;
+          width: 100% !important;
+        }
+        
         /* التبويبات المرئية - مسافات متساوية */
-        [role="tablist"] [role="tab"]:not([style*="display: none"]):not([aria-hidden="true"]) {
-          min-width: 70px !important;
-          max-width: 90px !important;
-          flex: 0 0 auto !important;
+        [role="tablist"] [role="tab"]:not([style*="display: none"]):not([aria-hidden="true"]),
+        [role="tablist"] a[role="tab"]:not([style*="display: none"]):not([aria-hidden="true"]) {
+          flex: 1 1 0% !important;
+          min-width: 0 !important;
+          max-width: none !important;
           display: flex !important;
           flex-direction: column !important;
           align-items: center !important;
           justify-content: center !important;
           padding: 4px ${tabPadding} !important;
-          margin: 0 ${tabMargin} !important;
+          margin: 0 2px !important;
           box-sizing: border-box !important;
         }
         
-        /* ضمان التمركز الكامل */
+        /* ضمان التمركز الكامل للحاويات */
         [role="tablist"] > div {
           display: flex !important;
           justify-content: center !important;
           align-items: center !important;
+          flex: 1 1 0% !important;
+          min-width: 0 !important;
         }
         
-        /* للشاشات الكبيرة - التمركز في المنتصف */
+        /* إخفاء الحاويات الفارغة */
+        [role="tablist"] > div:empty {
+          display: none !important;
+        }
+        
+        /* للشاشات الكبيرة - تحسين المسافات */
         @media (min-width: 1024px) {
-          [role="tablist"] {
-            max-width: ${maxContentWidth}px !important;
-            left: 50% !important;
-            transform: translateX(-50%) !important;
-            margin: 0 auto !important;
+          [role="tablist"] [role="tab"]:not([style*="display: none"]):not([aria-hidden="true"]),
+          [role="tablist"] a[role="tab"]:not([style*="display: none"]):not([aria-hidden="true"]) {
+            padding: 6px ${tabPadding} !important;
+            margin: 0 4px !important;
           }
         }
         
         /* للشاشات الصغيرة - تقليل المسافات */
         @media (max-width: 360px) {
-          [role="tablist"] {
-            gap: 12px !important;
-            padding: 0 12px !important;
+          [role="tablist"] [role="tab"]:not([style*="display: none"]):not([aria-hidden="true"]),
+          [role="tablist"] a[role="tab"]:not([style*="display: none"]):not([aria-hidden="true"]) {
+            padding: 2px 4px !important;
+            margin: 0 1px !important;
           }
-          [role="tablist"] [role="tab"]:not([style*="display: none"]):not([aria-hidden="true"]) {
-            min-width: 60px !important;
-            max-width: 75px !important;
+          
+          /* تقليل حجم النص والأيقونات في الشاشات الصغيرة */
+          [role="tablist"] [role="tab"] .css-text-146c3p1,
+          [role="tablist"] a[role="tab"] .css-text-146c3p1 {
+            font-size: 10px !important;
+          }
+        }
+        
+        /* للشاشات المتوسطة */
+        @media (min-width: 361px) and (max-width: 768px) {
+          [role="tablist"] [role="tab"]:not([style*="display: none"]):not([aria-hidden="true"]),
+          [role="tablist"] a[role="tab"]:not([style*="display: none"]):not([aria-hidden="true"]) {
             padding: 4px 6px !important;
-            margin: 0 4px !important;
+            margin: 0 2px !important;
           }
         }
       `;
       document.head.appendChild(style);
       
-      // إخفاء التبويبات بناءً على role المستخدم
+      // إخفاء التبويبات التي تحتوي على نص "admin" أو "setting"
       const hideUnwantedTabs = () => {
         const tabList = document.querySelector('[role="tablist"]');
         if (!tabList) return;
         
-        const currentRole = user?.role || '';
-        
-        // تعريف التبويبات لكل role
-        const roleTabs: Record<string, string[]> = {
-          customer: ['customer/home', 'customer/my-orders', 'customer/profile'],
-          driver: ['driver/dashboard', 'driver/trips', 'driver/wallet', 'driver/history', 'driver/my-orders'],
-          vendor: ['vendor/store', 'vendor/profile'],
-          admin: ['admin/dashboard', 'admin/drivers', 'admin/accounting', 'admin/places', 'admin/my-orders'],
-        };
-        
-        // الحصول على التبويبات المسموح بها للـ role الحالي
-        const allowedTabs = roleTabs[currentRole] || [];
-        
         // البحث عن جميع التبويبات
         const tabs = tabList.querySelectorAll('[role="tab"], button');
         tabs.forEach((tab) => {
-          const element = tab as HTMLElement;
           const text = (tab.textContent || '').toLowerCase();
-          const href = element.getAttribute('href') || '';
+          const html = (tab.innerHTML || '').toLowerCase();
           
-          // تحديد إذا كان التبويب يجب إخفاؤه
-          let shouldHide = false;
-          
-          // إخفاء التبويبات المخفية من React Native (aria-hidden="true")
-          if (element.getAttribute('aria-hidden') === 'true' || element.style.display === 'none') {
-            shouldHide = true;
-          } else if (currentRole) {
-            // إخفاء التبويبات التي لا تنتمي للـ role الحالي
-            const isCustomerTab = href.includes('/customer/') || text.includes('الرئيسية') || text.includes('home');
-            const isDriverTab = href.includes('/driver/') || text.includes('لوحة') || text.includes('dashboard') || text.includes('رحلات') || text.includes('محفظة') || text.includes('wallet');
-            const isVendorTab = href.includes('/vendor/') || text.includes('متجر') || text.includes('store');
-            const isAdminTab = href.includes('/admin/') || text.includes('admin') || text.includes('idmin') || text.includes('إدارة') || text.includes('محاسبة') || text.includes('accounting');
-            
-            if (currentRole === 'customer' && (isDriverTab || isVendorTab || isAdminTab)) {
-              shouldHide = true;
-            } else if (currentRole === 'driver' && (isCustomerTab || isVendorTab || isAdminTab)) {
-              shouldHide = true;
-            } else if (currentRole === 'vendor' && (isCustomerTab || isDriverTab || isAdminTab)) {
-              shouldHide = true;
-            } else if (currentRole === 'admin' && (isCustomerTab || isDriverTab || isVendorTab)) {
-              shouldHide = true;
-            }
-          }
-          
-          if (shouldHide) {
+          // إخفاء التبويبات التي تحتوي على admin أو setting أو idmin
+          if (text.includes('admin') || 
+              text.includes('setting') ||
+              text.includes('idmin') ||
+              html.includes('admin') ||
+              html.includes('setting') ||
+              html.includes('idmin')) {
+            const element = tab as HTMLElement;
             element.style.display = 'none';
             element.style.width = '0';
             element.style.height = '0';
@@ -218,11 +198,28 @@ export default function TabsLayout() {
             // إخفاء الحاوية الأب أيضاً
             const parent = element.parentElement;
             if (parent && parent !== tabList) {
-              const hasVisibleTabs = Array.from(parent.querySelectorAll('[role="tab"], button')).some(
-                t => (t as HTMLElement).style.display !== 'none' && (t as HTMLElement).getAttribute('aria-hidden') !== 'true'
-              );
-              if (!hasVisibleTabs) {
-                (parent as HTMLElement).style.display = 'none';
+              parent.style.display = 'none';
+              parent.style.width = '0';
+              parent.style.height = '0';
+              parent.style.margin = '0';
+              parent.style.padding = '0';
+            }
+          }
+        });
+        
+        // البحث عن الحاويات التي تحتوي على تبويبات مخفية
+        const containers = tabList.querySelectorAll('div');
+        containers.forEach((container) => {
+          const text = (container.textContent || '').toLowerCase();
+          if (text.includes('admin') || text.includes('setting') || text.includes('idmin')) {
+            const tabsInContainer = container.querySelectorAll('[role="tab"], button');
+            if (tabsInContainer.length > 0) {
+              const hasHiddenTab = Array.from(tabsInContainer).some(tab => {
+                const tabText = (tab.textContent || '').toLowerCase();
+                return tabText.includes('admin') || tabText.includes('setting') || tabText.includes('idmin');
+              });
+              if (hasHiddenTab) {
+                (container as HTMLElement).style.display = 'none';
               }
             }
           }
@@ -252,7 +249,21 @@ export default function TabsLayout() {
         observer.disconnect();
       };
     }
-  }, [tabBarHeight, tabBarGap, tabBarPadding, tabPadding, tabMargin, maxContentWidth, user?.role]);
+  }, [tabBarHeight, tabBarGap, tabBarPadding, tabPadding, tabMargin, maxContentWidth]);
+  
+  // إعادة تقييم التبويبات عند تغيير user.role
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof document !== 'undefined' && user?.role) {
+      // إجبار إعادة render للتبويبات عند تغيير الدور
+      // هذا يضمن أن التبويبات الصحيحة تظهر فوراً
+      const tabList = document.querySelector('[role="tablist"]');
+      if (tabList) {
+        // إعادة تقييم التبويبات
+        const event = new Event('roleChanged');
+        window.dispatchEvent(event);
+      }
+    }
+  }, [user?.role]);
 
   if (loading) {
     return null;
@@ -260,6 +271,12 @@ export default function TabsLayout() {
 
   if (!user) {
     return <Redirect href="/(auth)/login" />;
+  }
+  
+  // التأكد من أن user.role موجود قبل عرض التبويبات
+  // هذا يمنع عرض التبويبات الخاطئة أثناء تحميل الدور
+  if (!user.role) {
+    return null; // انتظار تحميل الدور
   }
 
   return (
@@ -284,24 +301,27 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarStyle: Platform.OS === 'web' ? {
           backgroundColor: '#fff',
-          borderTopWidth: 1,
-          borderTopColor: '#e0e0e0',
           height: tabBarHeight,
           paddingBottom: responsive.isTablet() ? 8 : responsive.isSmallScreen() ? 4 : 6,
           paddingTop: responsive.isTablet() ? 8 : responsive.isSmallScreen() ? 4 : 6,
           paddingLeft: responsive.isTablet() ? 20 : 16,
           paddingRight: responsive.isTablet() ? 20 : 16,
-          width: '100%',
-          maxWidth: responsive.isLargeScreen() ? responsive.getMaxContentWidth() : '100%',
-          marginLeft: responsive.isLargeScreen() ? 'auto' : 0,
-          marginRight: responsive.isLargeScreen() ? 'auto' : 0,
           justifyContent: 'center',
           alignItems: 'center',
           gap: responsive.isTablet() ? 24 : 20,
+          borderRadius: responsive.isTablet() ? 28 : 24,
+          display: 'flex',
+          position: 'fixed',
+          bottom: responsive.isTablet() ? 24 : 20,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: 'calc(100% - 32px)',
+          maxWidth: responsive.isLargeScreen() ? responsive.getMaxContentWidth() : 'calc(100% - 32px)',
+          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.08)',
+          borderWidth: 1,
+          borderColor: 'rgba(0, 0, 0, 0.05)',
         } as any : {
           backgroundColor: '#fff',
-          borderTopWidth: 1,
-          borderTopColor: '#e0e0e0',
           height: tabBarHeight,
           paddingBottom: responsive.isTablet() ? 8 : responsive.isSmallScreen() ? 4 : 6,
           paddingTop: responsive.isTablet() ? 8 : responsive.isSmallScreen() ? 4 : 6,
@@ -309,11 +329,14 @@ export default function TabsLayout() {
           paddingRight: responsive.isTablet() ? 20 : 16,
           justifyContent: 'center',
           alignItems: 'center',
+          borderRadius: responsive.isTablet() ? 28 : 24,
+          marginBottom: responsive.isTablet() ? 24 : 20,
+          marginHorizontal: 16,
           ...createShadowStyle({
             shadowColor: '#000',
-            shadowOffset: { width: 0, height: -2 },
+            shadowOffset: { width: 0, height: 4 },
             shadowOpacity: 0.1,
-            shadowRadius: 8,
+            shadowRadius: 20,
             elevation: 8,
           }),
         },

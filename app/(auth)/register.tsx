@@ -5,7 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
@@ -15,6 +14,7 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { UserRole, supabase } from '@/lib/supabase';
+import { showSimpleAlert } from '@/lib/alert';
 
 export default function RegisterScreen() {
   // رقم هاتف افتراضي للاختبار
@@ -58,14 +58,14 @@ export default function RegisterScreen() {
 
   const handleSendOtp = async () => {
     if (!phone) {
-      Alert.alert('تنبيه', 'الرجاء إدخال رقم الهاتف');
+      await showSimpleAlert('تنبيه', 'الرجاء إدخال رقم الهاتف', 'warning');
       return;
     }
 
     // التحقق من صحة رقم الهاتف
     const cleaned = phone.replace(/\D/g, '');
     if (cleaned.length < 10) {
-      Alert.alert('تنبيه', 'الرجاء إدخال رقم هاتف صحيح');
+      await showSimpleAlert('تنبيه', 'الرجاء إدخال رقم هاتف صحيح', 'warning');
       return;
     }
 
@@ -86,21 +86,21 @@ export default function RegisterScreen() {
         // معالجة خطأ 429 (Too Many Requests)
         if (error.status === 429 || error.message?.includes('40 seconds')) {
           setCooldownSeconds(40);
-          Alert.alert(
+          await showSimpleAlert(
             'تم تجاوز الحد المسموح',
             'لأسباب أمنية، يرجى الانتظار 40 ثانية قبل المحاولة مرة أخرى.',
-            [{ text: 'حسناً' }]
+            'warning'
           );
         } else {
-          Alert.alert('خطأ', error.message || 'فشل إرسال رمز التحقق');
+          await showSimpleAlert('خطأ', error.message || 'فشل إرسال رمز التحقق', 'error');
         }
       } else {
         setOtpSent(true);
-        Alert.alert('تم الإرسال', 'تم إرسال رمز التحقق إلى رقم هاتفك');
+        await showSimpleAlert('تم الإرسال', 'تم إرسال رمز التحقق إلى رقم هاتفك', 'success');
       }
     } catch (error: any) {
       console.error('Register: Error in send OTP:', error);
-      Alert.alert('خطأ', error.message || 'حدث خطأ أثناء إرسال رمز التحقق');
+      await showSimpleAlert('خطأ', error.message || 'حدث خطأ أثناء إرسال رمز التحقق', 'error');
     } finally {
       setSendingOtp(false);
     }
@@ -108,7 +108,7 @@ export default function RegisterScreen() {
 
   const handleVerifyOtp = async () => {
     if (!otp || otp.length !== 6) {
-      Alert.alert('تنبيه', 'الرجاء إدخال رمز التحقق المكون من 6 أرقام');
+      await showSimpleAlert('تنبيه', 'الرجاء إدخال رمز التحقق المكون من 6 أرقام', 'warning');
       return;
     }
 
@@ -126,7 +126,7 @@ export default function RegisterScreen() {
 
       if (error) {
         console.error('Register: Error verifying OTP:', error);
-        Alert.alert('خطأ', error.message || 'رمز التحقق غير صحيح');
+        await showSimpleAlert('خطأ', error.message || 'رمز التحقق غير صحيح', 'error');
       } else if (data.session && data.user) {
         console.log('Register: OTP verified successfully, user:', data.user.id);
         
@@ -158,11 +158,11 @@ export default function RegisterScreen() {
           router.replace(`/(auth)/complete-registration/${role}?phone=${encodeURIComponent(formattedPhone)}`);
         }
       } else {
-        Alert.alert('خطأ', 'فشل إنشاء الجلسة');
+        await showSimpleAlert('خطأ', 'فشل إنشاء الجلسة', 'error');
       }
     } catch (error: any) {
       console.error('Register: Error in verify OTP:', error);
-      Alert.alert('خطأ', error.message || 'حدث خطأ أثناء التحقق من رمز التحقق');
+      await showSimpleAlert('خطأ', error.message || 'حدث خطأ أثناء التحقق من رمز التحقق', 'error');
     } finally {
       setLoading(false);
     }

@@ -14,6 +14,7 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '@/lib/supabase';
+import { showSimpleAlert } from '@/lib/alert';
 import responsive from '@/utils/responsive';
 
 export default function LoginScreen() {
