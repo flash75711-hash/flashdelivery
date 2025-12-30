@@ -166,7 +166,7 @@ export default function CompleteDriverRegistration() {
 
   const handleComplete = async () => {
     if (!fullName || !phone) {
-      Alert.alert('خطأ', 'الرجاء إدخال الاسم الكامل ورقم التليفون');
+      await showSimpleAlert('خطأ', 'الرجاء إدخال الاسم الكامل ورقم التليفون', 'warning');
       return;
     }
 
@@ -175,7 +175,7 @@ export default function CompleteDriverRegistration() {
     const hasSelfie = selfieImage && (selfieImage.startsWith('http') || selfieImage.startsWith('https'));
 
     if (!idCardImage || !selfieImage) {
-      Alert.alert('خطأ', 'الرجاء رفع صورة البطاقة وصورة السيلفي');
+      await showSimpleAlert('خطأ', 'الرجاء رفع صورة البطاقة وصورة السيلفي', 'warning');
       return;
     }
 
@@ -211,7 +211,7 @@ export default function CompleteDriverRegistration() {
 
         // رسالة نجاح بعد رفع الصور (فقط إذا تم رفع صور جديدة)
         if (uploadPromises.length > 0) {
-          Alert.alert('✅ نجح الرفع', 'تم رفع الصور بنجاح! جاري حفظ البيانات...');
+          await showSimpleAlert('✅ نجح الرفع', 'تم رفع الصور بنجاح! جاري حفظ البيانات...', 'success');
         }
       }
 
@@ -238,19 +238,15 @@ export default function CompleteDriverRegistration() {
       );
 
       // رسالة انتظار المراجعة
-      Alert.alert(
+      await showSimpleAlert(
         '⏳ في انتظار المراجعة',
         'تم إرسال طلبك للمراجعة!\n\nسيقوم المدير بمراجعة بياناتك والمستندات المرفوعة.\nستتلقى إشعاراً عند الموافقة على طلبك.',
-        [
-          { 
-            text: 'حسناً', 
-            onPress: () => router.replace('/(tabs)/driver/dashboard') 
-          },
-        ]
+        'info'
       );
+      router.replace('/(tabs)/driver/dashboard');
     } catch (error: any) {
       setUploading(false);
-      Alert.alert('خطأ', error.message || 'فشل إكمال التسجيل');
+      await showSimpleAlert('خطأ', error.message || 'فشل إكمال التسجيل', 'error');
     } finally {
       setLoading(false);
     }

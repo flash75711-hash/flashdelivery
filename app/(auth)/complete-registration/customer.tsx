@@ -127,10 +127,10 @@ export default function CompleteCustomerRegistration() {
         // تحديث العنوان
         updateAddress(index, 'place_name', placeName);
 
-        Alert.alert('نجح', 'تم جلب العنوان بنجاح');
+        await showSimpleAlert('نجح', 'تم جلب العنوان بنجاح', 'success');
     } catch (error: any) {
       console.error('Error getting location:', error);
-      Alert.alert('خطأ', error.message || 'فشل جلب الموقع');
+      await showSimpleAlert('خطأ', error.message || 'فشل جلب الموقع', 'error');
     } finally {
       setGettingLocation(null);
     }
@@ -138,17 +138,17 @@ export default function CompleteCustomerRegistration() {
 
   const handleComplete = async () => {
     if (!fullName) {
-      Alert.alert('خطأ', 'الرجاء إدخال الاسم الكامل');
+      await showSimpleAlert('خطأ', 'الرجاء إدخال الاسم الكامل', 'warning');
       return;
     }
 
     if (!phone) {
-      Alert.alert('خطأ', 'لم يتم العثور على رقم الهاتف. يرجى تسجيل الخروج والدخول مرة أخرى.');
+      await showSimpleAlert('خطأ', 'لم يتم العثور على رقم الهاتف. يرجى تسجيل الخروج والدخول مرة أخرى.', 'warning');
       return;
     }
 
     if (addresses.some(addr => !addr.place_name)) {
-      Alert.alert('خطأ', 'الرجاء إدخال اسم المكان العام لجميع العناوين');
+      await showSimpleAlert('خطأ', 'الرجاء إدخال اسم المكان العام لجميع العناوين', 'warning');
       return;
     }
 
@@ -225,13 +225,13 @@ export default function CompleteCustomerRegistration() {
       router.replace('/(tabs)');
       
       // عرض رسالة نجاح بعد التوجيه
-      setTimeout(() => {
-        Alert.alert('نجح', 'تم إكمال التسجيل بنجاح');
+      setTimeout(async () => {
+        await showSimpleAlert('نجح', 'تم إكمال التسجيل بنجاح', 'success');
       }, 500);
     } catch (error: any) {
       console.error('CompleteRegistration: Error in handleComplete:', error);
       const errorMessage = error.message || error.code || 'فشل إكمال التسجيل';
-      Alert.alert('خطأ', errorMessage);
+      await showSimpleAlert('خطأ', errorMessage, 'error');
     } finally {
       setLoading(false);
     }

@@ -5,7 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
@@ -16,6 +15,7 @@ import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { getLocationWithAddress } from '@/lib/webLocationUtils';
 import { requestLocationPermission } from '@/lib/webUtils';
+import { showSimpleAlert } from '@/lib/alert';
 
 interface LocationData {
   latitude: number;
@@ -45,7 +45,7 @@ export default function CompleteVendorRegistration() {
     try {
       const hasPermission = await requestLocationPermission();
       if (!hasPermission) {
-        Alert.alert('خطأ', 'نحتاج إلى إذن الوصول إلى الموقع');
+        await showSimpleAlert('خطأ', 'نحتاج إلى إذن الوصول إلى الموقع', 'warning');
         setLocationSource('manual');
         return;
       }
@@ -53,7 +53,7 @@ export default function CompleteVendorRegistration() {
       const locationData = await getLocationWithAddress();
 
       if (!locationData) {
-        Alert.alert('خطأ', 'فشل الحصول على الموقع. يمكنك تحديده يدوياً');
+        await showSimpleAlert('خطأ', 'فشل الحصول على الموقع. يمكنك تحديده يدوياً', 'warning');
         setLocationSource('manual');
         return;
       }
@@ -64,26 +64,26 @@ export default function CompleteVendorRegistration() {
         address: locationData.address,
       });
     } catch (error: any) {
-      Alert.alert('خطأ', 'فشل الحصول على الموقع. يمكنك تحديده يدوياً');
+      await showSimpleAlert('خطأ', 'فشل الحصول على الموقع. يمكنك تحديده يدوياً', 'error');
       setLocationSource('manual');
     } finally {
       setGettingLocation(false);
     }
   };
 
-  const handleMapSelection = () => {
+  const handleMapSelection = async () => {
     // TODO: فتح خريطة لاختيار الموقع يدوياً
-    Alert.alert('قريباً', 'سيتم إضافة خريطة لاختيار الموقع يدوياً');
+    await showSimpleAlert('قريباً', 'سيتم إضافة خريطة لاختيار الموقع يدوياً', 'info');
   };
 
   const handleComplete = async () => {
     if (!placeName) {
-      Alert.alert('خطأ', 'الرجاء إدخال اسم المكان');
+      await showSimpleAlert('خطأ', 'الرجاء إدخال اسم المكان', 'warning');
       return;
     }
 
     if (!location) {
-      Alert.alert('خطأ', 'الرجاء تحديد موقع المكان');
+      await showSimpleAlert('خطأ', 'الرجاء تحديد موقع المكان', 'warning');
       return;
     }
 
@@ -109,11 +109,10 @@ export default function CompleteVendorRegistration() {
 
       if (vendorError) throw vendorError;
 
-      Alert.alert('نجح', 'تم إكمال التسجيل بنجاح', [
-        { text: 'حسناً', onPress: () => router.replace('/(tabs)') },
-      ]);
+      await showSimpleAlert('نجح', 'تم إكمال التسجيل بنجاح', 'success');
+      router.replace('/(tabs)');
     } catch (error: any) {
-      Alert.alert('خطأ', error.message || 'فشل إكمال التسجيل');
+      await showSimpleAlert('خطأ', error.message || 'فشل إكمال التسجيل', 'error');
     } finally {
       setLoading(false);
     }
