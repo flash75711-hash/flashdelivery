@@ -31,7 +31,7 @@ export default function TabsLayout() {
   const tabMargin = responsive.isTablet() ? '8px' : '6px';
   const maxContentWidth = responsive.getMaxContentWidth();
 
-  // CSS بسيط للويب فقط
+  // CSS محسّن للويب فقط
   useEffect(() => {
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
       const styleId = 'expo-tabs-bottom-navbar-style';
@@ -53,54 +53,29 @@ export default function TabsLayout() {
           display: flex !important;
           justify-content: center !important;
           align-items: center !important;
-          align-content: center !important;
           gap: ${tabBarGap} !important;
           padding: 0 ${tabBarPadding} !important;
           box-sizing: border-box !important;
         }
         
-        /* إخفاء التبويبات المخفية - تحسين */
-        [role="tablist"] [role="tab"][style*="display: none"],
+        /* إخفاء التبويبات المخفية */
         [role="tablist"] [role="tab"][aria-hidden="true"],
-        [role="tablist"] button[style*="display: none"],
-        [role="tablist"] button[aria-hidden="true"] {
+        [role="tablist"] button[aria-hidden="true"],
+        [role="tablist"] [role="tab"][style*="display: none"],
+        [role="tablist"] button[style*="display: none"] {
           display: none !important;
-          width: 0 !important;
-          height: 0 !important;
-          margin: 0 !important;
-          padding: 0 !important;
-          flex: 0 0 0 !important;
-          min-width: 0 !important;
-          max-width: 0 !important;
-          opacity: 0 !important;
-          visibility: hidden !important;
-          pointer-events: none !important;
         }
         
-        /* إخفاء الحاويات الفارغة - استخدام :has() فقط إذا كان مدعوماً */
+        /* إخفاء الحاويات الفارغة */
         @supports selector(:has(*)) {
-          [role="tablist"] > div:empty,
-          [role="tablist"] > div:has(button[style*="display: none"]),
-          [role="tablist"] > div:has(button[aria-hidden="true"]),
-          [role="tablist"] > div:has([role="tab"][style*="display: none"]),
-          [role="tablist"] > div:has([role="tab"][aria-hidden="true"]) {
+          [role="tablist"] > div:has([aria-hidden="true"]),
+          [role="tablist"] > div:has([style*="display: none"]) {
             display: none !important;
-            width: 0 !important;
-            height: 0 !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            flex: 0 0 0 !important;
           }
         }
         
-        /* إخفاء التبويبات التي تحتوي على نص admin أو setting باستخدام JavaScript */
-        [role="tablist"] [role="tab"],
-        [role="tablist"] button {
-          position: relative;
-        }
-        
         /* التبويبات المرئية - مسافات متساوية */
-        [role="tablist"] [role="tab"]:not([style*="display: none"]):not([aria-hidden="true"]) {
+        [role="tablist"] [role="tab"]:not([aria-hidden="true"]):not([style*="display: none"]) {
           min-width: 70px !important;
           max-width: 90px !important;
           flex: 0 0 auto !important;
@@ -126,7 +101,6 @@ export default function TabsLayout() {
             max-width: ${maxContentWidth}px !important;
             left: 50% !important;
             transform: translateX(-50%) !important;
-            margin: 0 auto !important;
           }
         }
         
@@ -136,7 +110,7 @@ export default function TabsLayout() {
             gap: 12px !important;
             padding: 0 12px !important;
           }
-          [role="tablist"] [role="tab"]:not([style*="display: none"]):not([aria-hidden="true"]) {
+          [role="tablist"] [role="tab"]:not([aria-hidden="true"]):not([style*="display: none"]) {
             min-width: 60px !important;
             max-width: 75px !important;
             padding: 4px 6px !important;
@@ -146,87 +120,62 @@ export default function TabsLayout() {
       `;
       document.head.appendChild(style);
       
-      // إخفاء التبويبات التي تحتوي على نص "admin" أو "setting"
-      const hideUnwantedTabs = () => {
+      // إخفاء التبويبات المخفية بشكل مبسط - يعمل مع tabBarButton: () => null
+      const hideHiddenTabs = () => {
         const tabList = document.querySelector('[role="tablist"]');
         if (!tabList) return;
         
-        // البحث عن جميع التبويبات
-        const tabs = tabList.querySelectorAll('[role="tab"], button');
-        tabs.forEach((tab) => {
-          const text = (tab.textContent || '').toLowerCase();
-          const html = (tab.innerHTML || '').toLowerCase();
-          
-          // إخفاء التبويبات التي تحتوي على admin أو setting أو idmin
-          if (text.includes('admin') || 
-              text.includes('setting') ||
-              text.includes('idmin') ||
-              html.includes('admin') ||
-              html.includes('setting') ||
-              html.includes('idmin')) {
-            const element = tab as HTMLElement;
-            element.style.display = 'none';
-            element.style.width = '0';
-            element.style.height = '0';
-            element.style.margin = '0';
-            element.style.padding = '0';
-            element.style.opacity = '0';
-            element.style.visibility = 'hidden';
-            element.style.pointerEvents = 'none';
+        // البحث عن التبويبات المخفية (التي تم تعيين tabBarButton: () => null لها)
+        const hiddenTabs = tabList.querySelectorAll('[role="tab"], button');
+        hiddenTabs.forEach((tab) => {
+          const element = tab as HTMLElement;
+          // التحقق من أن التبويب مخفي بالفعل من React Native
+          if (element.style.display === 'none' || element.getAttribute('aria-hidden') === 'true') {
             element.setAttribute('aria-hidden', 'true');
-            
-            // إخفاء الحاوية الأب أيضاً
+            // إخفاء الحاوية الأب إذا كانت موجودة
             const parent = element.parentElement;
-            if (parent && parent !== tabList) {
-              parent.style.display = 'none';
-              parent.style.width = '0';
-              parent.style.height = '0';
-              parent.style.margin = '0';
-              parent.style.padding = '0';
-            }
-          }
-        });
-        
-        // البحث عن الحاويات التي تحتوي على تبويبات مخفية
-        const containers = tabList.querySelectorAll('div');
-        containers.forEach((container) => {
-          const text = (container.textContent || '').toLowerCase();
-          if (text.includes('admin') || text.includes('setting') || text.includes('idmin')) {
-            const tabsInContainer = container.querySelectorAll('[role="tab"], button');
-            if (tabsInContainer.length > 0) {
-              const hasHiddenTab = Array.from(tabsInContainer).some(tab => {
-                const tabText = (tab.textContent || '').toLowerCase();
-                return tabText.includes('admin') || tabText.includes('setting') || tabText.includes('idmin');
-              });
-              if (hasHiddenTab) {
-                (container as HTMLElement).style.display = 'none';
+            if (parent && parent !== tabList && parent.tagName === 'DIV') {
+              const hasVisibleTabs = Array.from(parent.querySelectorAll('[role="tab"], button')).some(
+                t => (t as HTMLElement).style.display !== 'none' && (t as HTMLElement).getAttribute('aria-hidden') !== 'true'
+              );
+              if (!hasVisibleTabs) {
+                parent.setAttribute('aria-hidden', 'true');
               }
             }
           }
         });
       };
       
-      // تشغيل فوراً وبعد تحميل الصفحة
-      hideUnwantedTabs();
-      const intervals = [100, 300, 500, 1000, 2000];
-      intervals.forEach(delay => {
-        setTimeout(hideUnwantedTabs, delay);
+      // تشغيل بعد تحميل DOM
+      const timeoutId = setTimeout(hideHiddenTabs, 100);
+      
+      // مراقبة التغييرات في DOM بشكل محدود
+      const observer = new MutationObserver((mutations) => {
+        // التحقق من وجود تغييرات في tablist فقط
+        const hasTabListChanges = mutations.some(mutation => 
+          mutation.target === document.querySelector('[role="tablist"]') ||
+          (mutation.target as Element)?.closest('[role="tablist"]')
+        );
+        if (hasTabListChanges) {
+          hideHiddenTabs();
+        }
       });
       
-      // مراقبة التغييرات في DOM
-      const observer = new MutationObserver(() => {
-        hideUnwantedTabs();
-      });
-      observer.observe(document.body, {
-        childList: true,
-        subtree: true,
-        characterData: true,
-      });
+      const tabList = document.querySelector('[role="tablist"]');
+      if (tabList) {
+        observer.observe(tabList, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['style', 'aria-hidden'],
+        });
+      }
       
       return () => {
+        clearTimeout(timeoutId);
+        observer.disconnect();
         const styleToRemove = document.getElementById(styleId);
         if (styleToRemove) styleToRemove.remove();
-        observer.disconnect();
       };
     }
   }, [tabBarHeight, tabBarGap, tabBarPadding, tabPadding, tabMargin, maxContentWidth]);
@@ -259,41 +208,42 @@ export default function TabsLayout() {
         tabBarActiveTintColor: '#007AFF',
         tabBarInactiveTintColor: '#999',
         headerShown: false,
-        tabBarStyle: Platform.OS === 'web' ? {
-          backgroundColor: '#fff',
-          borderTopWidth: 1,
-          borderTopColor: '#e0e0e0',
-          height: tabBarHeight,
-          paddingBottom: responsive.isTablet() ? 8 : responsive.isSmallScreen() ? 4 : 6,
-          paddingTop: responsive.isTablet() ? 8 : responsive.isSmallScreen() ? 4 : 6,
-          paddingLeft: responsive.isTablet() ? 20 : 16,
-          paddingRight: responsive.isTablet() ? 20 : 16,
-          width: '100%',
-          maxWidth: responsive.isLargeScreen() ? responsive.getMaxContentWidth() : '100%',
-          marginLeft: responsive.isLargeScreen() ? 'auto' : 0,
-          marginRight: responsive.isLargeScreen() ? 'auto' : 0,
-          justifyContent: 'center',
-          alignItems: 'center',
-          gap: responsive.isTablet() ? 24 : 20,
-        } as any : {
-          backgroundColor: '#fff',
-          borderTopWidth: 1,
-          borderTopColor: '#e0e0e0',
-          height: tabBarHeight,
-          paddingBottom: responsive.isTablet() ? 8 : responsive.isSmallScreen() ? 4 : 6,
-          paddingTop: responsive.isTablet() ? 8 : responsive.isSmallScreen() ? 4 : 6,
-          paddingLeft: responsive.isTablet() ? 20 : 16,
-          paddingRight: responsive.isTablet() ? 20 : 16,
-          justifyContent: 'center',
-          alignItems: 'center',
-          ...createShadowStyle({
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: -2 },
-            shadowOpacity: 0.1,
-            shadowRadius: 8,
-            elevation: 8,
-          }),
-        },
+        tabBarStyle: (() => {
+          const baseStyle = {
+            backgroundColor: '#fff',
+            borderTopWidth: 1,
+            borderTopColor: '#e0e0e0',
+            height: tabBarHeight,
+            paddingBottom: responsive.isTablet() ? 8 : responsive.isSmallScreen() ? 4 : 6,
+            paddingTop: responsive.isTablet() ? 8 : responsive.isSmallScreen() ? 4 : 6,
+            paddingLeft: responsive.isTablet() ? 20 : 16,
+            paddingRight: responsive.isTablet() ? 20 : 16,
+            justifyContent: 'center' as const,
+            alignItems: 'center' as const,
+          };
+
+          if (Platform.OS === 'web') {
+            return {
+              ...baseStyle,
+              width: '100%',
+              maxWidth: responsive.isLargeScreen() ? responsive.getMaxContentWidth() : '100%',
+              marginLeft: responsive.isLargeScreen() ? 'auto' : 0,
+              marginRight: responsive.isLargeScreen() ? 'auto' : 0,
+              gap: responsive.isTablet() ? 24 : 20,
+            } as any;
+          }
+
+          return {
+            ...baseStyle,
+            ...createShadowStyle({
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: -2 },
+              shadowOpacity: 0.1,
+              shadowRadius: 8,
+              elevation: 8,
+            }),
+          };
+        })(),
         tabBarLabelStyle: {
           fontSize: tabBarFontSize,
           fontWeight: '600',
