@@ -40,20 +40,23 @@ export default function FloatingNotification({
   const [slideAnim] = useState(new Animated.Value(-200));
   const [opacityAnim] = useState(new Animated.Value(0));
 
+  // تعطيل useNativeDriver على الويب لأنه غير مدعوم
+  const useNativeDriver = Platform.OS !== 'web';
+
   useEffect(() => {
     if (visible && notification) {
       // إظهار الإشعار بانتقال سلس
       Animated.parallel([
         Animated.spring(slideAnim, {
           toValue: 0,
-          useNativeDriver: true,
+          useNativeDriver,
           tension: 50,
           friction: 7,
         }),
         Animated.timing(opacityAnim, {
           toValue: 1,
           duration: 300,
-          useNativeDriver: true,
+          useNativeDriver,
         }),
       ]).start();
 
@@ -69,16 +72,16 @@ export default function FloatingNotification({
         Animated.timing(slideAnim, {
           toValue: -200,
           duration: 300,
-          useNativeDriver: true,
+          useNativeDriver,
         }),
         Animated.timing(opacityAnim, {
           toValue: 0,
           duration: 300,
-          useNativeDriver: true,
+          useNativeDriver,
         }),
       ]).start();
     }
-  }, [visible, notification, slideAnim, opacityAnim]);
+  }, [visible, notification, slideAnim, opacityAnim, useNativeDriver]);
 
   const handleDismiss = async () => {
     if (notification) {

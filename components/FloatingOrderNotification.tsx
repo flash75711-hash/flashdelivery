@@ -46,12 +46,15 @@ export default function FloatingOrderNotification({
   const [slideAnim] = useState(new Animated.Value(-500));
   const [loading, setLoading] = useState(false);
 
+  // تعطيل useNativeDriver على الويب لأنه غير مدعوم
+  const useNativeDriver = Platform.OS !== 'web';
+
   useEffect(() => {
     if (visible && notification) {
       // إظهار الإشعار بانتقال سلس
       Animated.spring(slideAnim, {
         toValue: 0,
-        useNativeDriver: true,
+        useNativeDriver,
         tension: 50,
         friction: 7,
       }).start();
@@ -60,10 +63,10 @@ export default function FloatingOrderNotification({
       Animated.timing(slideAnim, {
         toValue: -500,
         duration: 300,
-        useNativeDriver: true,
+        useNativeDriver,
       }).start();
     }
-  }, [visible, notification, slideAnim]);
+  }, [visible, notification, slideAnim, useNativeDriver]);
 
   const handleAccept = async () => {
     if (!notification || !user) return;
