@@ -392,6 +392,22 @@ export default function AdminDashboardScreen() {
             </View>
             <Ionicons name="chevron-forward" size={24} color="#999" />
           </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.managementCard}
+            onPress={() => router.push('/(tabs)/admin/places-sync-settings')}
+          >
+            <View style={styles.managementInfo}>
+              <Ionicons name="sync" size={24} color="#4CAF50" />
+              <View style={styles.managementTextContainer}>
+                <Text style={styles.managementLabel}>إعدادات مزامنة الأماكن</Text>
+                <Text style={styles.managementDescription}>
+                  التحكم في التحديث التلقائي للأماكن لكل مدينة
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={24} color="#999" />
+          </TouchableOpacity>
         </View>
 
         {/* قسم إعدادات الطلبات */}

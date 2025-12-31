@@ -109,25 +109,37 @@ Deno.serve(async (req) => {
       );
     }
 
-    // مصطلحات البحث حسب النوع
+    // مصطلحات البحث حسب النوع - محسّنة لمدينة السادات
+    const isSadatCity = cityName.toLowerCase().includes('السادات') || cityName.toLowerCase().includes('sadat');
+    
     const searchTerms: { [key: string]: string[] } = {
-      mall: ['مول', 'mall', 'shopping center'],
-      market: ['سوق', 'market', 'سوبر ماركت'],
-      area: ['منطقة', 'حي', 'neighborhood'],
+      mall: isSadatCity 
+        ? ['مول', 'mall', 'shopping center', 'مركز تسوق', 'سوق تجاري']
+        : ['مول', 'mall', 'shopping center'],
+      market: isSadatCity
+        ? ['سوق', 'market', 'سوبر ماركت', 'سوبرماركت', 'بقالة', 'ميني ماركت']
+        : ['سوق', 'market', 'سوبر ماركت'],
+      area: isSadatCity
+        ? ['منطقة', 'حي', 'neighborhood', 'قطاع', 'شارع', 'طريق']
+        : ['منطقة', 'حي', 'neighborhood'],
     };
 
     const terms = searchTerms[placeType] || [];
     const allPlaces: any[] = [];
     const seenIds = new Set<string>();
 
+    // زيادة الحد الأقصى للنتائج لمدينة السادات
+    const limit = isSadatCity ? 30 : 15;
+    const delay = isSadatCity ? 500 : 1000; // تقليل التأخير لمدينة السادات
+
     // البحث عن كل مصطلح في Nominatim API
     for (const term of terms) {
       try {
         const query = `${term} ${cityName} مصر`;
-        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=15&accept-language=ar`;
+        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=${limit}&accept-language=ar`;
 
-        // تأخير لتجنب rate limit
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // تأخير لتجنب rate limit (أقل لمدينة السادات)
+        await new Promise(resolve => setTimeout(resolve, delay));
 
         const response = await fetch(url, {
           headers: {

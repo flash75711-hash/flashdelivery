@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>مزامنة مدينة السادات</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        .subtitle {
+            color: #666;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        .info {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            border-right: 4px solid #2196F3;
+        }
+        .info p {
+            margin: 5px 0;
+            color: #1976D2;
+            font-size: 14px;
+        }
+        .button {
+            width: 100%;
+            padding: 15px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-bottom: 10px;
+            transition: all 0.3s;
+        }
+        .button:hover {
+            background: #45a049;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        .button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .button.secondary {
+            background: #2196F3;
+        }
+        .button.secondary:hover {
+            background: #1976D2;
+        }
+        .results {
+            margin-top: 20px;
+            padding: 20px;
+            background: #f5f5f5;
+            border-radius: 10px;
+            display: none;
+        }
+        .results.show {
+            display: block;
+        }
+        .result-item {
+            padding: 10px;
+            margin: 5px 0;
+            background: white;
+            border-radius: 5px;
+            border-right: 4px solid #4CAF50;
+        }
+        .result-item.error {
+            border-right-color: #f44336;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #4CAF50;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .summary {
+            margin-top: 20px;
+            padding: 15px;
+            background: #4CAF50;
+            color: white;
+            border-radius: 10px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 مزامنة مدينة السادات</h1>
+        <p class="subtitle">مزامنة جميع أنواع الأماكن (مولات، أسواق، مناطق)</p>
+        
+        <div class="info">
+            <p><strong>📍 المدينة:</strong> السادات</p>
+            <p><strong>📦 الأنواع:</strong> مولات، أسواق، مناطق</p>
+            <p><strong>⚡ محسّنة:</strong> 30 نتيجة، 500ms delay</p>
+        </div>
+
+        <button class="button" id="syncAllBtn" onclick="syncAll()">
+            🔄 مزامنة جميع الأنواع
+        </button>
+        
+        <button class="button secondary" id="syncMallsBtn" onclick="syncType('mall')">
+            🏬 مزامنة المولات فقط
+        </button>
+        
+        <button class="button secondary" id="syncMarketsBtn" onclick="syncType('market')">
+            🛒 مزامنة الأسواق فقط
+        </button>
+        
+        <button class="button secondary" id="syncAreasBtn" onclick="syncType('area')">
+            🏘️ مزامنة المناطق فقط
+        </button>
+
+        <div class="results" id="results">
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>جاري المزامنة...</p>
+            </div>
+            <div id="resultItems"></div>
+            <div id="summary"></div>
+        </div>
+    </div>
+
+    <script>
+        const SUPABASE_URL = 'https://tnwrmybyvimlsamnputn.supabase.co';
+        const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRud3JteWJ5dmltbHNhbW5wdXRuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQxNDA1OTQsImV4cCI6MjA3OTcxNjU5NH0.Uaki5K4zkCt2P2JunTVCpME6WOKO_uX0Qe4Gy8QRreg';
+        const cityName = 'السادات';
+        const placeTypes = {
+            'mall': 'مولات',
+            'market': 'أسواق',
+            'area': 'مناطق'
+        };
+
+        function setLoading(loading) {
+            document.getElementById('loading').style.display = loading ? 'block' : 'none';
+            document.getElementById('resultItems').style.display = loading ? 'none' : 'block';
+            document.querySelectorAll('.button').forEach(btn => {
+                btn.disabled = loading;
+            });
+        }
+
+        function addResult(type, count, error = null) {
+            const items = document.getElementById('resultItems');
+            const div = document.createElement('div');
+            div.className = 'result-item' + (error ? ' error' : '');
+            div.innerHTML = error 
+                ? `❌ <strong>${placeTypes[type]}:</strong> ${error}`
+                : `✅ <strong>${placeTypes[type]}:</strong> ${count} مكان`;
+            items.appendChild(div);
+        }
+
+        function showSummary(total) {
+            const summary = document.getElementById('summary');
+            summary.className = 'summary';
+            summary.textContent = `✅ اكتملت المزامنة! المجموع: ${total} مكان`;
+        }
+
+        async function syncType(type) {
+            const resultsDiv = document.getElementById('results');
+            const itemsDiv = document.getElementById('resultItems');
+            resultsDiv.classList.add('show');
+            itemsDiv.innerHTML = '';
+            document.getElementById('summary').textContent = '';
+            setLoading(true);
+
+            try {
+                console.log(`🔄 مزامنة ${type}...`);
+                
+                const response = await fetch(`${SUPABASE_URL}/functions/v1/sync-places`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${ANON_KEY}`,
+                    },
+                    body: JSON.stringify({
+                        cityName,
+                        placeType: type,
+                    }),
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    const count = result.placesCount || 0;
+                    addResult(type, count);
+                    showSummary(count);
+                    console.log(`✅ تم مزامنة ${count} مكان`);
+                } else {
+                    throw new Error(result.error || 'Unknown error');
+                }
+            } catch (error) {
+                console.error(`❌ خطأ:`, error);
+                addResult(type, 0, error.message);
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        async function syncAll() {
+            const resultsDiv = document.getElementById('results');
+            const itemsDiv = document.getElementById('resultItems');
+            resultsDiv.classList.add('show');
+            itemsDiv.innerHTML = '';
+            document.getElementById('summary').textContent = '';
+            setLoading(true);
+
+            const results = {};
+            let total = 0;
+
+            for (const type of Object.keys(placeTypes)) {
+                try {
+                    console.log(`🔄 مزامنة ${type}...`);
+                    
+                    const response = await fetch(`${SUPABASE_URL}/functions/v1/sync-places`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${ANON_KEY}`,
+                        },
+                        body: JSON.stringify({
+                            cityName,
+                            placeType: type,
+                        }),
+                    });
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(`HTTP ${response.status}: ${errorText}`);
+                    }
+
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        const count = result.placesCount || 0;
+                        results[type] = count;
+                        total += count;
+                        addResult(type, count);
+                        console.log(`✅ تم مزامنة ${count} مكان`);
+                    } else {
+                        throw new Error(result.error || 'Unknown error');
+                    }
+                } catch (error) {
+                    console.error(`❌ خطأ في ${type}:`, error);
+                    results[type] = 0;
+                    addResult(type, 0, error.message);
+                }
+
+                // تأخير بين الأنواع
+                if (type !== Object.keys(placeTypes)[Object.keys(placeTypes).length - 1]) {
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                }
+            }
+
+            showSummary(total);
+            setLoading(false);
+        }
+    </script>
+</body>
+</html>
+

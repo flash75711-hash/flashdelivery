@@ -60,16 +60,25 @@ export default function DriverMyOrdersScreen() {
           text: 'نعم، قبول',
           onPress: async () => {
             try {
-              const { error } = await supabase
-                .from('orders')
-                .update({
+              // استخدام Edge Function لتحديث الطلب (لتجاوز RLS)
+              const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-order', {
+                body: {
+                  orderId: order.id,
                   status: 'accepted',
-                  driver_id: user?.id,
-                  negotiated_price: order.negotiated_price || order.total_fee,
-                })
-                .eq('id', order.id);
+                  driverId: user?.id,
+                  negotiatedPrice: order.negotiated_price || order.total_fee,
+                },
+              });
 
-              if (error) throw error;
+              if (edgeFunctionError) {
+                console.error('Error updating order via Edge Function:', edgeFunctionError);
+                throw edgeFunctionError;
+              }
+
+              if (!edgeFunctionData || !edgeFunctionData.success) {
+                console.error('Edge Function returned error:', edgeFunctionData?.error);
+                throw new Error(edgeFunctionData?.error || 'فشل قبول الطلب');
+              }
 
               // إشعار العميل
               if (order.customer_id) {
@@ -114,17 +123,26 @@ export default function DriverMyOrdersScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              // إذا كان الطلب مقبولاً، نعيده إلى pending ونزيل driver_id
+              // استخدام Edge Function لتحديث الطلب (لتجاوز RLS)
               if (order.status === 'accepted') {
-                const { error } = await supabase
-                  .from('orders')
-                  .update({
+                // إذا كان الطلب مقبولاً، نعيده إلى pending ونزيل driver_id
+                const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-order', {
+                  body: {
+                    orderId: order.id,
                     status: 'pending',
-                    driver_id: null,
-                  })
-                  .eq('id', order.id);
+                    driverId: null,
+                  },
+                });
 
-                if (error) throw error;
+                if (edgeFunctionError) {
+                  console.error('Error updating order via Edge Function:', edgeFunctionError);
+                  throw edgeFunctionError;
+                }
+
+                if (!edgeFunctionData || !edgeFunctionData.success) {
+                  console.error('Edge Function returned error:', edgeFunctionData?.error);
+                  throw new Error(edgeFunctionData?.error || 'فشل رفض الطلب');
+                }
 
                 // إشعار العميل
                 if (order.customer_id) {
@@ -138,12 +156,22 @@ export default function DriverMyOrdersScreen() {
                 }
               } else {
                 // للطلبات pending، نزيل driver_id فقط
-                const { error } = await supabase
-                  .from('orders')
-                  .update({ driver_id: null })
-                  .eq('id', order.id);
+                const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-order', {
+                  body: {
+                    orderId: order.id,
+                    driverId: null,
+                  },
+                });
 
-                if (error) throw error;
+                if (edgeFunctionError) {
+                  console.error('Error updating order via Edge Function:', edgeFunctionError);
+                  throw edgeFunctionError;
+                }
+
+                if (!edgeFunctionData || !edgeFunctionData.success) {
+                  console.error('Edge Function returned error:', edgeFunctionData?.error);
+                  throw new Error(edgeFunctionData?.error || 'فشل رفض الطلب');
+                }
               }
 
               Alert.alert('نجح', 'تم رفض الطلب');

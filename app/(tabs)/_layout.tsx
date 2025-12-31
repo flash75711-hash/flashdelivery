@@ -551,6 +551,12 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="admin/places-sync-settings"
+        options={{
+          tabBarButton: () => null, // إخفاء من الـ navbar
+        }}
+      />
+      <Tabs.Screen
         name="admin/users"
         options={{
           title: 'المستخدمين',

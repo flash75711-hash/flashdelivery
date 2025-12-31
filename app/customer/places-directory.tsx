@@ -651,9 +651,30 @@ export default function PlacesDirectoryScreen() {
 
       const { data: dbPlaces, error: dbError } = await query;
 
-      // التحقق من الحاجة للتحديث من API (كل أسبوع)
-      const oneWeekAgo = new Date();
-      oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+      // جلب إعدادات المزامنة للمدينة (إن وجدت)
+      let syncSettings: any = null;
+      if (cityName) {
+        try {
+          const { data: settingsData, error: settingsError } = await supabase
+            .from('places_sync_settings')
+            .select('*')
+            .eq('city_name', cityName)
+            .maybeSingle();
+          
+          if (!settingsError && settingsData) {
+            syncSettings = settingsData;
+          }
+        } catch (error) {
+          console.log('No sync settings found for city:', cityName, error);
+        }
+      }
+
+      // تحديد فترة التحديث من الإعدادات أو استخدام القيمة الافتراضية (7 أيام)
+      const syncIntervalDays = syncSettings?.sync_interval_days || 7;
+      const autoSyncEnabled = syncSettings?.auto_sync_enabled !== false; // افتراضياً true
+      
+      const syncIntervalAgo = new Date();
+      syncIntervalAgo.setDate(syncIntervalAgo.getDate() - syncIntervalDays);
       
       let needsApiUpdate = false;
       let cityPlaces: any[] = [];
@@ -676,16 +697,21 @@ export default function PlacesDirectoryScreen() {
           cityPlaces = dbPlaces;
         }
 
-        // التحقق إذا كانت الأماكن تحتاج تحديث (أكثر من أسبوع)
-        const needsUpdate = cityPlaces.some((place: any) => {
-          if (place.is_manual) return false; // الأماكن اليدوية لا تحتاج تحديث
-          if (!place.last_api_update) return true; // لم يتم تحديثها من قبل
-          return new Date(place.last_api_update) < oneWeekAgo;
-        });
+        // التحقق إذا كانت الأماكن تحتاج تحديث (حسب إعدادات المزامنة)
+        if (autoSyncEnabled) {
+          const needsUpdate = cityPlaces.some((place: any) => {
+            if (place.is_manual) return false; // الأماكن اليدوية لا تحتاج تحديث
+            if (!place.last_api_update) return true; // لم يتم تحديثها من قبل
+            return new Date(place.last_api_update) < syncIntervalAgo;
+          });
 
-        needsApiUpdate = cityPlaces.length === 0 || needsUpdate;
+          needsApiUpdate = cityPlaces.length === 0 || needsUpdate;
+        } else {
+          // إذا كان التحديث التلقائي معطلاً، لا نحتاج تحديث
+          needsApiUpdate = false;
+        }
       } else {
-        needsApiUpdate = true;
+        needsApiUpdate = autoSyncEnabled; // إذا لم توجد أماكن وكان التحديث التلقائي مفعّل
       }
 
       // إذا لم نجد أماكن أو تحتاج تحديث، نبحث في API
@@ -767,27 +793,34 @@ export default function PlacesDirectoryScreen() {
         return;
       }
 
-      // البحث عن الأماكن في المدينة باستخدام Edge Function (كل أسبوع)
+      // البحث عن الأماكن في المدينة باستخدام Edge Function
       const currentType = activeTab === 'malls' ? 'malls' : activeTab === 'markets' ? 'markets' : 'areas';
+      const placeType = currentType === 'malls' ? 'mall' : currentType === 'markets' ? 'market' : 'area';
       let apiPlaces: Place[] = [];
 
+      // التحقق من إعدادات المزامنة - هل يجب مزامنة هذا النوع من الأماكن؟
+      const shouldSyncType = !syncSettings || (
+        (placeType === 'mall' && syncSettings.sync_malls) ||
+        (placeType === 'market' && syncSettings.sync_markets) ||
+        (placeType === 'area' && syncSettings.sync_areas)
+      );
+
       // استدعاء Edge Function لجلب الأماكن من Nominatim API
-      if (cityName) {
+      if (cityName && shouldSyncType && autoSyncEnabled) {
         try {
           const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
           if (supabaseUrl) {
             const functionUrl = `${supabaseUrl}/functions/v1/sync-places`;
-            const { data: { session } } = await supabase.auth.getSession();
             
             const response = await fetch(functionUrl, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${session?.access_token || ''}`,
+                'apikey': process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '',
               },
               body: JSON.stringify({
                 cityName,
-                placeType: currentType === 'malls' ? 'mall' : currentType === 'markets' ? 'market' : 'area',
+                placeType: placeType,
               }),
             });
 

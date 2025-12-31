@@ -264,17 +264,26 @@ export default function DriverTripsScreen() {
   const handleAcceptOrder = async (order: any) => {
     setLoading(true);
     try {
-      const { error } = await supabase
-        .from('orders')
-        .update({
+      // استخدام Edge Function لتحديث الطلب (لتجاوز RLS)
+      const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-order', {
+        body: {
+          orderId: order.id,
           status: 'accepted',
-          driver_id: user?.id,
-          negotiation_status: 'accepted',
-          negotiated_price: order.total_fee,
-        })
-        .eq('id', order.id);
+          driverId: user?.id,
+          negotiationStatus: 'accepted',
+          negotiatedPrice: order.total_fee,
+        },
+      });
 
-      if (error) throw error;
+      if (edgeFunctionError) {
+        console.error('Error updating order via Edge Function:', edgeFunctionError);
+        throw edgeFunctionError;
+      }
+
+      if (!edgeFunctionData || !edgeFunctionData.success) {
+        console.error('Edge Function returned error:', edgeFunctionData?.error);
+        throw new Error(edgeFunctionData?.error || 'فشل قبول الطلب');
+      }
       
       // إرسال إشعار للعميل
       if (order.customer_id) {
@@ -357,12 +366,23 @@ export default function DriverTripsScreen() {
 
     setLoading(true);
     try {
-      const { error } = await supabase
-        .from('orders')
-        .update({ status: 'pickedUp' })
-        .eq('id', activeOrder.id);
+      // استخدام Edge Function لتحديث الطلب (لتجاوز RLS)
+      const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-order', {
+        body: {
+          orderId: activeOrder.id,
+          status: 'pickedUp',
+        },
+      });
 
-      if (error) throw error;
+      if (edgeFunctionError) {
+        console.error('Error updating order via Edge Function:', edgeFunctionError);
+        throw edgeFunctionError;
+      }
+
+      if (!edgeFunctionData || !edgeFunctionData.success) {
+        console.error('Edge Function returned error:', edgeFunctionData?.error);
+        throw new Error(edgeFunctionData?.error || 'فشل تحديث حالة الطلب');
+      }
       
       // إرسال إشعار للعميل
       if (activeOrder.customer_id) {
@@ -392,15 +412,24 @@ export default function DriverTripsScreen() {
 
     setLoading(true);
     try {
-      const { error } = await supabase
-        .from('orders')
-        .update({ 
+      // استخدام Edge Function لتحديث الطلب (لتجاوز RLS)
+      const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-order', {
+        body: {
+          orderId: activeOrder.id,
           status: 'completed',
-          completed_at: new Date().toISOString()
-        })
-        .eq('id', activeOrder.id);
+          completedAt: new Date().toISOString(),
+        },
+      });
 
-      if (error) throw error;
+      if (edgeFunctionError) {
+        console.error('Error updating order via Edge Function:', edgeFunctionError);
+        throw edgeFunctionError;
+      }
+
+      if (!edgeFunctionData || !edgeFunctionData.success) {
+        console.error('Edge Function returned error:', edgeFunctionData?.error);
+        throw new Error(edgeFunctionData?.error || 'فشل تحديث حالة الطلب');
+      }
 
       // إضافة المبلغ إلى محفظة السائق
       const commission = activeOrder.total_fee * 0.1;
