@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Platform,
   ScrollView,
+  RefreshControl,
 } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -126,6 +127,13 @@ export default function DriverTripsScreen() {
       };
     }
   }, [user]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadNewOrders();
+    await loadActiveOrder();
+    setRefreshing(false);
+  };
 
   const loadNewOrders = async () => {
     try {
@@ -487,7 +495,12 @@ export default function DriverTripsScreen() {
             <Ionicons name="arrow-back" size={24} color="#007AFF" />
           </TouchableOpacity>
         </View>
-        <ScrollView contentContainerStyle={styles.activeTripContainer}>
+        <ScrollView 
+          contentContainerStyle={styles.activeTripContainer}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+        >
           <OrderCard
             order={{
               ...activeOrder,
@@ -536,7 +549,12 @@ export default function DriverTripsScreen() {
         <Text style={styles.title}>{t('driver.newTrips')}</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView 
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
         {orders.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Ionicons name="time-outline" size={64} color="#999" />

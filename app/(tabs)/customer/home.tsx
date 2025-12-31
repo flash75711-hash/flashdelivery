@@ -7,6 +7,7 @@ import {
   SafeAreaView,
   Platform,
   ScrollView,
+  RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
@@ -90,10 +91,24 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
 export default function CustomerHomeScreen() {
   const router = useRouter();
   const { t } = useTranslation();
+  const [refreshing, setRefreshing] = useState(false);
   
   // Calculate tab bar padding for web
   const tabBarBottomPadding = Platform.OS === 'web' ? responsive.getTabBarBottomPadding() : 0;
   const styles = getStyles(tabBarBottomPadding);
+
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    // إعادة تحميل الموقع والإشعارات
+    // تحديث refreshKey لإجبار المكونات على إعادة التحميل
+    setRefreshKey(prev => prev + 1);
+    // انتظار قليل للسماح للمكونات بالتحديث
+    setTimeout(() => {
+      setRefreshing(false);
+    }, 1500);
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -101,11 +116,16 @@ export default function CustomerHomeScreen() {
         <Text style={styles.title}>{t('customer.home')}</Text>
       </View>
 
-      <CurrentLocationDisplay />
+      <CurrentLocationDisplay key={`location-${refreshKey}`} onManualRefresh={onRefresh} />
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView 
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
         {/* قسم الإشعارات */}
-        <NotificationCard />
+        <NotificationCard key={`notifications-${refreshKey}`} />
 
       <View>
         <TouchableOpacity
