@@ -235,18 +235,19 @@ export default function DeliverPackageScreen() {
         }
       }
 
-      let orderData: any;
+      // استخدام Edge Function لإنشاء الطلب (لتجاوز RLS)
+      let orderRequestData: any;
       
       if (deliveryMode === 'simple') {
         // الوضع البسيط: نقطة انطلاق + نقطة وصول
-        orderData = {
-          customer_id: user?.id,
-          pickup_address: pickupAddress,
-          delivery_address: deliveryAddress,
-          package_description: packageDescription,
+        orderRequestData = {
+          customerId: user?.id,
+          pickupAddress: pickupAddress,
+          deliveryAddress: deliveryAddress,
+          packageDescription: packageDescription,
           status: 'pending',
-          total_fee: estimatedFee,
-          order_type: 'package',
+          totalFee: estimatedFee,
+          orderType: 'package',
         };
       } else {
         // الوضع المتعدد: حفظ المسار كـ JSON
@@ -255,25 +256,33 @@ export default function DeliverPackageScreen() {
           description: point.description,
         }));
         
-        orderData = {
-          customer_id: user?.id,
-          pickup_address: deliveryPoints[0].address, // أول نقطة
-          delivery_address: deliveryPoints[deliveryPoints.length - 1].address, // آخر نقطة
-          package_description: packageDescription,
+        orderRequestData = {
+          customerId: user?.id,
+          pickupAddress: deliveryPoints[0].address, // أول نقطة
+          deliveryAddress: deliveryPoints[deliveryPoints.length - 1].address, // آخر نقطة
+          packageDescription: packageDescription,
           status: 'pending',
-          total_fee: estimatedFee,
-          order_type: 'package',
+          totalFee: estimatedFee,
+          orderType: 'package',
           items: route, // حفظ المسار الكامل في items
         };
       }
 
-      const { data, error } = await supabase
-        .from('orders')
-        .insert(orderData)
-        .select()
-        .single();
+      const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('create-order', {
+        body: orderRequestData,
+      });
 
-      if (error) throw error;
+      if (edgeFunctionError) {
+        console.error('Error creating order via Edge Function:', edgeFunctionError);
+        throw edgeFunctionError;
+      }
+
+      if (!edgeFunctionData || !edgeFunctionData.success) {
+        console.error('Edge Function returned error:', edgeFunctionData?.error);
+        throw new Error(edgeFunctionData?.error || 'فشل إنشاء الطلب');
+      }
+
+      const data = edgeFunctionData.order;
       
       // تحديد نقطة البحث عن السائقين
       let searchPoint: { lat: number; lon: number } | null = null;

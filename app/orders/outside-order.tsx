@@ -1144,26 +1144,33 @@ export default function OutsideOrderScreen() {
         .filter((images): images is string[] => images !== null)
         .flat();
       
-      // إنشاء طلب واحد يحتوي على المسار الكامل
-      const orderData = {
-        customer_id: user?.id,
-        vendor_id: null,
-        driver_id: null, // سيتم البحث عن سائق تلقائياً
-        items: routePoints, // حفظ المسار الكامل في items
-        status: 'pending', // دائماً pending حتى يظهر في قائمة الطلبات الجديدة ويتلقى السائق الإشعار
-        pickup_address: routePoints[0]?.address || 'نقطة الانطلاق', // أول نقطة
-        delivery_address: routePoints[routePoints.length - 1]?.address || customerAddressText, // آخر نقطة (عنوان العميل)
-        total_fee: selectedPrice, // استخدام السعر المختار
-        images: allImages.length > 0 ? allImages : null,
-        order_type: 'outside', // تحديد نوع الطلب كطلب من خارج
-      };
-      
-      const { data, error } = await supabase
-        .from('orders')
-        .insert(orderData)
-        .select();
+      // استخدام Edge Function لإنشاء الطلب (لتجاوز RLS)
+      const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('create-order', {
+        body: {
+          customerId: user?.id,
+          vendorId: null,
+          driverId: null, // سيتم البحث عن سائق تلقائياً
+          items: routePoints, // حفظ المسار الكامل في items
+          status: 'pending', // دائماً pending حتى يظهر في قائمة الطلبات الجديدة ويتلقى السائق الإشعار
+          pickupAddress: routePoints[0]?.address || 'نقطة الانطلاق', // أول نقطة
+          deliveryAddress: routePoints[routePoints.length - 1]?.address || customerAddressText, // آخر نقطة (عنوان العميل)
+          totalFee: selectedPrice, // استخدام السعر المختار
+          images: allImages.length > 0 ? allImages : null,
+          orderType: 'outside', // تحديد نوع الطلب كطلب من خارج
+        },
+      });
 
-      if (error) throw error;
+      if (edgeFunctionError) {
+        console.error('Error creating order via Edge Function:', edgeFunctionError);
+        throw edgeFunctionError;
+      }
+
+      if (!edgeFunctionData || !edgeFunctionData.success) {
+        console.error('Edge Function returned error:', edgeFunctionData?.error);
+        throw new Error(edgeFunctionData?.error || 'فشل إنشاء الطلب');
+      }
+
+      const data = [edgeFunctionData.order]; // تحويل إلى array للتوافق مع الكود الموجود
 
       // بدء البحث التلقائي عن السائقين
       // استخدام أبعد مكان كنقطة البحث

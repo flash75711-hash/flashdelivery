@@ -51,6 +51,7 @@ export default function DriverDashboardScreen() {
   const [checkingRegistration, setCheckingRegistration] = useState(true);
   const [showApprovalAlert, setShowApprovalAlert] = useState(false);
   const previousApprovalStatusRef = useRef<'pending' | 'approved' | 'rejected' | undefined>(undefined);
+  const hasShownApprovalAlertRef = useRef(false); // لمنع عرض رسالة التهنئة أكثر من مرة
   const [notifications, setNotifications] = useState<Array<{
     id: string;
     title: string;
@@ -65,6 +66,9 @@ export default function DriverDashboardScreen() {
   useEffect(() => {
     console.log('DriverDashboard: useEffect triggered, user:', user?.id);
     if (user) {
+      // إعادة تعيين flag عند تغيير المستخدم
+      hasShownApprovalAlertRef.current = false;
+      previousApprovalStatusRef.current = undefined;
       loadDriverStatus();
       loadDriverProfile();
       
@@ -135,10 +139,11 @@ export default function DriverDashboardScreen() {
 
         console.log('DriverDashboard: Polling - Current status:', profile?.approval_status, 'Previous ref:', previousApprovalStatusRef.current);
 
-        // إذا تغيرت الحالة من pending إلى approved
+        // إذا تغيرت الحالة من pending إلى approved ولم يتم عرض الرسالة من قبل
         if (
           profile?.approval_status === 'approved' &&
-          profile?.registration_complete
+          profile?.registration_complete &&
+          !hasShownApprovalAlertRef.current
         ) {
           // تمت الموافقة!
           console.log('DriverDashboard: ✅ Approval detected in polling!');
@@ -270,14 +275,16 @@ export default function DriverDashboardScreen() {
         const previousStatus = previousApprovalStatusRef.current;
         const currentStatus = profile.approval_status;
         
-        // فقط إذا كانت الحالة السابقة pending والحالة الحالية مختلفة
+        // فقط إذا كانت الحالة السابقة pending والحالة الحالية approved ولم يتم عرض الرسالة من قبل
         if (
           previousStatus === 'pending' &&
           currentStatus === 'approved' &&
-          profile.registration_complete
+          profile.registration_complete &&
+          !hasShownApprovalAlertRef.current
         ) {
           console.log('DriverDashboard: ✅ Approval detected in loadDriverProfile!');
-          // تمت الموافقة!
+          // تمت الموافقة! عرض الرسالة مرة واحدة فقط
+          hasShownApprovalAlertRef.current = true;
           await showSimpleAlert(
             '🎉 تهانينا!',
             'تمت الموافقة على تسجيلك بنجاح!\n\nابدأ رحلاتك الآن واستقبل الطلبات.',
@@ -307,18 +314,6 @@ export default function DriverDashboardScreen() {
       const isComplete = await isRegistrationComplete(user.id);
       console.log('DriverDashboard: Registration complete status:', isComplete);
       setRegistrationComplete(isComplete);
-      
-      // إذا تمت الموافقة، عرض رسالة التهنئة
-      if (profile?.approval_status === 'approved' && isComplete && !registrationComplete) {
-        setTimeout(async () => {
-          await showSimpleAlert(
-            '🎉 تهانينا!',
-            'تمت الموافقة على تسجيلك بنجاح!\n\nابدأ رحلاتك الآن واستقبل الطلبات.',
-            'success'
-          );
-          setShowApprovalAlert(false);
-        }, 500);
-      }
     } catch (error) {
       console.error('DriverDashboard: Error loading driver profile:', error);
       setDriverProfile(null);
