@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { Session, User as SupabaseUser } from '@supabase/supabase-js';
-import { supabase, getUserWithRole, getUserWithRoleFromSession, isRegistrationComplete, User, UserRole } from '@/lib/supabase';
+import { supabase, getUserWithRole, getUserWithRoleFromSession, isRegistrationComplete, User, UserRole, getUserFromLocalStorage } from '@/lib/supabase';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
@@ -199,6 +199,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         });
       } else {
+        // إذا لم يكن هناك session، نجرب localStorage (للمستخدمين الذين سجلوا دخولهم بـ PIN)
+        console.log('No session found, checking localStorage...');
+        const localUser = getUserFromLocalStorage();
+        if (localUser) {
+          console.log('Found user in localStorage, setting user state');
+          setUser(localUser);
+        }
         setLoading(false);
       }
     }).catch((error) => {
@@ -208,6 +215,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!mounted) return;
       
       console.error('Error loading session:', error);
+      // حتى في حالة الخطأ، نجرب localStorage
+      console.log('Checking localStorage as fallback...');
+      const localUser = getUserFromLocalStorage();
+      if (localUser) {
+        console.log('Found user in localStorage, setting user state');
+        setUser(localUser);
+      }
       setLoading(false);
     });
     
@@ -412,6 +426,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         phone: userData.phone,
       };
       
+      // حفظ بيانات المستخدم في localStorage (للاستعادة بعد إعادة التحميل)
+      if (typeof window !== 'undefined' && window.localStorage) {
+        try {
+          localStorage.setItem('flash_user', JSON.stringify(user));
+          console.log('✅ User saved to localStorage');
+        } catch (storageError) {
+          console.error('❌ Error saving user to localStorage:', storageError);
+        }
+      }
+      
       // تحديث user state مباشرة
       setUser(user);
       
@@ -446,12 +470,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log('signOut: Sign out successful, clearing state...');
       setUser(null);
       setSession(null);
+      
+      // مسح بيانات المستخدم من localStorage
+      if (typeof window !== 'undefined' && window.localStorage) {
+        try {
+          localStorage.removeItem('flash_user');
+          console.log('✅ User cleared from localStorage');
+        } catch (storageError) {
+          console.error('❌ Error clearing user from localStorage:', storageError);
+        }
+      }
+      
       console.log('signOut: State cleared');
     } catch (error: any) {
       console.error('signOut: Error in signOut:', error);
       // حتى لو فشل signOut من Supabase، نمسح الحالة المحلية
     setUser(null);
     setSession(null);
+      
+      // مسح بيانات المستخدم من localStorage حتى في حالة الخطأ
+      if (typeof window !== 'undefined' && window.localStorage) {
+        try {
+          localStorage.removeItem('flash_user');
+          console.log('✅ User cleared from localStorage (error case)');
+        } catch (storageError) {
+          console.error('❌ Error clearing user from localStorage:', storageError);
+        }
+      }
+      
       throw error;
     }
   };

@@ -3,7 +3,7 @@
  * شاشة التسجيل باستخدام رقم الموبايل و PIN
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -17,11 +17,12 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
-import { registerWithPin, formatPhone, isValidPhone, type UserRole } from '@/lib/pinAuth';
+import { registerWithPin, formatPhone, isValidPhone, checkPhoneExists, type UserRole } from '@/lib/pinAuth';
 import { showToast } from '@/lib/alert';
 import { vibrateError, vibrateSuccess } from '@/lib/vibration';
 import PinInput from '@/components/PinInput';
 import responsive from '@/utils/responsive';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function RegisterScreen() {
   const [phone, setPhone] = useState('');
@@ -30,8 +31,16 @@ export default function RegisterScreen() {
   const [selectedRole, setSelectedRole] = useState<UserRole>('customer');
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState<'role' | 'phone' | 'pin' | 'confirmPin'>('role');
+  const [checkingPhone, setCheckingPhone] = useState(false);
+  const [phoneExists, setPhoneExists] = useState(false);
+  const [phoneInvalid, setPhoneInvalid] = useState(false);
+  const [registrationComplete, setRegistrationComplete] = useState(false);
+  const checkTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const registrationCompleteRef = useRef(false);
+  const isRegisteringRef = useRef(false); // لمنع الاستدعاءات المتعددة
   const router = useRouter();
   const { t } = useTranslation();
+  const { loginWithPin } = useAuth();
   
   const styles = getStyles();
 
@@ -41,22 +50,146 @@ export default function RegisterScreen() {
     { value: 'vendor', label: 'مزود خدمة', icon: '🏪' },
   ];
 
+  // التحقق من وجود رقم الموبايل أثناء الإدخال (debounced)
+  // ملاحظة: التحقق من صحة الرقم يتم فقط عند الضغط على "متابعة"
+  useEffect(() => {
+    console.log('🔍 [useEffect] Phone check effect triggered', {
+      phone,
+      step,
+      registrationComplete,
+      registrationCompleteRef: registrationCompleteRef.current,
+    });
+
+    // لا نتحقق إذا تم التسجيل بنجاح
+    if (registrationComplete) {
+      console.log('⏭️ [useEffect] Skipping check - registrationComplete is true');
+      return;
+    }
+
+    // التحقق فقط عند خطوة phone
+    if (step !== 'phone') {
+      console.log('⏭️ [useEffect] Skipping check - step is not phone:', step);
+      return;
+    }
+
+    // إلغاء التحقق السابق إذا كان موجوداً
+    if (checkTimeoutRef.current) {
+      console.log('🛑 [useEffect] Clearing previous timeout');
+      clearTimeout(checkTimeoutRef.current);
+    }
+
+    // إعادة تعيين الحالة إذا كان الرقم فارغاً
+    if (!phone.trim()) {
+      console.log('⏭️ [useEffect] Skipping check - phone is empty');
+      setPhoneExists(false);
+      setCheckingPhone(false);
+      return;
+    }
+
+    // التحقق من صحة تنسيق الرقم قبل التحقق من الوجود
+    const formatted = formatPhone(phone);
+    const isValid = isValidPhone(formatted);
+
+    // إذا كان الرقم غير صحيح، لا نتحقق من الوجود
+    if (!isValid) {
+      console.log('⏭️ [useEffect] Skipping check - phone format is invalid');
+      setPhoneExists(false);
+      setCheckingPhone(false);
+      return;
+    }
+
+    // انتظار 800ms قبل التحقق من الوجود (debounce)
+    console.log('⏳ [useEffect] Setting timeout to check phone in 800ms');
+    setCheckingPhone(true);
+    checkTimeoutRef.current = setTimeout(async () => {
+      console.log('⏰ [setTimeout] Timeout executed, checking phone existence', {
+        phone,
+        registrationCompleteRef: registrationCompleteRef.current,
+      });
+
+      // التحقق من أن التسجيل لم يكتمل بعد (لتجنب التحقق بعد التسجيل الناجح)
+      // نستخدم ref للتحقق من القيمة الحالية وليس القيمة المقفلة
+      if (registrationCompleteRef.current) {
+        console.log('✅ [setTimeout] Skipping check - registration completed');
+        setCheckingPhone(false);
+        return;
+      }
+      
+      try {
+        console.log('🔎 [setTimeout] Calling checkPhoneExists...');
+        const exists = await checkPhoneExists(phone);
+        console.log('📊 [setTimeout] checkPhoneExists result:', exists);
+        
+        // التحقق مرة أخرى بعد استدعاء checkPhoneExists (قد يكون التسجيل اكتمل أثناء الانتظار)
+        if (registrationCompleteRef.current) {
+          console.log('✅ [setTimeout] Registration completed during check, skipping result');
+          setCheckingPhone(false);
+          return;
+        }
+        
+        console.log('📝 [setTimeout] Setting phoneExists to:', exists);
+        setPhoneExists(exists);
+        if (exists) {
+          console.log('❌ [setTimeout] Phone exists, showing error toast');
+          vibrateError();
+          showToast('رقم الموبايل مسجل بالفعل', 'error');
+        } else {
+          console.log('✅ [setTimeout] Phone does not exist, registration can proceed');
+        }
+      } catch (error) {
+        console.error('❌ [setTimeout] Error checking phone:', error);
+        // لا نحدث الحالة إذا كان التسجيل قد اكتمل
+        if (!registrationCompleteRef.current) {
+          setPhoneExists(false);
+        }
+      } finally {
+        if (!registrationCompleteRef.current) {
+          setCheckingPhone(false);
+        }
+      }
+    }, 800);
+
+    // تنظيف عند إلغاء التحميل
+    return () => {
+      if (checkTimeoutRef.current) {
+        clearTimeout(checkTimeoutRef.current);
+      }
+    };
+  }, [phone, step, registrationComplete]);
+
   const handleRoleSelect = (role: UserRole) => {
     setSelectedRole(role);
     setStep('phone');
   };
 
-  const handlePhoneSubmit = () => {
+  const handlePhoneSubmit = async () => {
     if (!phone.trim()) {
       showToast('الرجاء إدخال رقم الموبايل', 'warning');
+      vibrateError();
       return;
     }
 
-    if (!isValidPhone(phone)) {
+    const formatted = formatPhone(phone);
+    if (!isValidPhone(formatted)) {
+      setPhoneInvalid(true);
       showToast('رقم الموبايل غير صحيح', 'error');
+      vibrateError();
       return;
     }
 
+    // التحقق من وجود الرقم قبل المتابعة
+    if (checkingPhone) {
+      showToast('جاري التحقق من الرقم...', 'info');
+      return;
+    }
+
+    if (phoneExists) {
+      showToast('رقم الموبايل مسجل بالفعل', 'error');
+      vibrateError();
+      return;
+    }
+
+    setPhoneInvalid(false);
     setStep('pin');
   };
 
@@ -78,12 +211,32 @@ export default function RegisterScreen() {
       return;
     }
 
+    // منع الاستدعاء إذا كان التسجيل قيد التنفيذ
+    if (isRegisteringRef.current || loading) {
+      console.log('⏸️ [handleConfirmPinComplete] Registration already in progress, skipping');
+      return;
+    }
+
     await handleRegister();
   };
 
   const handleRegister = async () => {
-    if (!phone.trim() || !isValidPhone(phone)) {
-      showToast('الرجاء إدخال رقم الموبايل صحيح', 'warning');
+    // منع الاستدعاءات المتعددة
+    if (isRegisteringRef.current || loading) {
+      console.log('⏸️ [handleRegister] Registration already in progress, skipping');
+      return;
+    }
+
+    if (!phone.trim()) {
+      showToast('الرجاء إدخال رقم الموبايل', 'warning');
+      return;
+    }
+
+    const formatted = formatPhone(phone);
+    if (!isValidPhone(formatted)) {
+      setPhoneInvalid(true);
+      showToast('رقم الموبايل غير صحيح', 'error');
+      vibrateError();
       return;
     }
 
@@ -98,35 +251,112 @@ export default function RegisterScreen() {
       return;
     }
 
+    console.log('🚀 [handleRegister] Starting registration', {
+      phone,
+      role: selectedRole,
+      registrationCompleteBefore: registrationComplete,
+      registrationCompleteRefBefore: registrationCompleteRef.current,
+      isRegisteringBefore: isRegisteringRef.current,
+    });
+
+    // تعيين flag لمنع الاستدعاءات المتعددة
+    isRegisteringRef.current = true;
     setLoading(true);
+    // منع التحقق من وجود الرقم بعد بدء التسجيل
+    setRegistrationComplete(true);
+    registrationCompleteRef.current = true; // تحديث ref أيضاً
+    console.log('🔒 [handleRegister] Set registrationComplete to true');
+
+    // إلغاء أي تحقق قيد التنفيذ
+    if (checkTimeoutRef.current) {
+      console.log('🛑 [handleRegister] Clearing pending phone check timeout');
+      clearTimeout(checkTimeoutRef.current);
+      checkTimeoutRef.current = null;
+    }
+    setCheckingPhone(false);
+    setPhoneExists(false);
 
     try {
+      console.log('📞 [handleRegister] Calling registerWithPin...');
       const result = await registerWithPin(phone, pin, selectedRole);
+      console.log('📊 [handleRegister] registerWithPin result:', {
+        success: result.success,
+        hasUser: !!result.user,
+        error: result.error,
+      });
 
       if (result.success && result.user) {
+        console.log('✅ [handleRegister] Registration successful, showing success toast');
         vibrateSuccess();
         showToast('تم إنشاء الحساب بنجاح', 'success');
         
-        // التنقل لصفحة تسجيل الدخول
-        setTimeout(() => {
-          router.replace('/(auth)/login');
-        }, 1000);
+        // تسجيل الدخول تلقائياً بعد إنشاء الحساب
+        try {
+          console.log('🔐 [handleRegister] Attempting auto-login...');
+          await loginWithPin({
+            id: result.user.id,
+            phone: result.user.phone,
+            role: result.user.role,
+            full_name: result.user.full_name || null,
+            email: result.user.email || null,
+          });
+          console.log('✅ [handleRegister] Auto-login successful, navigating to tabs');
+          
+          // التنقل للصفحة الرئيسية حسب دور المستخدم
+          // لا نعيد تعيين isRegisteringRef هنا لأننا سنترك الصفحة
+          setTimeout(() => {
+            console.log('🧭 [handleRegister] Navigating to /(tabs)');
+            router.replace('/(tabs)');
+          }, 500);
+          // لا نعيد تعيين isRegisteringRef هنا لأننا سنترك الصفحة
+          return; // خروج مبكر بعد النجاح
+        } catch (loginError: any) {
+          console.error('❌ [handleRegister] Auto-login error:', loginError);
+          // إذا فشل تسجيل الدخول التلقائي، نوجه المستخدم لصفحة تسجيل الدخول
+          showToast('تم إنشاء الحساب. يرجى تسجيل الدخول', 'info');
+          setTimeout(() => {
+            router.replace('/(auth)/login');
+          }, 1000);
+          // لا نعيد تعيين isRegisteringRef هنا لأننا سنترك الصفحة
+          return; // خروج مبكر
+        }
       } else {
+        console.log('❌ [handleRegister] Registration failed:', result.error);
+        // إعادة تفعيل التحقق إذا فشل التسجيل
+        setRegistrationComplete(false);
+        registrationCompleteRef.current = false; // تحديث ref أيضاً
+        isRegisteringRef.current = false; // إعادة تعيين flag
+        console.log('🔓 [handleRegister] Reset registrationComplete and isRegistering to false');
         vibrateError();
         showToast(result.error || 'فشل إنشاء الحساب', 'error');
       }
     } catch (error: any) {
-      console.error('Registration error:', error);
+      console.error('❌ [handleRegister] Registration exception:', error);
+      // إعادة تفعيل التحقق إذا فشل التسجيل
+      setRegistrationComplete(false);
+      registrationCompleteRef.current = false; // تحديث ref أيضاً
+      isRegisteringRef.current = false; // إعادة تعيين flag
+      console.log('🔓 [handleRegister] Reset registrationComplete and isRegistering to false (exception)');
       vibrateError();
       showToast(error.message || 'حدث خطأ أثناء التسجيل', 'error');
     } finally {
       setLoading(false);
+      // لا نعيد تعيين isRegisteringRef هنا إذا كان التسجيل نجح (لأننا سنترك الصفحة)
+      // ولكن إذا فشل، نعيد تعيينه في الـ catch/else blocks
     }
   };
 
   const handleBack = () => {
     if (step === 'phone') {
+      console.log('🔙 [handleBack] Resetting phone step, clearing registrationComplete');
       setStep('role');
+      setPhone('');
+      setPhoneExists(false);
+      setPhoneInvalid(false);
+      setCheckingPhone(false);
+      setRegistrationComplete(false);
+      registrationCompleteRef.current = false; // تحديث ref أيضاً
+      isRegisteringRef.current = false; // إعادة تعيين flag
     } else if (step === 'pin') {
       setStep('phone');
     } else if (step === 'confirmPin') {
@@ -187,22 +417,52 @@ export default function RegisterScreen() {
 
             <View style={styles.inputContainer}>
               <TextInput
-                style={styles.input}
+                style={[
+                  styles.input,
+                  phoneExists && styles.inputError,
+                  checkingPhone && styles.inputChecking,
+                  phoneInvalid && styles.inputError,
+                ]}
                 placeholder="رقم الموبايل (مثال: 01234567890)"
                 value={phone}
-                onChangeText={setPhone}
+                onChangeText={(text) => {
+                  const cleaned = text.replace(/\D/g, '');
+                  setPhone(cleaned);
+                  setPhoneExists(false);
+                  setPhoneInvalid(false);
+                }}
                 keyboardType="phone-pad"
                 placeholderTextColor="#999"
                 textAlign="right"
                 autoFocus
                 onSubmitEditing={handlePhoneSubmit}
+                maxLength={15}
               />
+              {checkingPhone && !phoneInvalid && (
+                <View style={styles.checkingContainer}>
+                  <ActivityIndicator size="small" color="#007AFF" />
+                  <Text style={styles.checkingText}>جاري التحقق...</Text>
+                </View>
+              )}
+              {phoneInvalid && (
+                <View style={styles.errorContainer}>
+                  <Text style={styles.errorText}>⚠️ رقم الموبايل غير صحيح</Text>
+                </View>
+              )}
+              {phoneExists && !checkingPhone && !phoneInvalid && (
+                <View style={styles.errorContainer}>
+                  <Text style={styles.errorText}>⚠️ رقم الموبايل مسجل بالفعل</Text>
+                </View>
+              )}
             </View>
 
             <TouchableOpacity
-              style={[styles.button, loading && styles.buttonDisabled]}
+              style={[
+                styles.button,
+                (loading || !phone.trim() || phoneExists || phoneInvalid || checkingPhone) && styles.buttonDisabled,
+              ]}
               onPress={handlePhoneSubmit}
-              disabled={loading}
+              disabled={loading || !phone.trim() || phoneExists || phoneInvalid || checkingPhone}
             >
               <Text style={styles.buttonText}>متابعة</Text>
             </TouchableOpacity>
@@ -374,6 +634,30 @@ const getStyles = () => StyleSheet.create({
     fontSize: responsive.getResponsiveFontSize(16),
     borderWidth: 1,
     borderColor: '#e0e0e0',
+  },
+  inputError: {
+    borderColor: '#FF3B30',
+    backgroundColor: '#FFF5F5',
+  },
+  inputChecking: {
+    borderColor: '#007AFF',
+  },
+  checkingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    gap: 8,
+  },
+  checkingText: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#007AFF',
+  },
+  errorContainer: {
+    marginTop: 8,
+  },
+  errorText: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#FF3B30',
   },
   phoneDisplayContainer: {
     alignItems: 'center',

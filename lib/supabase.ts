@@ -108,6 +108,49 @@ export async function getUserWithRoleFromSession(session: { user: any } | null):
   }
 }
 
+// حفظ بيانات المستخدم في localStorage (للمستخدمين الذين سجلوا دخولهم بـ PIN)
+export function saveUserToLocalStorage(user: User): void {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      localStorage.setItem('flash_user', JSON.stringify(user));
+      console.log('✅ User saved to localStorage');
+    } catch (error) {
+      console.error('❌ Error saving user to localStorage:', error);
+    }
+  }
+}
+
+// استعادة بيانات المستخدم من localStorage
+export function getUserFromLocalStorage(): User | null {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      const userStr = localStorage.getItem('flash_user');
+      if (userStr) {
+        const user = JSON.parse(userStr) as User;
+        console.log('✅ User restored from localStorage:', user.id);
+        return user;
+      }
+    } catch (error) {
+      console.error('❌ Error reading user from localStorage:', error);
+      // في حالة خطأ، نمسح البيانات التالفة
+      localStorage.removeItem('flash_user');
+    }
+  }
+  return null;
+}
+
+// مسح بيانات المستخدم من localStorage
+export function clearUserFromLocalStorage(): void {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      localStorage.removeItem('flash_user');
+      console.log('✅ User cleared from localStorage');
+    } catch (error) {
+      console.error('❌ Error clearing user from localStorage:', error);
+    }
+  }
+}
+
 // جلب معلومات المستخدم مع الدور
 export async function getUserWithRole(): Promise<User | null> {
   console.log('getUserWithRole: Starting...');
@@ -182,10 +225,23 @@ export async function getUserWithRole(): Promise<User | null> {
       
       if (getUserError) {
         console.error('getUserWithRole: Error getting user:', getUserError);
+        // إذا فشل getUser، نجرب localStorage (للمستخدمين الذين سجلوا دخولهم بـ PIN)
+        console.log('getUserWithRole: Trying localStorage as fallback...');
+        const localUser = getUserFromLocalStorage();
+        if (localUser) {
+          console.log('getUserWithRole: Found user in localStorage');
+          return localUser;
+        }
         return null;
       }
       if (!user) {
-        console.log('getUserWithRole: No user found');
+        console.log('getUserWithRole: No user found, trying localStorage...');
+        // إذا لم يكن هناك user، نجرب localStorage (للمستخدمين الذين سجلوا دخولهم بـ PIN)
+        const localUser = getUserFromLocalStorage();
+        if (localUser) {
+          console.log('getUserWithRole: Found user in localStorage');
+          return localUser;
+        }
         return null;
       }
 
@@ -232,10 +288,24 @@ export async function getUserWithRole(): Promise<User | null> {
       }
     } catch (getUserError) {
       console.error('getUserWithRole: Error in getUser fallback:', getUserError);
+      // إذا فشل كل شيء، نجرب localStorage (للمستخدمين الذين سجلوا دخولهم بـ PIN)
+      console.log('getUserWithRole: Trying localStorage as final fallback...');
+      const localUser = getUserFromLocalStorage();
+      if (localUser) {
+        console.log('getUserWithRole: Found user in localStorage');
+        return localUser;
+      }
       return null;
     }
   } catch (error) {
     console.error('getUserWithRole: Unexpected error:', error);
+    // إذا فشل كل شيء، نجرب localStorage (للمستخدمين الذين سجلوا دخولهم بـ PIN)
+    console.log('getUserWithRole: Trying localStorage as final fallback (catch)...');
+    const localUser = getUserFromLocalStorage();
+    if (localUser) {
+      console.log('getUserWithRole: Found user in localStorage');
+      return localUser;
+    }
     return null;
   }
 }

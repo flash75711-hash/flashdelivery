@@ -214,17 +214,21 @@ export async function loginWithPin(
 
 /**
  * التسجيل بحساب جديد
+ * يحاول استخدام Edge Function أولاً، ثم يتراجع إلى الطريقة القديمة
  */
 export async function registerWithPin(
   phone: string,
   pin: string,
   role: UserRole
 ): Promise<PinAuthResult> {
+  console.log('📝 [registerWithPin] Starting registration', { phone, role, pinLength: pin.length });
   try {
     const formattedPhone = formatPhone(phone);
+    console.log('📝 [registerWithPin] Formatted phone:', formattedPhone);
     
     // التحقق من صحة المدخلات
     if (!isValidPhone(formattedPhone)) {
+      console.log('❌ [registerWithPin] Invalid phone format');
       return {
         success: false,
         error: 'رقم الموبايل غير صحيح',
@@ -232,6 +236,7 @@ export async function registerWithPin(
     }
     
     if (!isValidPin(pin)) {
+      console.log('❌ [registerWithPin] Invalid PIN format');
       return {
         success: false,
         error: 'رمز PIN يجب أن يكون 6 أرقام',
@@ -239,23 +244,112 @@ export async function registerWithPin(
     }
     
     if (!['customer', 'driver', 'vendor'].includes(role)) {
+      console.log('❌ [registerWithPin] Invalid role');
       return {
         success: false,
         error: 'نوع الحساب غير صحيح',
       };
     }
+
+    // محاولة استخدام Edge Function أولاً
+    try {
+      console.log('🌐 [registerWithPin] Attempting to use Edge Function...');
+      const { data, error: functionError } = await supabase.functions.invoke('register-user', {
+        body: {
+          phone: formattedPhone,
+          pin: pin,
+          role: role,
+        },
+      });
+
+      console.log('📊 [registerWithPin] Edge Function response:', {
+        hasData: !!data,
+        success: data?.success,
+        hasUser: !!data?.user,
+        error: data?.error || functionError?.message,
+      });
+
+      if (!functionError && data && data.success) {
+        console.log('✅ [registerWithPin] Edge Function registration successful');
+        return {
+          success: true,
+          user: {
+            id: data.user.id,
+            phone: data.user.phone,
+            role: data.user.role,
+          },
+        };
+      }
+
+      // إذا كان الخطأ بسبب رقم موجود بالفعل، نرجع الخطأ مباشرة
+      if (data && !data.success && data.error) {
+        console.log('❌ [registerWithPin] Edge Function returned error:', data.error);
+        return {
+          success: false,
+          error: data.error,
+        };
+      }
+
+      // إذا فشل Edge Function، نتابع بالطريقة القديمة
+      console.warn('⚠️ [registerWithPin] Edge Function failed, falling back to direct registration:', functionError || data?.error);
+    } catch (functionError: any) {
+      // Edge Function غير متاح أو فشل، نتابع بالطريقة القديمة
+      console.warn('⚠️ [registerWithPin] Edge Function not available, using direct registration:', functionError);
+    }
     
-    // التحقق من وجود المستخدم
-    const { data: existingProfile } = await supabase
+    // التحقق من وجود المستخدم في profiles
+    // نستخدم maybeSingle بدلاً من single لتجنب الأخطاء إذا لم يوجد المستخدم
+    const { data: existingProfile, error: profileCheckError } = await supabase
       .from('profiles')
-      .select('id, phone')
+      .select('id, phone, pin_hash, role')
       .eq('phone', formattedPhone)
-      .single();
+      .maybeSingle();
     
+    // إذا كان هناك خطأ في التحقق (مثل RLS)، نحاول المتابعة ولكن بحذر
+    if (profileCheckError && profileCheckError.code !== 'PGRST116') {
+      // PGRST116 يعني "no rows found" وهو طبيعي
+      // أي خطأ آخر قد يكون مشكلة RLS أو مشكلة أخرى
+      console.warn('Error checking existing profile:', profileCheckError);
+      // نتابع المحاولة ولكن سنتعامل مع الأخطاء لاحقاً
+    }
+    
+    // إذا كان هناك profile موجود بنفس رقم الهاتف
     if (existingProfile) {
+      // إذا كان لديه PIN hash، فهذا يعني أنه مسجل بالكامل
+      if (existingProfile.pin_hash) {
+        return {
+          success: false,
+          error: 'رقم الموبايل مسجل بالفعل',
+        };
+      }
+      // إذا كان موجوداً ولكن بدون PIN، فهذا يعني أنه حساب قديم أو غير مكتمل
+      // يمكننا محاولة تحديثه
+      console.log('Existing profile found without PIN, attempting to update:', existingProfile.id);
+      const pinHash = await hashPin(pin);
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({
+          pin_hash: pinHash,
+          role: role,
+          status: 'active',
+          failed_attempts: 0,
+          locked_until: null,
+        })
+        .eq('id', existingProfile.id);
+
+      if (updateError) {
+        console.error('Error updating existing profile:', updateError);
+        return { success: false, error: 'فشل تحديث الملف الشخصي الموجود.' };
+      }
+
+      // بعد التحديث، نرجع بيانات المستخدم مباشرة
       return {
-        success: false,
-        error: 'رقم الموبايل مسجل بالفعل',
+        success: true,
+        user: {
+          id: existingProfile.id,
+          phone: formattedPhone,
+          role: role,
+        },
       };
     }
     
@@ -275,6 +369,216 @@ export async function registerWithPin(
     
     if (authError) {
       console.error('Auth signup error:', authError);
+
+      // إذا كان الخطأ بسبب وجود user موجود بالفعل
+      if (authError.code === 'user_already_registered' ||
+          authError.message?.includes('already registered') ||
+          authError.message?.includes('already exists') ||
+          authError.message?.includes('User already registered')) {
+        
+        console.log('User already exists in auth.users, attempting to handle...');
+        
+        // أولاً، نتحقق من وجود profile بنفس phone (الأولوية للـ phone)
+        const { data: existingProfileByPhone } = await supabase
+          .from('profiles')
+          .select('id, phone, pin_hash, email')
+          .eq('phone', formattedPhone)
+          .maybeSingle();
+
+        if (existingProfileByPhone) {
+          // Profile موجود بنفس phone
+          if (existingProfileByPhone.pin_hash) {
+            return {
+              success: false,
+              error: 'رقم الموبايل مسجل بالفعل',
+            };
+          }
+          // Profile موجود بدون PIN، نحدثه
+          console.log('Found existing profile by phone without PIN, updating...');
+          const { error: updateError } = await supabase
+            .from('profiles')
+            .update({
+              pin_hash: pinHash,
+              role: role,
+              status: 'active',
+              failed_attempts: 0,
+              locked_until: null,
+            })
+            .eq('id', existingProfileByPhone.id);
+
+          if (updateError) {
+            console.error('Profile update error (by phone):', updateError);
+            return { success: false, error: 'فشل تحديث الملف الشخصي.' };
+          }
+
+          return {
+            success: true,
+            user: {
+              id: existingProfileByPhone.id,
+              phone: formattedPhone,
+              role: role,
+            },
+          };
+        }
+
+        // إذا لم نجد profile بنفس phone، نبحث عن profile بنفس email
+        const { data: existingProfileByEmail } = await supabase
+          .from('profiles')
+          .select('id, phone, email, pin_hash')
+          .eq('email', tempEmail)
+          .maybeSingle();
+
+        if (existingProfileByEmail) {
+          // Profile موجود بنفس email
+          // التحقق من أن رقم الموبايل غير مستخدم من قبل مستخدم آخر
+          if (existingProfileByEmail.phone && existingProfileByEmail.phone !== formattedPhone) {
+            return {
+              success: false,
+              error: 'رقم الموبايل مسجل بالفعل',
+            };
+          }
+
+          // تحديث profile
+          console.log('Found existing profile by email, updating...');
+          const { error: profileUpdateError } = await supabase
+            .from('profiles')
+            .update({
+              phone: formattedPhone,
+              pin_hash: pinHash,
+              role: role,
+              status: 'active',
+              failed_attempts: 0,
+              locked_until: null,
+            })
+            .eq('id', existingProfileByEmail.id);
+
+          if (profileUpdateError) {
+            console.error('Profile update error (by email):', profileUpdateError);
+            return {
+              success: false,
+              error: 'فشل تحديث الملف الشخصي. يرجى المحاولة مرة أخرى',
+            };
+          }
+
+          return {
+            success: true,
+            user: {
+              id: existingProfileByEmail.id,
+              phone: formattedPhone,
+              role: role,
+            },
+          };
+        }
+
+        // User موجود في auth.users لكن لا يوجد profile
+        // نحاول تسجيل الدخول للحصول على user ID
+        // ملاحظة: هذا قد يفشل إذا كان password مختلف (PIN مختلف)
+        console.log('User exists in auth.users but no profile found, attempting sign in...');
+        try {
+          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+            email: tempEmail,
+            password: pinHash,
+          });
+
+          if (signInError) {
+            // إذا فشل تسجيل الدخول، قد يكون بسبب PIN مختلف
+            // في هذه الحالة، نحاول تحديث password في auth.users أولاً
+            console.warn('Sign in failed, user may have different PIN:', signInError);
+            
+            // نحاول تحديث password في auth.users
+            // ملاحظة: هذا يتطلب service role key أو Edge Function
+            // في الوقت الحالي، نرجع رسالة خطأ واضحة
+            return {
+              success: false,
+              error: 'الحساب موجود لكن لا يمكن الوصول إليه. يرجى المحاولة مرة أخرى أو الاتصال بالدعم',
+            };
+          }
+
+          if (!signInData?.user?.id) {
+            return {
+              success: false,
+              error: 'فشل الحصول على معلومات المستخدم. يرجى المحاولة مرة أخرى',
+            };
+          }
+
+          const userId = signInData.user.id;
+
+          // التحقق من وجود profile بعد تسجيل الدخول (قد يكون تم إنشاؤه بواسطة trigger)
+          const { data: existingProfileById } = await supabase
+            .from('profiles')
+            .select('id, phone, pin_hash')
+            .eq('id', userId)
+            .maybeSingle();
+
+          if (existingProfileById) {
+            // Profile موجود، نحدثه
+            console.log('Found profile after sign in, updating...');
+            const { error: profileUpdateError } = await supabase
+              .from('profiles')
+              .update({
+                phone: formattedPhone,
+                pin_hash: pinHash,
+                role: role,
+                status: 'active',
+                failed_attempts: 0,
+                locked_until: null,
+              })
+              .eq('id', userId);
+
+            if (profileUpdateError) {
+              console.error('Profile update error (after sign in):', profileUpdateError);
+              await supabase.auth.signOut();
+              return {
+                success: false,
+                error: 'فشل تحديث الملف الشخصي. يرجى المحاولة مرة أخرى',
+              };
+            }
+          } else {
+            // Profile غير موجود، ننشئه
+            console.log('No profile found after sign in, creating new profile...');
+            const { error: profileError } = await supabase
+              .from('profiles')
+              .insert({
+                id: userId,
+                phone: formattedPhone,
+                pin_hash: pinHash,
+                role: role,
+                status: 'active',
+                failed_attempts: 0,
+                locked_until: null,
+                email: tempEmail,
+              });
+
+            if (profileError) {
+              console.error('Profile creation error (after sign in):', profileError);
+              await supabase.auth.signOut();
+              return {
+                success: false,
+                error: 'فشل إنشاء الملف الشخصي. يرجى المحاولة مرة أخرى',
+              };
+            }
+          }
+
+          // تسجيل الخروج بعد إنشاء/تحديث profile
+          await supabase.auth.signOut();
+
+          return {
+            success: true,
+            user: {
+              id: userId,
+              phone: formattedPhone,
+              role: role,
+            },
+          };
+        } catch (error: any) {
+          console.error('Error handling existing user:', error);
+          return {
+            success: false,
+            error: 'حدث خطأ أثناء معالجة الحساب الموجود. يرجى المحاولة مرة أخرى',
+          };
+        }
+      }
+
       return {
         success: false,
         error: authError.message || 'فشل إنشاء الحساب. يرجى المحاولة مرة أخرى',
@@ -290,32 +594,69 @@ export async function registerWithPin(
       };
     }
     
-    // إنشاء profile
-    const { error: profileError } = await supabase
+    // التحقق من وجود profile (قد يكون تم إنشاؤه تلقائياً بواسطة trigger)
+    const { data: existingProfileById } = await supabase
       .from('profiles')
-      .insert({
-        id: userId,
-        phone: formattedPhone,
-        pin_hash: pinHash,
-        role: role,
-        status: 'active',
-        failed_attempts: 0,
-        locked_until: null,
-        email: tempEmail,
-      });
+      .select('id, phone')
+      .eq('id', userId)
+      .maybeSingle();
     
-    if (profileError) {
-      console.error('Profile creation error:', profileError);
-      // محاولة حذف user من auth إذا فشل إنشاء profile
-      try {
-        await supabase.auth.admin.deleteUser(userId);
-      } catch (deleteError) {
-        console.error('Error deleting user:', deleteError);
+    if (existingProfileById) {
+      // Profile موجود بالفعل (تم إنشاؤه بواسطة trigger)، نحدثه
+      const { error: profileUpdateError } = await supabase
+        .from('profiles')
+        .update({
+          phone: formattedPhone,
+          pin_hash: pinHash,
+          role: role,
+          status: 'active',
+          failed_attempts: 0,
+          locked_until: null,
+          email: tempEmail,
+        })
+        .eq('id', userId);
+      
+      if (profileUpdateError) {
+        console.error('Profile update error:', profileUpdateError);
+        // محاولة حذف user من auth إذا فشل تحديث profile
+        try {
+          await supabase.auth.admin.deleteUser(userId);
+        } catch (deleteError) {
+          console.error('Error deleting user:', deleteError);
+        }
+        return {
+          success: false,
+          error: 'فشل تحديث الملف الشخصي. يرجى المحاولة مرة أخرى',
+        };
       }
-      return {
-        success: false,
-        error: 'فشل إنشاء الملف الشخصي. يرجى المحاولة مرة أخرى',
-      };
+    } else {
+      // إنشاء profile جديد
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .insert({
+          id: userId,
+          phone: formattedPhone,
+          pin_hash: pinHash,
+          role: role,
+          status: 'active',
+          failed_attempts: 0,
+          locked_until: null,
+          email: tempEmail,
+        });
+      
+      if (profileError) {
+        console.error('Profile creation error:', profileError);
+        // محاولة حذف user من auth إذا فشل إنشاء profile
+        try {
+          await supabase.auth.admin.deleteUser(userId);
+        } catch (deleteError) {
+          console.error('Error deleting user:', deleteError);
+        }
+        return {
+          success: false,
+          error: 'فشل إنشاء الملف الشخصي. يرجى المحاولة مرة أخرى',
+        };
+      }
     }
     
     return {
@@ -383,6 +724,86 @@ export async function checkAccountLock(phone: string): Promise<{
   } catch (error) {
     console.error('Check lock error:', error);
     return { locked: false };
+  }
+}
+
+/**
+ * التحقق من وجود رقم الموبايل في قاعدة البيانات
+ * يحاول استخدام Edge Function أولاً، ثم يتراجع إلى الطريقة القديمة
+ */
+export async function checkPhoneExists(phone: string): Promise<boolean> {
+  console.log('📞 [checkPhoneExists] Checking phone existence:', phone);
+  try {
+    const formattedPhone = formatPhone(phone);
+    console.log('📞 [checkPhoneExists] Formatted phone:', formattedPhone);
+
+    if (!isValidPhone(formattedPhone)) {
+      console.log('❌ [checkPhoneExists] Phone format is invalid');
+      return false;
+    }
+
+    // محاولة استخدام Edge Function أولاً
+    try {
+      console.log('🌐 [checkPhoneExists] Attempting to use Edge Function...');
+      const { data, error: functionError } = await supabase.functions.invoke('check-phone', {
+        body: {
+          phone: formattedPhone,
+        },
+      });
+
+      if (!functionError && data && data.success !== undefined) {
+        console.log('✅ [checkPhoneExists] Edge Function result:', data.exists);
+        return data.exists === true;
+      }
+
+      // إذا فشل Edge Function، نتابع بالطريقة القديمة
+      console.warn('⚠️ [checkPhoneExists] Edge Function failed, falling back to direct check:', functionError || data?.error);
+    } catch (functionError: any) {
+      // Edge Function غير متاح أو فشل، نتابع بالطريقة القديمة
+      console.warn('⚠️ [checkPhoneExists] Edge Function not available, using direct check:', functionError);
+    }
+
+    // الطريقة القديمة: التحقق المباشر من قاعدة البيانات
+    console.log('🔍 [checkPhoneExists] Using direct database check...');
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, pin_hash')
+      .eq('phone', formattedPhone)
+      .maybeSingle();
+
+    // PGRST116 يعني "no rows found" وهو طبيعي (الرقم غير موجود)
+    if (error) {
+      if (error.code === 'PGRST116') {
+        // الرقم غير موجود
+        console.log('✅ [checkPhoneExists] Phone does not exist (PGRST116)');
+        return false;
+      }
+      
+      // أي خطأ آخر قد يكون مشكلة RLS أو مشكلة أخرى
+      console.warn('⚠️ [checkPhoneExists] Error checking phone existence:', error);
+      
+      // في حالة خطأ RLS (406 أو PGRST301)، نعتبر أن الرقم غير موجود
+      // لتجنب منع التسجيل، ولكن هذا قد يسبب مشاكل إذا كان الرقم موجوداً بالفعل
+      if (error.code === 'PGRST301' || 
+          error.message?.includes('406') || 
+          error.message?.includes('Not Acceptable')) {
+        console.warn('⚠️ [checkPhoneExists] RLS error, assuming phone does not exist to allow registration');
+        return false;
+      }
+      
+      // لأخطاء أخرى، نعتبر أن الرقم غير موجود لتجنب منع التسجيل
+      console.log('✅ [checkPhoneExists] Assuming phone does not exist due to error');
+      return false;
+    }
+
+    // نتحقق من وجود PIN hash أيضاً (لأن الحساب يجب أن يكون مكتملاً)
+    const exists = !!(data && data.pin_hash);
+    console.log('📊 [checkPhoneExists] Final result:', exists, data ? { hasData: true, hasPinHash: !!data.pin_hash } : { hasData: false });
+    return exists;
+  } catch (error) {
+    console.error('❌ [checkPhoneExists] Exception:', error);
+    // في حالة خطأ غير متوقع، نعتبر أن الرقم غير موجود
+    return false;
   }
 }
 
