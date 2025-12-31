@@ -407,50 +407,24 @@ export default function DriverDashboardScreen() {
     if (!user || !isOnline) return;
 
     try {
-      // البحث عن سجل موجود بدون order_id
-      const { data: existingLocation, error: findError } = await supabase
-        .from('driver_locations')
-        .select('id')
-        .eq('driver_id', user.id)
-        .is('order_id', null)
-        .maybeSingle();
-      
-      if (findError && findError.code !== 'PGRST116') {
-        // PGRST116 = no rows returned (هذا طبيعي)
-        console.error('Error finding existing location:', findError);
+      // استخدام Edge Function لتحديث الموقع (لتجاوز RLS)
+      const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-driver-location', {
+        body: {
+          driverId: user.id,
+          latitude: location.lat,
+          longitude: location.lon,
+          orderId: null, // بدون طلب نشط
+        },
+      });
+
+      if (edgeFunctionError) {
+        console.error('Error updating driver location via Edge Function:', edgeFunctionError);
+        return;
       }
 
-      if (existingLocation) {
-        // تحديث السجل الموجود
-        const { error: locationError } = await supabase
-          .from('driver_locations')
-          .update({
-            latitude: location.lat,
-            longitude: location.lon,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', existingLocation.id);
-
-        if (locationError) {
-          console.error('Error updating driver location:', locationError);
-          return;
-        }
-      } else {
-        // إضافة سجل جديد
-        const { error: locationError } = await supabase
-          .from('driver_locations')
-          .insert({
-            driver_id: user.id,
-            order_id: null, // بدون طلب نشط
-            latitude: location.lat,
-            longitude: location.lon,
-            updated_at: new Date().toISOString(),
-          });
-
-        if (locationError) {
-          console.error('Error inserting driver location:', locationError);
-          return;
-        }
+      if (!edgeFunctionData || !edgeFunctionData.success) {
+        console.error('Edge Function returned error:', edgeFunctionData?.error);
+        return;
       }
 
       console.log('✅ Driver location updated in DB:', { lat: location.lat, lon: location.lon, address: location.address });

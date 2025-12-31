@@ -73,7 +73,12 @@ export async function uploadImageToImgBB(
     }
 
     // تحويل الصورة إلى base64
+    console.log('🔄 [ImgBB] Converting image to base64...', {
+      uriType: imageUri instanceof File ? 'File' : typeof imageUri,
+      uriLength: imageUri instanceof File ? imageUri.size : (typeof imageUri === 'string' ? imageUri.length : 0),
+    });
     const base64String = await imageToBase64(imageUri);
+    console.log('✅ [ImgBB] Image converted to base64, length:', base64String.length);
 
     // محاولة استخدام Supabase Client أولاً (يتعامل مع CORS تلقائياً)
     try {
@@ -89,6 +94,10 @@ export async function uploadImageToImgBB(
       }
 
       if (data && data.success && data.url) {
+        console.log('✅ [ImgBB] Image uploaded successfully via Supabase Client:', {
+          url: data.url.substring(0, 50) + '...',
+          format: data.format || format,
+        });
         return data.url;
       } else {
         throw new Error(data?.error || 'Upload failed');
@@ -131,6 +140,10 @@ export async function uploadImageToImgBB(
       const result = await uploadResponse.json();
 
       if (result.success && result.url) {
+        console.log('✅ [ImgBB] Image uploaded successfully via direct fetch:', {
+          url: result.url.substring(0, 50) + '...',
+          format: result.format || format,
+        });
         return result.url;
       } else {
         throw new Error(result.error || 'Upload failed');

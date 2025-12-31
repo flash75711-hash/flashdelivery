@@ -130,40 +130,45 @@ export default function AdminDriversScreen() {
       console.log('AdminDrivers: Approving driver:', driverId);
       setProcessingDriverId(driverId);
       try {
-        const { data: { user } } = await supabase.auth.getUser();
-        console.log('AdminDrivers: Current user:', user?.id);
-        
-        const { data, error } = await supabase
-          .from('profiles')
-          .update({ 
+        // استخدام Edge Function لتجاوز RLS
+        console.log('🌐 [AdminDrivers] Calling Edge Function update-driver-profile to approve driver...', {
+          driverId,
+          approval_status: 'approved',
+          registration_complete: true,
+          status: 'active',
+        });
+
+        const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-driver-profile', {
+          body: {
+            userId: driverId,
             approval_status: 'approved',
             registration_complete: true,
-            status: 'active'
-          })
-          .eq('id', driverId)
-          .select();
+            status: 'active',
+          },
+        });
 
-        console.log('AdminDrivers: Update result:', { data, error, driverId });
+        console.log('📥 [AdminDrivers] Edge Function response received:', {
+          hasData: !!edgeFunctionData,
+          success: edgeFunctionData?.success,
+          hasError: !!edgeFunctionError,
+          errorMessage: edgeFunctionError?.message || edgeFunctionData?.error,
+          profileId: edgeFunctionData?.profile?.id,
+        });
 
-        if (error) {
-          console.error('AdminDrivers: Update error details:', {
-            message: error.message,
-            code: error.code,
-            details: error.details,
-            hint: error.hint
-          });
-          throw error;
+        if (edgeFunctionError) {
+          console.error('❌ [AdminDrivers] Edge Function error:', edgeFunctionError);
+          throw edgeFunctionError;
         }
-        
-        if (!data || data.length === 0) {
-          console.warn('AdminDrivers: No rows updated - check RLS policies');
-          throw new Error('لم يتم تحديث أي صفوف. يرجى التحقق من الصلاحيات.');
+
+        if (!edgeFunctionData || !edgeFunctionData.success) {
+          console.error('❌ [AdminDrivers] Edge Function returned error:', edgeFunctionData?.error);
+          throw new Error(edgeFunctionData?.error || 'فشل الموافقة على السائق');
         }
-        
-        console.log('AdminDrivers: Driver approved successfully, updated rows:', data.length);
+
+        console.log('AdminDrivers: Driver approved successfully via Edge Function');
         
         // إرسال إشعار للإدارة عن الموافقة على السائق
-        const driverName = data[0]?.full_name || 'سائق';
+        const driverName = edgeFunctionData.profile?.full_name || 'سائق';
         await notifyAllAdmins(
           'تم الموافقة على سائق',
           `تم الموافقة على السائق ${driverName} بنجاح.`,
@@ -228,36 +233,40 @@ export default function AdminDriversScreen() {
       console.log('AdminDrivers: Rejecting driver:', driverId);
       setProcessingDriverId(driverId);
       try {
-        const { data: { user } } = await supabase.auth.getUser();
-        console.log('AdminDrivers: Current user:', user?.id);
-        
-        const { data, error } = await supabase
-          .from('profiles')
-          .update({ 
+        // استخدام Edge Function لتجاوز RLS
+        console.log('🌐 [AdminDrivers] Calling Edge Function update-driver-profile to reject driver...', {
+          driverId,
+          approval_status: 'rejected',
+          registration_complete: false,
+        });
+
+        const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-driver-profile', {
+          body: {
+            userId: driverId,
             approval_status: 'rejected',
-            registration_complete: false
-          })
-          .eq('id', driverId)
-          .select();
+            registration_complete: false,
+          },
+        });
 
-        console.log('AdminDrivers: Reject result:', { data, error, driverId });
+        console.log('📥 [AdminDrivers] Edge Function response received:', {
+          hasData: !!edgeFunctionData,
+          success: edgeFunctionData?.success,
+          hasError: !!edgeFunctionError,
+          errorMessage: edgeFunctionError?.message || edgeFunctionData?.error,
+          profileId: edgeFunctionData?.profile?.id,
+        });
 
-        if (error) {
-          console.error('AdminDrivers: Reject error details:', {
-            message: error.message,
-            code: error.code,
-            details: error.details,
-            hint: error.hint
-          });
-          throw error;
+        if (edgeFunctionError) {
+          console.error('❌ [AdminDrivers] Edge Function error:', edgeFunctionError);
+          throw edgeFunctionError;
         }
-        
-        if (!data || data.length === 0) {
-          console.warn('AdminDrivers: No rows updated - check RLS policies');
-          throw new Error('لم يتم تحديث أي صفوف. يرجى التحقق من الصلاحيات.');
+
+        if (!edgeFunctionData || !edgeFunctionData.success) {
+          console.error('❌ [AdminDrivers] Edge Function returned error:', edgeFunctionData?.error);
+          throw new Error(edgeFunctionData?.error || 'فشل رفض السائق');
         }
-        
-        console.log('AdminDrivers: Driver rejected successfully, updated rows:', data.length);
+
+        console.log('AdminDrivers: Driver rejected successfully via Edge Function');
         
         if (Platform.OS === 'web') {
           window.alert('تم الرفض\nتم رفض تسجيل السائق');

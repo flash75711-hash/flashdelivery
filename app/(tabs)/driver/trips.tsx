@@ -19,7 +19,7 @@ import { getCurrentLocation, requestLocationPermission } from '@/lib/webUtils';
 import responsive, { createShadowStyle } from '@/utils/responsive';
 import { createNotification } from '@/lib/notifications';
 import OrderCard from '@/components/OrderCard';
-import { showSimpleAlert } from '@/lib/alert';
+import { showSimpleAlert, showToast } from '@/lib/alert';
 
 interface Order {
   id: string;
@@ -50,6 +50,7 @@ export default function DriverTripsScreen() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const { t } = useTranslation();
   const router = useRouter();
   
@@ -129,10 +130,21 @@ export default function DriverTripsScreen() {
   }, [user]);
 
   const onRefresh = async () => {
+    console.log('🔄 [Pull to Refresh] Driver trips refresh started');
     setRefreshing(true);
-    await loadNewOrders();
-    await loadActiveOrder();
-    setRefreshing(false);
+    try {
+      await loadNewOrders();
+      console.log('✅ [Pull to Refresh] New orders loaded');
+      await loadActiveOrder();
+      console.log('✅ [Pull to Refresh] Active order loaded');
+      showToast('تم تحديث الطلبات', 'success');
+    } catch (error) {
+      console.error('❌ [Pull to Refresh] Error during refresh:', error);
+      showToast('حدث خطأ أثناء التحديث', 'error');
+    } finally {
+      console.log('✅ [Pull to Refresh] Driver trips refresh completed');
+      setRefreshing(false);
+    }
   };
 
   const loadNewOrders = async () => {
@@ -301,17 +313,32 @@ export default function DriverTripsScreen() {
     // بدء تتبع الموقع كل 5 ثوانٍ
     locationIntervalRef.current = setInterval(async () => {
       try {
+        if (!user?.id) return;
+        
         const location = await getCurrentLocation({
           enableHighAccuracy: true,
           timeout: 5000,
         });
-      await supabase.from('driver_locations').upsert({
-        driver_id: user?.id,
-        order_id: orderId,
-          latitude: location.latitude,
-          longitude: location.longitude,
-        updated_at: new Date().toISOString(),
-      });
+        
+        // استخدام Edge Function لتحديث الموقع (لتجاوز RLS)
+        const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-driver-location', {
+          body: {
+            driverId: user.id,
+            latitude: location.latitude,
+            longitude: location.longitude,
+            orderId: orderId,
+          },
+        });
+
+        if (edgeFunctionError) {
+          console.error('Error updating driver location via Edge Function:', edgeFunctionError);
+          return;
+        }
+
+        if (!edgeFunctionData || !edgeFunctionData.success) {
+          console.error('Edge Function returned error:', edgeFunctionData?.error);
+          return;
+        }
       } catch (error) {
         console.error('Error updating driver location:', error);
       }

@@ -18,10 +18,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { pickImage } from '@/lib/webUtils';
 import { notifyAllAdmins } from '@/lib/notifications';
 import { showSimpleAlert } from '@/lib/alert';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function CompleteDriverRegistration() {
   const { phone: phoneParam, email } = useLocalSearchParams<{ phone?: string; email?: string }>();
   const router = useRouter();
+  const { user } = useAuth();
   
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState(phoneParam || '');
@@ -43,7 +45,6 @@ export default function CompleteDriverRegistration() {
   useEffect(() => {
     const loadExistingProfile = async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
           setLoadingProfile(false);
           return;
@@ -88,12 +89,9 @@ export default function CompleteDriverRegistration() {
           }
         }
 
-        // إذا لم يكن هناك phone في profile، جرب من phoneParam أو auth.user
-        if (!profile?.phone && !phoneParam) {
-          const { data: { user: authUser } } = await supabase.auth.getUser();
-          if (authUser?.phone) {
-            setPhone(authUser.phone);
-          }
+        // إذا لم يكن هناك phone في profile، جرب من phoneParam أو user
+        if (!profile?.phone && !phoneParam && user?.phone) {
+          setPhone(user.phone);
         }
       } catch (error) {
         console.error('Error loading existing profile:', error);
@@ -103,7 +101,7 @@ export default function CompleteDriverRegistration() {
     };
 
     loadExistingProfile();
-  }, [phoneParam]);
+  }, [phoneParam, user]);
 
   const handlePickImage = async (type: 'idCard' | 'selfie') => {
     try {
@@ -133,8 +131,14 @@ export default function CompleteDriverRegistration() {
   };
 
   const uploadImage = async (uri: string, type: 'idCard' | 'selfie'): Promise<string> => {
-    const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('المستخدم غير موجود');
+
+    console.log(`📤 [Image Upload] Starting upload for ${type}...`, {
+      userId: user.id,
+      uriLength: uri.length,
+      isBlob: uri.startsWith('blob:'),
+      isDataUrl: uri.startsWith('data:'),
+    });
 
     // تحديث حالة الرفع
     setUploadProgress(prev => ({
@@ -147,14 +151,20 @@ export default function CompleteDriverRegistration() {
       // الصورة تم تحويلها بالفعل إلى WebP في pickImage
       const imageUrl = await uploadImageToImgBB(uri, 'webp');
       
+      console.log(`✅ [Image Upload] ${type} uploaded successfully:`, {
+        url: imageUrl.substring(0, 50) + '...',
+        fullUrl: imageUrl,
+      });
+      
       // تحديث حالة النجاح
       setUploadProgress(prev => ({
         ...prev,
         [type]: { uploading: false, uploaded: true },
       }));
     
-    return imageUrl;
+      return imageUrl;
     } catch (error: any) {
+      console.error(`❌ [Image Upload] ${type} upload failed:`, error);
       // تحديث حالة الخطأ
       setUploadProgress(prev => ({
         ...prev,
@@ -182,7 +192,6 @@ export default function CompleteDriverRegistration() {
     setLoading(true);
     setUploading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         throw new Error('المستخدم غير موجود');
       }
@@ -197,40 +206,166 @@ export default function CompleteDriverRegistration() {
 
       if (needsIdCardUpload || needsSelfieUpload) {
         setUploading(true);
+        console.log('📤 [Driver Registration] Starting image uploads...', {
+          needsIdCardUpload,
+          needsSelfieUpload,
+        });
         
         const uploadPromises = [];
         if (needsIdCardUpload) {
-          uploadPromises.push(uploadImage(idCardImage, 'idCard').then(url => { idCardUrl = url; }));
+          uploadPromises.push(
+            uploadImage(idCardImage, 'idCard').then(url => {
+              idCardUrl = url;
+              console.log('✅ [Driver Registration] ID Card uploaded successfully:', url.substring(0, 50) + '...');
+            })
+          );
         }
         if (needsSelfieUpload) {
-          uploadPromises.push(uploadImage(selfieImage, 'selfie').then(url => { selfieUrl = url; }));
+          uploadPromises.push(
+            uploadImage(selfieImage, 'selfie').then(url => {
+              selfieUrl = url;
+              console.log('✅ [Driver Registration] Selfie uploaded successfully:', url.substring(0, 50) + '...');
+            })
+          );
         }
 
         await Promise.all(uploadPromises);
-      setUploading(false);
+        setUploading(false);
+        console.log('✅ [Driver Registration] All images uploaded successfully');
 
         // رسالة نجاح بعد رفع الصور (فقط إذا تم رفع صور جديدة)
         if (uploadPromises.length > 0) {
           await showSimpleAlert('✅ نجح الرفع', 'تم رفع الصور بنجاح! جاري حفظ البيانات...', 'success');
         }
+      } else {
+        console.log('ℹ️ [Driver Registration] Images already uploaded, using existing URLs');
       }
 
       // تحديث ملف المستخدم مع وضع حالة المراجعة
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({
-          full_name: fullName,
-          phone: phone,
-          id_card_image_url: idCardUrl,
-          selfie_image_url: selfieUrl,
-          approval_status: 'pending', // في انتظار المراجعة
-          registration_complete: false, // لن يتم تفعيله حتى الموافقة
-        })
-        .eq('id', user.id);
+      console.log('💾 [Driver Registration] Starting database update...', {
+        userId: user.id,
+        fullName,
+        phone,
+        idCardUrl: idCardUrl.substring(0, 50) + '...',
+        selfieUrl: selfieUrl.substring(0, 50) + '...',
+      });
 
-      if (profileError) throw profileError;
+      // استخدام Edge Function لتحديث البيانات (لتجاوز RLS)
+      console.log('🌐 [Driver Registration] Calling Edge Function update-driver-profile...', {
+        userId: user.id,
+        fullName,
+        phone,
+        hasIdCardUrl: !!idCardUrl,
+        hasSelfieUrl: !!selfieUrl,
+      });
+
+      try {
+        const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-driver-profile', {
+          body: {
+            userId: user.id,
+            full_name: fullName,
+            phone: phone,
+            id_card_image_url: idCardUrl,
+            selfie_image_url: selfieUrl,
+            approval_status: 'pending',
+            registration_complete: false,
+          },
+        });
+
+        console.log('📥 [Driver Registration] Edge Function response received:', {
+          hasData: !!edgeFunctionData,
+          success: edgeFunctionData?.success,
+          hasError: !!edgeFunctionError,
+          errorMessage: edgeFunctionError?.message || edgeFunctionData?.error,
+        });
+
+        if (edgeFunctionError) {
+          console.error('❌ [Driver Registration] Edge Function error:', edgeFunctionError);
+          throw edgeFunctionError;
+        }
+
+        if (!edgeFunctionData || !edgeFunctionData.success) {
+          console.error('❌ [Driver Registration] Edge Function returned error:', edgeFunctionData?.error);
+          throw new Error(edgeFunctionData?.error || 'فشل تحديث البيانات');
+        }
+
+        console.log('✅ [Driver Registration] Database update successful via Edge Function:', {
+          profile: edgeFunctionData.profile ? {
+            id: edgeFunctionData.profile.id,
+            full_name: edgeFunctionData.profile.full_name,
+            phone: edgeFunctionData.profile.phone,
+            hasIdCard: !!edgeFunctionData.profile.id_card_image_url,
+            hasSelfie: !!edgeFunctionData.profile.selfie_image_url,
+            approval_status: edgeFunctionData.profile.approval_status,
+          } : null,
+        });
+      } catch (edgeError: any) {
+        console.error('❌ [Driver Registration] Edge Function failed, trying direct update...', {
+          error: edgeError.message || edgeError,
+          errorType: edgeError.constructor?.name,
+        });
+        
+        // Fallback: محاولة التحديث المباشر (قد يفشل بسبب RLS)
+        const { data: updateData, error: profileError } = await supabase
+          .from('profiles')
+          .update({
+            full_name: fullName,
+            phone: phone,
+            id_card_image_url: idCardUrl,
+            selfie_image_url: selfieUrl,
+            approval_status: 'pending',
+            registration_complete: false,
+          })
+          .eq('id', user.id)
+          .select();
+
+        if (profileError) {
+          console.error('❌ [Driver Registration] Direct update also failed:', profileError);
+          throw new Error(profileError.message || 'فشل تحديث البيانات. يرجى المحاولة مرة أخرى');
+        }
+
+        // التحقق من أن التحديث نجح فعلياً
+        if (!updateData || updateData.length === 0) {
+          console.error('❌ [Driver Registration] Direct update returned 0 rows - RLS may be blocking');
+          throw new Error('فشل تحديث البيانات بسبب قيود الأمان. يرجى المحاولة مرة أخرى أو الاتصال بالدعم');
+        }
+
+        console.log('✅ [Driver Registration] Database update successful via direct update:', {
+          updatedRows: updateData.length,
+          data: updateData[0] ? {
+            id: updateData[0].id,
+            full_name: updateData[0].full_name,
+            phone: updateData[0].phone,
+            hasIdCard: !!updateData[0].id_card_image_url,
+            hasSelfie: !!updateData[0].selfie_image_url,
+            approval_status: updateData[0].approval_status,
+          } : null,
+        });
+      }
+
+      // التحقق من أن البيانات تم حفظها بشكل صحيح
+      console.log('🔍 [Driver Registration] Verifying saved data...');
+      const { data: verifyData, error: verifyError } = await supabase
+        .from('profiles')
+        .select('id, full_name, phone, id_card_image_url, selfie_image_url, approval_status')
+        .eq('id', user.id)
+        .single();
+
+      if (verifyError) {
+        console.error('❌ [Driver Registration] Verification failed:', verifyError);
+      } else {
+        console.log('✅ [Driver Registration] Data verification successful:', {
+          id: verifyData.id,
+          full_name: verifyData.full_name,
+          phone: verifyData.phone,
+          idCardUrl: verifyData.id_card_image_url ? verifyData.id_card_image_url.substring(0, 50) + '...' : 'null',
+          selfieUrl: verifyData.selfie_image_url ? verifyData.selfie_image_url.substring(0, 50) + '...' : 'null',
+          approval_status: verifyData.approval_status,
+        });
+      }
 
       // إرسال إشعار لجميع المديرين عن تسجيل سائق جديد
+      console.log('📧 [Driver Registration] Sending notification to admins...');
       await notifyAllAdmins(
         'سائق جديد ينتظر المراجعة',
         `سائق جديد (${fullName || phone}) أكمل التسجيل وهو في انتظار المراجعة.`,
@@ -243,6 +378,7 @@ export default function CompleteDriverRegistration() {
         'تم إرسال طلبك للمراجعة!\n\nسيقوم المدير بمراجعة بياناتك والمستندات المرفوعة.\nستتلقى إشعاراً عند الموافقة على طلبك.',
         'info'
       );
+      console.log('✅ [Driver Registration] Registration completed successfully, navigating to dashboard');
       router.replace('/(tabs)/driver/dashboard');
     } catch (error: any) {
       setUploading(false);

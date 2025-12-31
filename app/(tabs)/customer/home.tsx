@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import CurrentLocationDisplay from '@/components/CurrentLocationDisplay';
 import responsive, { createShadowStyle } from '@/utils/responsive';
 import NotificationCard from '@/components/NotificationCard';
+import { showToast } from '@/lib/alert';
 
 const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   container: {
@@ -100,14 +101,29 @@ export default function CustomerHomeScreen() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   const onRefresh = async () => {
+    console.log('🔄 [Pull to Refresh] Customer home refresh started');
     setRefreshing(true);
-    // إعادة تحميل الموقع والإشعارات
-    // تحديث refreshKey لإجبار المكونات على إعادة التحميل
-    setRefreshKey(prev => prev + 1);
-    // انتظار قليل للسماح للمكونات بالتحديث
-    setTimeout(() => {
+    
+    try {
+      // إعادة تحميل الموقع والإشعارات
+      // تحديث refreshKey لإجبار المكونات على إعادة التحميل
+      setRefreshKey(prev => {
+        const newKey = prev + 1;
+        console.log('🔄 [Pull to Refresh] Refresh key updated:', newKey);
+        return newKey;
+      });
+      
+      // انتظار قليل للسماح للمكونات بالتحديث
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      console.log('✅ [Pull to Refresh] Customer home refresh completed');
+      showToast('تم تحديث البيانات', 'success');
+    } catch (error) {
+      console.error('❌ [Pull to Refresh] Error:', error);
+      showToast('حدث خطأ أثناء التحديث', 'error');
+    } finally {
       setRefreshing(false);
-    }, 1500);
+    }
   };
 
   return (
