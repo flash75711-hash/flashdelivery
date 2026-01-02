@@ -58,27 +58,101 @@ export class LocationError extends Error {
   }
 }
 
+// تخزين حالة الإذن لتجنب الطلبات المتكررة
+let permissionStatus: 'granted' | 'denied' | 'prompt' | null = null;
+let permissionCheckPromise: Promise<boolean> | null = null;
+
 /**
- * طلب إذن الوصول للموقع
+ * التحقق من حالة الإذن بدون طلب جديد
+ */
+async function checkPermissionStatus(): Promise<'granted' | 'denied' | 'prompt'> {
+  // استخدام navigator.permissions.query إذا كان متاحاً (Chrome, Firefox)
+  if ('permissions' in navigator && 'query' in navigator.permissions) {
+    try {
+      const result = await navigator.permissions.query({ name: 'geolocation' as PermissionName });
+      return result.state as 'granted' | 'denied' | 'prompt';
+    } catch (e) {
+      // بعض المتصفحات لا تدعم query لـ geolocation
+      console.log('Permission query not supported, will check via getCurrentPosition');
+    }
+  }
+  
+  // إذا لم يكن query متاحاً، نرجع 'prompt' للسماح بالتحقق
+  return 'prompt';
+}
+
+/**
+ * طلب إذن الوصول للموقع (محسّن - يتحقق من الإذن أولاً)
  */
 export async function requestLocationPermission(): Promise<boolean> {
   if (!navigator.geolocation) {
     throw new LocationError('Geolocation غير مدعوم في هذا المتصفح', 0, false);
   }
 
-  return new Promise((resolve) => {
-    navigator.geolocation.getCurrentPosition(
-      () => resolve(true),
-      (error) => {
-        if (error.code === error.PERMISSION_DENIED) {
-          resolve(false);
-        } else {
-          resolve(false);
-        }
-      },
-      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
-    );
-  });
+  // إذا كان هناك promise قيد التنفيذ، ننتظرها
+  if (permissionCheckPromise) {
+    return permissionCheckPromise;
+  }
+
+  // التحقق من حالة الإذن المخزنة
+  if (permissionStatus === 'granted') {
+    return true;
+  }
+  
+  if (permissionStatus === 'denied') {
+    return false;
+  }
+
+  // التحقق من حالة الإذن أولاً
+  permissionCheckPromise = (async () => {
+    try {
+      const status = await checkPermissionStatus();
+      
+      if (status === 'granted') {
+        permissionStatus = 'granted';
+        return true;
+      }
+      
+      if (status === 'denied') {
+        permissionStatus = 'denied';
+        return false;
+      }
+
+      // إذا كان prompt، نحاول جلب الموقع (سيطلب الإذن تلقائياً)
+      // استخدام maximumAge كبير و timeout أطول لتقليل الطلبات
+      return new Promise<boolean>((resolve) => {
+        navigator.geolocation.getCurrentPosition(
+          () => {
+            permissionStatus = 'granted';
+            resolve(true);
+          },
+          (error) => {
+            if (error.code === error.PERMISSION_DENIED) {
+              permissionStatus = 'denied';
+              resolve(false);
+            } else {
+              // أخطاء أخرى (timeout, unavailable) لا تعني رفض الإذن
+              // نرجع true لأن الإذن قد يكون موجوداً لكن الموقع غير متاح حالياً
+              permissionStatus = 'granted'; // نفترض أن الإذن موجود
+              resolve(true);
+            }
+          },
+          { 
+            enableHighAccuracy: false, // تقليل الدقة لتسريع الطلب
+            timeout: 3000, // timeout قصير للتحقق السريع
+            maximumAge: 60000 // استخدام موقع قديم حتى 60 ثانية لتسريع الطلب
+          }
+        );
+      });
+    } catch (error) {
+      console.error('Error checking permission:', error);
+      return false;
+    } finally {
+      permissionCheckPromise = null;
+    }
+  })();
+
+  return permissionCheckPromise;
 }
 
 /**
@@ -93,8 +167,8 @@ export async function getCurrentLocation(
 
   const {
     enableHighAccuracy = true,
-    timeout = 10000,
-    maximumAge = 0,
+    timeout = 15000, // زيادة timeout من 10 إلى 15 ثانية
+    maximumAge = 30000, // استخدام موقع قديم حتى 30 ثانية كقيمة افتراضية (بدلاً من 0)
   } = options;
 
   return new Promise((resolve, reject) => {
@@ -118,6 +192,8 @@ export async function getCurrentLocation(
           case error.PERMISSION_DENIED:
             message = 'تم رفض إذن الوصول للموقع';
             permissionDenied = true;
+            // تحديث حالة الإذن المخزنة
+            permissionStatus = 'denied';
             break;
           case error.POSITION_UNAVAILABLE:
             message = 'الموقع غير متاح';
@@ -154,8 +230,8 @@ export function watchPosition(
 
   const {
     enableHighAccuracy = true,
-    timeout = 10000,
-    maximumAge = 0,
+    timeout = 15000, // زيادة timeout من 10 إلى 15 ثانية
+    maximumAge = 30000, // استخدام موقع قديم حتى 30 ثانية كقيمة افتراضية (بدلاً من 0)
   } = options;
 
   return navigator.geolocation.watchPosition(
@@ -178,6 +254,8 @@ export function watchPosition(
         case error.PERMISSION_DENIED:
           message = 'تم رفض إذن الوصول للموقع';
           permissionDenied = true;
+          // تحديث حالة الإذن المخزنة
+          permissionStatus = 'denied';
           break;
         case error.POSITION_UNAVAILABLE:
           message = 'الموقع غير متاح';

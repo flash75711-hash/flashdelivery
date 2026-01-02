@@ -131,7 +131,7 @@ export async function findNearestPlaceInDirectory(
  * جلب الموقع مع دقة عالية (Web API)
  */
 export async function getLocationWithHighAccuracy(
-  maxRetries: number = 5,
+  maxRetries: number = 3, // تقليل المحاولات من 5 إلى 3
   minAccuracy: number = 30
 ): Promise<LocationCoordinates> {
   let bestLocation: LocationCoordinates | null = null;
@@ -141,10 +141,13 @@ export async function getLocationWithHighAccuracy(
     try {
       console.log(`📍 Attempt ${attempt}/${maxRetries} to get high accuracy location...`);
       
+      // استخدام maximumAge تدريجياً: محاولة أولى بدون cache، ثم مع cache
+      const maximumAge = attempt === 1 ? 0 : 10000; // المحاولة الأولى جديدة، الباقي يمكن استخدام cache
+      
       const location = await getCurrentLocation({
         enableHighAccuracy: true,
         timeout: 15000,
-        maximumAge: 0,
+        maximumAge,
       });
       
       const accuracy = location.accuracy ?? Infinity;
@@ -175,8 +178,9 @@ export async function getLocationWithHighAccuracy(
       }
       
       if (attempt < maxRetries && accuracy > minAccuracy) {
-        const baseWaitTime = bestAccuracy < 200 ? 800 : 1200;
-        const waitTime = Math.min(attempt * baseWaitTime, 4000);
+        // تقليل وقت الانتظار لتسريع العملية
+        const baseWaitTime = bestAccuracy < 200 ? 500 : 800;
+        const waitTime = Math.min(attempt * baseWaitTime, 2000); // تقليل من 4000 إلى 2000
         console.log(`⏳ Waiting ${waitTime}ms before next attempt to allow GPS to improve...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
       }

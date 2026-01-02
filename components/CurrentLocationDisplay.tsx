@@ -379,7 +379,7 @@ export default function CurrentLocationDisplay({ onLocationUpdate, onOpenPlacesD
     const startLocationTracking = async () => {
       try {
         console.log('🔄 Starting location tracking...');
-        // طلب إذن الوصول للموقع (Web API)
+        // طلب إذن الوصول للموقع (Web API) - محسّن للتحقق من الإذن أولاً
         const { requestLocationPermission } = await import('../lib/webUtils');
         const hasPermission = await requestLocationPermission();
         if (!hasPermission) {
@@ -422,7 +422,7 @@ export default function CurrentLocationDisplay({ onLocationUpdate, onOpenPlacesD
 
     startLocationTracking();
     
-    // تحديث الموقع كل 60 ثانية فقط إذا لم يكن هناك externalLocation
+    // تحديث الموقع كل 120 ثانية (دقيقتين) فقط إذا لم يكن هناك externalLocation
     // (لأن externalLocation يعني أن الموقع يتم تحديثه من الخارج)
     // نستخدم ref للتحقق من externalLocation الحالي في كل مرة
     const interval = setInterval(() => {
@@ -432,7 +432,7 @@ export default function CurrentLocationDisplay({ onLocationUpdate, onOpenPlacesD
         // نستخدم ref لتجنب dependency على updateLocation
         updateLocationRef.current();
       }
-    }, 60000); // 60 ثانية بدلاً من 30
+    }, 120000); // 120 ثانية (دقيقتين) لتقليل الطلبات
     
     return () => {
       mounted = false; // منع تحديث state بعد unmount
