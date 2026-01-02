@@ -85,14 +85,27 @@ export default function FloatingNotification({
 
   const handleDismiss = async () => {
     if (notification) {
-      // تحديث الإشعار كمقروء
+      // تحديث الإشعار كمقروء فقط إذا كان ID صحيح (يبدأ بـ UUID أو ليس من نوع order_created_)
+      // تجنب تحديث الإشعارات المؤقتة التي تم إنشاؤها من useOrderNotifications
+      const isValidNotificationId = notification.id && 
+        !notification.id.startsWith('order_created_') && 
+        !notification.id.startsWith('order_status_') &&
+        !notification.id.startsWith('new_order_') &&
+        !notification.id.startsWith('order_completed_');
+      
+      if (isValidNotificationId) {
       try {
-        await supabase
+          const { error } = await supabase
           .from('notifications')
           .update({ is_read: true })
           .eq('id', notification.id);
+          
+          if (error) {
+            console.error('Error marking notification as read:', error);
+          }
       } catch (error) {
         console.error('Error marking notification as read:', error);
+        }
       }
     }
     onDismiss();

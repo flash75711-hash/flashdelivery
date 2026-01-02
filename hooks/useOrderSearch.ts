@@ -169,7 +169,7 @@ export function useOrderSearch({
     try {
       const { data, error } = await supabase
         .from('orders')
-        .select('status, driver_id')
+        .select('status,driver_id')
         .eq('id', orderId)
         .single();
 

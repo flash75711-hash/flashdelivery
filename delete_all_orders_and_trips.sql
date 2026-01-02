@@ -2,25 +2,29 @@
 -- حذف جميع الطلبات والرحلات والإشعارات المرتبطة
 -- ============================================
 -- ⚠️ تحذير: هذا الاستعلام سيحذف جميع البيانات التالية:
--- - جميع الطلبات (orders)
+-- - جميع عناصر الطلبات (order_items)
 -- - جميع الإشعارات المرتبطة بالطلبات (notifications)
 -- - جميع مواقع السائقين المرتبطة بالطلبات (driver_locations)
 -- - جميع المعاملات المالية المرتبطة بالطلبات (wallets)
+-- - جميع الطلبات (orders)
 -- ============================================
 
--- 1. حذف جميع الإشعارات المرتبطة بالطلبات
+-- 1. حذف جميع عناصر الطلبات (order_items)
+DELETE FROM order_items;
+
+-- 2. حذف جميع الإشعارات المرتبطة بالطلبات
 DELETE FROM notifications 
 WHERE order_id IS NOT NULL;
 
--- 2. حذف جميع مواقع السائقين المرتبطة بالطلبات
+-- 3. حذف جميع مواقع السائقين المرتبطة بالطلبات
 DELETE FROM driver_locations 
 WHERE order_id IS NOT NULL;
 
--- 3. حذف جميع المعاملات المالية المرتبطة بالطلبات
+-- 4. حذف جميع المعاملات المالية المرتبطة بالطلبات
 DELETE FROM wallets 
 WHERE order_id IS NOT NULL;
 
--- 4. حذف جميع الطلبات
+-- 5. حذف جميع الطلبات
 DELETE FROM orders;
 
 -- ============================================
@@ -44,6 +48,15 @@ WHERE order_id IS NOT NULL;
 SELECT COUNT(*) as remaining_order_wallets 
 FROM wallets 
 WHERE order_id IS NOT NULL;
+
+-- عرض عدد عناصر الطلبات المتبقية (يجب أن يكون 0)
+SELECT COUNT(*) as remaining_order_items 
+FROM order_items;
+
+
+
+
+
 
 
 

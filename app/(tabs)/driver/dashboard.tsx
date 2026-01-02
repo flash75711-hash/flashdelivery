@@ -33,7 +33,9 @@ export default function DriverDashboardScreen() {
   const tabBarBottomPadding = Platform.OS === 'web' ? responsive.getTabBarBottomPadding() : 0;
   const styles = getStyles(tabBarBottomPadding);
   
-  const [isOnline, setIsOnline] = useState(false);
+  // نبدأ بـ null بدلاً من false حتى يتم جلب القيمة من قاعدة البيانات
+  // هذا يمنع إعادة تعيين الحالة إلى false عند إعادة تحميل الصفحة
+  const [isOnline, setIsOnline] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [toggling, setToggling] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -46,12 +48,16 @@ export default function DriverDashboardScreen() {
     selfie_image_url?: string;
     approval_status?: 'pending' | 'approved' | 'rejected';
     status?: string;
+    is_online?: boolean;
   } | null>(null);
   const [registrationComplete, setRegistrationComplete] = useState(false);
   const [checkingRegistration, setCheckingRegistration] = useState(true);
+  const isLoadingProfileRef = useRef(false);
   const [showApprovalAlert, setShowApprovalAlert] = useState(false);
   const previousApprovalStatusRef = useRef<'pending' | 'approved' | 'rejected' | undefined>(undefined);
   const hasShownApprovalAlertRef = useRef(false); // لمنع عرض رسالة التهنئة أكثر من مرة
+  const lastKnownOnlineStatusRef = useRef<boolean | null>(null); // حفظ آخر حالة معروفة
+  const hasLoadedInitialStatusRef = useRef(false); // للتأكد من أننا جلبنا الحالة الأولية من قاعدة البيانات
   const [notifications, setNotifications] = useState<Array<{
     id: string;
     title: string;
@@ -62,6 +68,23 @@ export default function DriverDashboardScreen() {
   }>>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showOrderTypeModal, setShowOrderTypeModal] = useState(false);
+
+  // قراءة الحالة الأولية من localStorage عند تحميل المكون
+  useEffect(() => {
+    if (user && Platform.OS === 'web' && typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(`driver_${user.id}_is_online`);
+        if (saved !== null) {
+          const savedStatus = saved === 'true';
+          console.log('DriverDashboard: Initial load from localStorage:', savedStatus);
+          setIsOnline(savedStatus);
+          lastKnownOnlineStatusRef.current = savedStatus;
+        }
+      } catch (e) {
+        console.error('DriverDashboard: Error reading from localStorage on initial load:', e);
+      }
+    }
+  }, [user]);
 
   useEffect(() => {
     console.log('DriverDashboard: useEffect triggered, user:', user?.id);
@@ -103,12 +126,17 @@ export default function DriverDashboardScreen() {
     }
   }, [user]);
 
-  // إعادة تحميل البيانات عند العودة للصفحة
+  // إعادة تحميل البيانات عند العودة للصفحة (فقط إذا لم يتم تحميلها للتو)
   useFocusEffect(
     React.useCallback(() => {
       console.log('DriverDashboard: useFocusEffect triggered, user:', user?.id);
-      if (user) {
-        loadDriverProfile();
+      if (user && !isLoadingProfileRef.current) {
+        // إعادة تحميل فقط إذا لم يكن هناك تحميل جاري
+        const timer = setTimeout(() => {
+          loadDriverProfile();
+        }, 100); // تأخير بسيط لتجنب الاستدعاءات المتكررة
+        
+        return () => clearTimeout(timer);
       }
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user])
@@ -172,6 +200,43 @@ export default function DriverDashboardScreen() {
   const loadDriverStatus = async () => {
     if (!user) return;
     
+    // قراءة الحالة من localStorage أولاً (إذا كانت متاحة)
+    let localStorageStatus: boolean | null = null;
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(`driver_${user.id}_is_online`);
+        if (saved !== null) {
+          localStorageStatus = saved === 'true';
+          console.log('DriverDashboard: loadDriverStatus - read from localStorage:', localStorageStatus);
+        }
+      } catch (e) {
+        console.error('DriverDashboard: loadDriverStatus - error reading from localStorage:', e);
+      }
+    }
+    
+    // إذا تم تحميل البيانات بالفعل في loadDriverProfile، لا نحتاج لإعادة التحميل
+    if (driverProfile && 'is_online' in driverProfile) {
+      // تحديث is_online فقط إذا كان موجوداً وليس null
+      if (driverProfile.is_online !== undefined && driverProfile.is_online !== null) {
+        // إذا كانت القيمة في localStorage هي true لكن القيمة في DB هي false/null، نحافظ على true
+        if (localStorageStatus === true && driverProfile.is_online === false) {
+          console.log('DriverDashboard: loadDriverStatus - localStorage says true but DB says false, keeping true');
+          setIsOnline(true);
+          lastKnownOnlineStatusRef.current = true;
+        } else {
+          setIsOnline(driverProfile.is_online);
+          lastKnownOnlineStatusRef.current = driverProfile.is_online;
+        }
+      } else if (localStorageStatus === true) {
+        // إذا كانت القيمة في DB null لكن localStorage يقول true، نحافظ على true
+        console.log('DriverDashboard: loadDriverStatus - DB is null but localStorage says true, keeping true');
+        setIsOnline(true);
+        lastKnownOnlineStatusRef.current = true;
+      }
+      hasLoadedInitialStatusRef.current = true;
+      return;
+    }
+    
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -182,8 +247,56 @@ export default function DriverDashboardScreen() {
       if (error && error.code !== 'PGRST116') {
         console.error('Error loading driver status:', error);
       } else if (data) {
-        setIsOnline(data.is_online || false);
+        console.log('DriverDashboard: loadDriverStatus - is_online from DB:', data.is_online, 'localStorage:', localStorageStatus, 'current isOnline:', isOnline);
+        
+        // إذا كانت القيمة في localStorage هي true لكن القيمة في DB هي false/null، نحافظ على true
+        if (localStorageStatus === true && (data.is_online === false || data.is_online === null)) {
+          console.log('DriverDashboard: loadDriverStatus - localStorage says true but DB says false/null, keeping true and updating DB');
+          setIsOnline(true);
+          lastKnownOnlineStatusRef.current = true;
+          
+          // محاولة تحديث قاعدة البيانات لتطابق localStorage
+          try {
+            await supabase
+              .from('profiles')
+              .update({ is_online: true })
+              .eq('id', user.id);
+            console.log('DriverDashboard: loadDriverStatus - updated DB to match localStorage');
+          } catch (updateError) {
+            console.error('DriverDashboard: loadDriverStatus - error updating DB:', updateError);
+          }
+        } else if (data.is_online !== undefined && data.is_online !== null) {
+          // تحديث is_online فقط إذا كان موجوداً وليس null
+          console.log('DriverDashboard: loadDriverStatus - updating isOnline to:', data.is_online);
+          setIsOnline(data.is_online);
+          lastKnownOnlineStatusRef.current = data.is_online;
+          
+          // تحديث localStorage لتطابق قاعدة البيانات
+          if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            try {
+              localStorage.setItem(`driver_${user.id}_is_online`, String(data.is_online));
+            } catch (e) {
+              console.error('DriverDashboard: loadDriverStatus - error saving to localStorage:', e);
+            }
+          }
+        } else if (localStorageStatus !== null) {
+          // إذا كانت القيمة في DB null لكن localStorage لديه قيمة، نستخدم localStorage
+          console.log('DriverDashboard: loadDriverStatus - DB is null, using localStorage:', localStorageStatus);
+          setIsOnline(localStorageStatus);
+          lastKnownOnlineStatusRef.current = localStorageStatus;
+        } else {
+          console.log('DriverDashboard: loadDriverStatus - is_online is null/undefined in both DB and localStorage, keeping current state');
+        }
+      } else {
+        // لا توجد بيانات، نستخدم localStorage إذا كان متاحاً
+        if (localStorageStatus !== null) {
+          console.log('DriverDashboard: loadDriverStatus - no DB data, using localStorage:', localStorageStatus);
+          setIsOnline(localStorageStatus);
+          lastKnownOnlineStatusRef.current = localStorageStatus;
+        }
       }
+      hasLoadedInitialStatusRef.current = true;
+      // إذا كان is_online null أو undefined، نحافظ على القيمة الحالية
     } catch (error) {
       console.error('Error loading driver status:', error);
     } finally {
@@ -197,7 +310,14 @@ export default function DriverDashboardScreen() {
       return;
     }
     
+    // منع الاستدعاءات المتكررة
+    if (isLoadingProfileRef.current) {
+      console.log('DriverDashboard: loadDriverProfile - already loading, skipping');
+      return;
+    }
+    
     console.log('DriverDashboard: loadDriverProfile - starting for user:', user.id);
+    isLoadingProfileRef.current = true;
     setCheckingRegistration(true);
     try {
       // محاولة تحميل بيانات السائق مع معالجة الأخطاء
@@ -207,9 +327,10 @@ export default function DriverDashboardScreen() {
 
       try {
         // محاولة جلب جميع البيانات بما فيها الصور وحالة الموافقة وحالة الحساب
+        // تحديد الأعمدة المطلوبة فقط لتحسين الأداء
         const result = await supabase
           .from('profiles')
-          .select('full_name, phone, id_card_image_url, selfie_image_url, approval_status, registration_complete, status')
+          .select('full_name, phone, id_card_image_url, selfie_image_url, approval_status, registration_complete, status, is_online')
           .eq('id', user.id)
           .single();
         profile = result.data;
@@ -300,6 +421,85 @@ export default function DriverDashboardScreen() {
           previousApprovalStatusRef.current = currentStatus;
         }
         setDriverProfile(profile);
+        // تحديث is_online فقط إذا كان موجوداً وليس null
+        // هذا يمنع إعادة تعيين الحالة إلى false/null عند تحميل الصفحة
+        console.log('DriverDashboard: is_online from profile:', profile.is_online, 'current isOnline state:', isOnline, 'lastKnownOnlineStatusRef:', lastKnownOnlineStatusRef.current);
+        
+        // قراءة الحالة من localStorage أولاً (إذا كانت متاحة)
+        let localStorageStatus: boolean | null = null;
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          try {
+            const saved = localStorage.getItem(`driver_${user.id}_is_online`);
+            if (saved !== null) {
+              localStorageStatus = saved === 'true';
+              console.log('DriverDashboard: loadDriverProfile - read from localStorage:', localStorageStatus);
+            }
+          } catch (e) {
+            console.error('DriverDashboard: loadDriverProfile - error reading from localStorage:', e);
+          }
+        }
+        
+        if (profile.is_online !== undefined && profile.is_online !== null) {
+          // إذا كانت القيمة في localStorage هي true لكن القيمة في DB هي false، نحافظ على true
+          if (localStorageStatus === true && profile.is_online === false) {
+            console.log('DriverDashboard: loadDriverProfile - localStorage says true but DB says false, keeping true');
+            setIsOnline(true);
+            lastKnownOnlineStatusRef.current = true;
+            
+            // محاولة تحديث قاعدة البيانات لتطابق localStorage
+            try {
+              await supabase
+                .from('profiles')
+                .update({ is_online: true })
+                .eq('id', user.id);
+              console.log('DriverDashboard: loadDriverProfile - updated DB to match localStorage');
+            } catch (updateError) {
+              console.error('DriverDashboard: loadDriverProfile - error updating DB:', updateError);
+            }
+          } else if (isOnline === true && profile.is_online === false && !hasLoadedInitialStatusRef.current) {
+            // إذا كانت القيمة الحالية true والقيمة من قاعدة البيانات false ولم نكن قد جلبنا الحالة الأولية بعد،
+            // قد يكون هناك تأخير في التحديث، لذلك نحافظ على القيمة الحالية
+            console.log('DriverDashboard: isOnline is true but DB has false - possible sync delay, keeping current state');
+            // لا نحدث isOnline، نحافظ على القيمة الحالية
+          } else {
+            console.log('DriverDashboard: Updating isOnline to:', profile.is_online);
+            setIsOnline(profile.is_online);
+            lastKnownOnlineStatusRef.current = profile.is_online;
+            
+            // تحديث localStorage لتطابق قاعدة البيانات
+            if (Platform.OS === 'web' && typeof window !== 'undefined') {
+              try {
+                localStorage.setItem(`driver_${user.id}_is_online`, String(profile.is_online));
+              } catch (e) {
+                console.error('DriverDashboard: loadDriverProfile - error saving to localStorage:', e);
+              }
+            }
+          }
+        } else if (localStorageStatus === true) {
+          // إذا كانت القيمة في DB null لكن localStorage يقول true، نحافظ على true
+          console.log('DriverDashboard: loadDriverProfile - DB is null but localStorage says true, keeping true');
+          setIsOnline(true);
+          lastKnownOnlineStatusRef.current = true;
+          
+          // محاولة تحديث قاعدة البيانات لتطابق localStorage
+          try {
+            await supabase
+              .from('profiles')
+              .update({ is_online: true })
+              .eq('id', user.id);
+            console.log('DriverDashboard: loadDriverProfile - updated DB to match localStorage');
+          } catch (updateError) {
+            console.error('DriverDashboard: loadDriverProfile - error updating DB:', updateError);
+          }
+        } else if (localStorageStatus !== null) {
+          // إذا كانت القيمة في DB null لكن localStorage لديه قيمة، نستخدم localStorage
+          console.log('DriverDashboard: loadDriverProfile - DB is null, using localStorage:', localStorageStatus);
+          setIsOnline(localStorageStatus);
+          lastKnownOnlineStatusRef.current = localStorageStatus;
+        } else {
+          console.log('DriverDashboard: is_online is null/undefined, keeping current state:', isOnline);
+        }
+        // إذا كان is_online null أو undefined، نحافظ على القيمة الحالية
         
         // التحقق من الموافقة الجديدة
         if (profile.approval_status === 'approved' && !registrationComplete) {
@@ -319,6 +519,7 @@ export default function DriverDashboardScreen() {
       setDriverProfile(null);
     } finally {
       setCheckingRegistration(false);
+      isLoadingProfileRef.current = false;
       console.log('DriverDashboard: loadDriverProfile - completed');
     }
   };
@@ -349,24 +550,56 @@ export default function DriverDashboardScreen() {
     setToggling(true);
     try {
       const newStatus = !isOnline;
+      console.log('DriverDashboard: toggleOnlineStatus - changing from', isOnline, 'to', newStatus);
       
-      // تحديث حالة السائق في قاعدة البيانات
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({ is_online: newStatus })
-        .eq('id', user.id);
+      // استخدام Edge Function لتحديث is_online (لتجاوز RLS)
+      console.log('DriverDashboard: toggleOnlineStatus - calling Edge Function update-driver-profile...');
+      const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-driver-profile', {
+        body: {
+          userId: user.id,
+          is_online: newStatus,
+        },
+      });
 
-      if (updateError) {
-        // إذا لم يكن الحقل موجوداً، نحاول إضافته أولاً
-        if (updateError.code === '42703') {
-          console.log('⚠️ is_online field does not exist, attempting to add it...');
-          setToggling(false);
-          return;
-        }
-        throw updateError;
+      console.log('DriverDashboard: toggleOnlineStatus - Edge Function response:', {
+        hasData: !!edgeFunctionData,
+        success: edgeFunctionData?.success,
+        hasError: !!edgeFunctionError,
+        errorMessage: edgeFunctionError?.message || edgeFunctionData?.error,
+        profileIsOnline: edgeFunctionData?.profile?.is_online,
+      });
+
+      if (edgeFunctionError) {
+        console.error('DriverDashboard: toggleOnlineStatus - Edge Function error:', edgeFunctionError);
+        throw edgeFunctionError;
       }
 
-      setIsOnline(newStatus);
+      if (!edgeFunctionData || !edgeFunctionData.success) {
+        console.error('DriverDashboard: toggleOnlineStatus - Edge Function returned error:', edgeFunctionData?.error);
+        throw new Error(edgeFunctionData?.error || 'فشل تحديث الحالة');
+      }
+
+      // التأكد من أن القيمة تم حفظها في قاعدة البيانات
+      const updatedIsOnline = edgeFunctionData.profile?.is_online;
+      if (updatedIsOnline === newStatus) {
+        console.log('DriverDashboard: toggleOnlineStatus - confirmed saved to DB:', updatedIsOnline);
+        // حفظ الحالة محلياً
+        setIsOnline(newStatus);
+        lastKnownOnlineStatusRef.current = newStatus;
+        
+        // حفظ في localStorage للاستمرارية بعد إعادة التحميل
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          try {
+            localStorage.setItem(`driver_${user.id}_is_online`, String(newStatus));
+            console.log('DriverDashboard: toggleOnlineStatus - saved to localStorage:', newStatus);
+          } catch (e) {
+            console.error('DriverDashboard: toggleOnlineStatus - error saving to localStorage:', e);
+          }
+        }
+      } else {
+        console.error('DriverDashboard: toggleOnlineStatus - value mismatch! Expected:', newStatus, 'Got:', updatedIsOnline);
+        throw new Error('فشل التحقق من حفظ الحالة في قاعدة البيانات');
+      }
 
       if (!newStatus) {
         // إذا تم الإيقاف، نتوقف عن تتبع الموقع
@@ -562,12 +795,12 @@ export default function DriverDashboardScreen() {
           <View style={styles.statusHeader}>
             <View style={styles.statusInfo}>
               <Ionicons 
-                name={isOnline ? "radio-button-on" : "radio-button-off"} 
+                name={(isOnline ?? false) ? "radio-button-on" : "radio-button-off"} 
                 size={24} 
-                color={isOnline ? "#34C759" : "#999"} 
+                color={(isOnline ?? false) ? "#34C759" : "#999"} 
               />
               <Text style={styles.statusLabel}>
-                {isOnline ? 'نشط الآن' : 'غير نشط'}
+                {(isOnline ?? false) ? 'نشط الآن' : 'غير نشط'}
               </Text>
             </View>
             
@@ -575,10 +808,10 @@ export default function DriverDashboardScreen() {
               <ActivityIndicator size="small" color="#007AFF" />
             ) : (
               <Switch
-                value={isOnline}
+                value={isOnline ?? false}
                 onValueChange={toggleOnlineStatus}
                 trackColor={{ false: '#e0e0e0', true: '#34C759' }}
-                thumbColor={isOnline ? '#fff' : '#f4f3f4'}
+                thumbColor={(isOnline ?? false) ? '#fff' : '#f4f3f4'}
                 ios_backgroundColor="#e0e0e0"
                 disabled={toggling || driverProfile?.approval_status !== 'approved' || !registrationComplete || driverProfile?.status === 'suspended'}
               />

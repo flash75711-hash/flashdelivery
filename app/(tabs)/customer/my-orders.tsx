@@ -34,12 +34,23 @@ export default function CustomerMyOrdersScreen() {
     const active: Order[] = [];
     const completed: Order[] = [];
 
+    console.log('📊 [CustomerMyOrders] Processing orders:', {
+      total: orders.length,
+      statuses: orders.map(o => o.status),
+    });
+
     orders.forEach((order) => {
       if (order.status === 'completed' || order.status === 'cancelled') {
         completed.push(order);
       } else {
         active.push(order);
       }
+    });
+
+    console.log('📊 [CustomerMyOrders] Orders categorized:', {
+      active: active.length,
+      completed: completed.length,
+      activeStatuses: active.map(o => o.status),
     });
 
     return {
@@ -91,77 +102,45 @@ export default function CustomerMyOrdersScreen() {
   const handleCancelOrder = useCallback(async (order: Order) => {
     // منع الاستدعاءات المتكررة لنفس الطلب
     if (cancelingOrderIdRef.current === order.id) {
-      console.log('⚠️ [handleCancelOrder] Already processing cancellation for order:', order.id);
       return;
     }
 
-    console.log('🔄 [handleCancelOrder] Starting cancel process for order:', order.id);
-    
-    const confirmed = await showConfirm(
-      'إلغاء الطلب',
-      'هل أنت متأكد من إلغاء هذا الطلب؟ لا يمكن التراجع عن هذه العملية.',
-      {
-        confirmText: 'نعم، إلغاء',
-        cancelText: 'إلغاء',
-        type: 'warning',
-      }
-    );
-
-    if (!confirmed) return;
-
-    // تعيين حالة المعالجة
     cancelingOrderIdRef.current = order.id;
 
     try {
-      console.log('🔄 [handleCancelOrder] Updating order status to cancelled...');
-      const { data, error } = await supabase
-        .from('orders')
-        .update({ status: 'cancelled' })
-        .eq('id', order.id)
-        .select();
-
-      if (error) {
-        console.error('❌ [handleCancelOrder] Error updating order:', error);
-        throw error;
-      }
-
-      console.log('✅ [handleCancelOrder] Order updated successfully:', data);
-
-      // إشعار السائق إذا كان الطلب مقبولاً
-      if (order.driver_id) {
-        console.log('📨 [handleCancelOrder] Sending notification to driver:', order.driver_id);
-        const notificationResult = await createNotification({
-          user_id: order.driver_id,
-          title: 'تم إلغاء الطلب',
-          message: `تم إلغاء الطلب رقم ${order.id.slice(0, 8)}`,
+      const confirmed = await showConfirm(
+        'إلغاء الطلب',
+        'هل أنت متأكد من إلغاء هذا الطلب؟',
+        {
+          confirmText: 'نعم، إلغاء',
+          cancelText: 'لا',
           type: 'warning',
-          order_id: order.id,
-        });
-
-        if (!notificationResult.success) {
-          console.error('⚠️ [handleCancelOrder] Failed to send notification:', notificationResult.error);
-        } else {
-          console.log('✅ [handleCancelOrder] Notification sent successfully');
         }
+      );
+
+      if (!confirmed) {
+        cancelingOrderIdRef.current = null;
+        return;
       }
 
-      await showSimpleAlert('نجح', 'تم إلغاء الطلب بنجاح', 'success');
-      console.log('🔄 [handleCancelOrder] Reloading orders...');
+      // تحديث حالة الطلب إلى cancelled
+      const { error } = await supabase
+        .from('orders')
+        .update({
+          status: 'cancelled',
+          cancelled_by: order.customer_id, // العميل يلغي طلبه
+          cancelled_at: new Date().toISOString(),
+        })
+        .eq('id', order.id);
+
+      if (error) throw error;
+
+      showSimpleAlert('نجح', 'تم إلغاء الطلب بنجاح', 'success');
       reload();
     } catch (error: any) {
-      console.error('❌ [handleCancelOrder] Error cancelling order:', error);
+      console.error('Error cancelling order:', error);
       showSimpleAlert('خطأ', error.message || 'فشل إلغاء الطلب', 'error');
-      if (error.details) {
-        console.error('Supabase Error Details:', error.details);
-      }
-      if (error.hint) {
-        console.error('Supabase Error Hint:', error.hint);
-      }
-      if (error.code) {
-        console.error('Supabase Error Code:', error.code);
-      }
     } finally {
-      // إعادة تعيين حالة المعالجة بعد انتهاء العملية
       cancelingOrderIdRef.current = null;
     }
   }, [reload]);

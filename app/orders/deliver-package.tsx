@@ -248,6 +248,7 @@ export default function DeliverPackageScreen() {
           status: 'pending',
           totalFee: estimatedFee,
           orderType: 'package',
+          createdByRole: user?.role || 'customer', // من أنشأ الطلب
         };
       } else {
         // الوضع المتعدد: حفظ المسار كـ JSON
@@ -265,6 +266,7 @@ export default function DeliverPackageScreen() {
           totalFee: estimatedFee,
           orderType: 'package',
           items: route, // حفظ المسار الكامل في items
+          createdByRole: user?.role || 'customer', // من أنشأ الطلب
         };
       }
 
@@ -273,89 +275,26 @@ export default function DeliverPackageScreen() {
       });
 
       if (edgeFunctionError) {
-        console.error('Error creating order via Edge Function:', edgeFunctionError);
+        console.error('❌ Error creating order via Edge Function:', edgeFunctionError);
         throw edgeFunctionError;
       }
 
       if (!edgeFunctionData || !edgeFunctionData.success) {
-        console.error('Edge Function returned error:', edgeFunctionData?.error);
+        console.error('❌ Edge Function returned error:', edgeFunctionData?.error);
         throw new Error(edgeFunctionData?.error || 'فشل إنشاء الطلب');
       }
 
-      const data = edgeFunctionData.order;
+      console.log('✅ Order created successfully:', edgeFunctionData.order?.id);
       
-      // تحديد نقطة البحث عن السائقين
-      let searchPoint: { lat: number; lon: number } | null = null;
-      
-      try {
-        if (deliveryMode === 'simple') {
-          // للوضع البسيط: البحث من نقطة الاستلام
-          const pickupCoords = await geocodeAddress(pickupAddress);
-          if (pickupCoords) {
-            searchPoint = pickupCoords;
-          }
-        } else {
-          // للوضع المتعدد: البحث من نقطة الانطلاق (أول نقطة)
-          const startPointCoords = await geocodeAddress(deliveryPoints[0].address);
-          if (startPointCoords) {
-            searchPoint = startPointCoords;
-          }
-        }
-      } catch (locationError) {
-        console.error('Error getting search point location:', locationError);
-        // إذا فشل الحصول على الموقع، نحاول استخدام موقع العميل الحالي
-        try {
-          const location = await getCurrentLocation({ enableHighAccuracy: true });
-          searchPoint = { lat: location.latitude, lon: location.longitude };
-        } catch (err) {
-          console.error('Error getting current location:', err);
-        }
-      }
+      const message = 'تم إرسال طلبك بنجاح! سيظهر الطلب للسائقين قريباً.';
 
-      // بدء البحث التلقائي عن السائقين
-      if (searchPoint && data) {
-        try {
-          // تحديث حالة البحث
-          await supabase
-            .from('orders')
-            .update({
-              search_status: 'searching',
-              search_started_at: new Date().toISOString(),
-            })
-            .eq('id', data.id);
-
-          // جلب الإعدادات
-          const { data: settings } = await supabase
-            .from('order_search_settings')
-            .select('setting_key, setting_value');
-
-          const initialRadius = parseFloat(
-            settings?.find(s => s.setting_key === 'initial_search_radius_km')?.setting_value || '3'
-          );
-          const expandedRadius = parseFloat(
-            settings?.find(s => s.setting_key === 'expanded_search_radius_km')?.setting_value || '6'
-          );
-          const initialDuration = parseFloat(
-            settings?.find(s => s.setting_key === 'initial_search_duration_seconds')?.setting_value || '10'
-          );
-          const expandedDuration = parseFloat(
-            settings?.find(s => s.setting_key === 'expanded_search_duration_seconds')?.setting_value || '10'
-          );
-
-          // بدء البحث
-          startOrderSearch(data.id, searchPoint, initialRadius, expandedRadius, initialDuration, expandedDuration);
-        } catch (searchError) {
-          console.error('Error starting search:', searchError);
-        }
-      }
-      
-      const message = searchPoint 
-        ? 'تم إرسال طلبك بنجاح! جاري البحث عن سائق...'
-        : 'تم إرسال طلبك بنجاح!';
+      // إيقاف loading قبل التوجيه
+      setLoading(false);
       
       // التوجيه حسب دور المستخدم
+      try {
       if (user?.role === 'driver') {
-        router.replace('/(tabs)/driver/my-orders');
+          router.replace('/(tabs)/driver/trips');
       } else if (user?.role === 'admin') {
         router.replace('/(tabs)/admin/my-orders');
       } else {
@@ -366,333 +305,17 @@ export default function DeliverPackageScreen() {
       setTimeout(() => {
         showSimpleAlert('✅ نجح', message, 'success');
       }, 300);
-    } catch (error: any) {
-      showSimpleAlert('خطأ', error.message || 'فشل إرسال الطلب', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // دالة لبدء البحث التلقائي عن السائقين (نفس الكود من outside-order.tsx)
-  const startOrderSearch = async (
-    orderId: string,
-    searchPoint: { lat: number; lon: number },
-    initialRadius: number,
-    expandedRadius: number,
-    initialDuration: number,
-    expandedDuration: number
-  ) => {
-    try {
-      // جلب بيانات الطلب (السعر)
-      const { data: orderData } = await supabase
-        .from('orders')
-        .select('total_fee')
-        .eq('id', orderId)
-        .single();
-      
-      const orderPrice = parseFloat(orderData?.total_fee?.toString() || '0');
-      
-      const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-        const R = 6371;
-        const dLat = (lat2 - lat1) * Math.PI / 180;
-        const dLon = (lon2 - lon1) * Math.PI / 180;
-        const a = 
-          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-          Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c;
-      };
-
-      const findDriversInRadius = async (radius: number) => {
-        console.log(`🔍 البحث عن سائقين في نطاق ${radius} كم من النقطة:`, searchPoint);
-        
-        // أولاً: التحقق من جميع السائقين (للتشخيص)
-        const { data: allDriversCheck, error: checkError } = await supabase
-          .from('profiles')
-          .select('id, status, approval_status, role')
-          .eq('role', 'driver');
-        
-        if (checkError) {
-          console.error('❌ خطأ في جلب جميع السائقين:', checkError);
-        } else {
-          console.log(`📊 إجمالي السائقين في قاعدة البيانات: ${allDriversCheck?.length || 0}`);
-          if (allDriversCheck && allDriversCheck.length > 0) {
-            const statusCounts = allDriversCheck.reduce((acc: any, d: any) => {
-              const key = `${d.status || 'null'}_${d.approval_status || 'null'}`;
-              acc[key] = (acc[key] || 0) + 1;
-              return acc;
-            }, {});
-            console.log('📊 توزيع حالات السائقين:', statusCounts);
-          }
-        }
-        
-        const { data: allDrivers, error: driversError } = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('role', 'driver')
-          .eq('status', 'active')
-          .eq('approval_status', 'approved');
-
-        if (driversError) {
-          console.error('❌ خطأ في جلب السائقين:', driversError);
-          return [];
-        }
-
-        if (!allDrivers || allDrivers.length === 0) {
-          console.log('⚠️ لا يوجد سائقين نشطين وموافق عليهم');
-          console.log('💡 تأكد من:');
-          console.log('   1. وجود سائقين في قاعدة البيانات');
-          console.log('   2. أن status = "active"');
-          console.log('   3. أن approval_status = "approved"');
-          return [];
-        }
-
-        console.log(`✅ تم العثور على ${allDrivers.length} سائق نشط وموافق عليه`);
-
-        const driverIds = allDrivers.map(d => d.id);
-        const { data: locationsData, error: locationsError } = await supabase
-          .from('driver_locations')
-          .select('driver_id, latitude, longitude, updated_at')
-          .in('driver_id', driverIds)
-          .order('updated_at', { ascending: false });
-
-        if (locationsError) {
-          console.error('❌ خطأ في جلب مواقع السائقين:', locationsError);
-        }
-
-        if (!locationsData || locationsData.length === 0) {
-          console.log('⚠️ لا توجد مواقع محدثة للسائقين');
-          return [];
-        }
-
-        console.log(`📍 تم العثور على ${locationsData.length} موقع سائق`);
-
-        const latestLocations = new Map<string, { driver_id: string; latitude: number; longitude: number }>();
-        locationsData.forEach(loc => {
-          if (loc.latitude && loc.longitude && !latestLocations.has(loc.driver_id)) {
-            latestLocations.set(loc.driver_id, {
-              driver_id: loc.driver_id,
-              latitude: loc.latitude,
-              longitude: loc.longitude,
-            });
-          }
-        });
-
-        console.log(`📍 ${latestLocations.size} سائق لديه موقع محدث`);
-
-        const driversInRadius: { driver_id: string; latitude: number; longitude: number }[] = [];
-        latestLocations.forEach((driver) => {
-          const distance = calculateDistance(
-            searchPoint.lat,
-            searchPoint.lon,
-            driver.latitude,
-            driver.longitude
-          );
-          if (distance <= radius) {
-            driversInRadius.push(driver);
-            console.log(`✅ سائق في النطاق: ${driver.driver_id} على بعد ${distance.toFixed(2)} كم`);
-          }
-        });
-
-        console.log(`✅ تم العثور على ${driversInRadius.length} سائق في نطاق ${radius} كم`);
-        return driversInRadius;
-      };
-
-      const notifyDrivers = async (drivers: { driver_id: string }[], radius: number, orderId: string, orderPrice: number) => {
-        if (drivers.length === 0) {
-          console.log('⚠️ لا يوجد سائقين لإرسال إشعارات لهم');
-          return;
-        }
-
-        console.log(`📧 إرسال إشعارات لـ ${drivers.length} سائق`);
-
-        // جلب تفاصيل الطلب
-        const { data: orderData } = await supabase
-          .from('orders')
-          .select('order_type, pickup_address, delivery_address, items')
-          .eq('id', orderId)
-          .single();
-
-        // بناء رسالة الإشعار مع التركيز على النقاط
-        let title = 'مسار جديد متاح';
-        let message = '';
-        
-        // إذا كان الطلب يحتوي على عدة نقاط، نركز على النقاط
-        if (orderData?.items && Array.isArray(orderData.items) && orderData.items.length > 0) {
-          const firstPoint = orderData.items[0];
-          const lastPoint = orderData.items[orderData.items.length - 1];
-          const firstAddress = typeof firstPoint === 'object' ? (firstPoint.address || firstPoint.description || 'نقطة الانطلاق') : firstPoint;
-          const lastAddress = typeof lastPoint === 'object' ? (lastPoint.address || lastPoint.description || 'نقطة الوصول') : lastPoint;
-          
-          title = `مسار متعدد النقاط (${orderData.items.length} نقطة)`;
-          message = `من: ${firstAddress}\nإلى: ${lastAddress}\nالسعر: ${orderPrice} ج.م\nفي نطاق ${radius} كم`;
-        } else {
-          // طلب بسيط (نقطتان فقط)
-          message = `من: ${orderData?.pickup_address || 'نقطة الانطلاق'}\nإلى: ${orderData?.delivery_address || 'نقطة الوصول'}\nالسعر: ${orderPrice} ج.م\nفي نطاق ${radius} كم`;
-        }
-        
-        // استخدام الدالة insert_notification_for_driver لتجاوز مشاكل RLS
-        const type = 'info';
-
-        let successCount = 0;
-        let errorCount = 0;
-
-        // إرسال إشعار لكل سائق باستخدام الدالة مع order_id
-        for (const driver of drivers) {
-          try {
-            const { data, error } = await supabase.rpc('insert_notification_for_driver', {
-              p_user_id: driver.driver_id,
-              p_title: title,
-              p_message: message,
-              p_type: type,
-              p_order_id: orderId,
-            });
-
-            if (error) {
-              console.error(`❌ خطأ في إرسال إشعار للسائق ${driver.driver_id}:`, error);
-              errorCount++;
-            } else {
-              successCount++;
-            }
-          } catch (err) {
-            console.error(`❌ خطأ في إرسال إشعار للسائق ${driver.driver_id}:`, err);
-            errorCount++;
-          }
-        }
-
-        if (successCount > 0) {
-          console.log(`✅ تم إرسال ${successCount} إشعار بنجاح`);
-        }
-        if (errorCount > 0) {
-          console.error(`❌ فشل إرسال ${errorCount} إشعار`);
-        }
-      };
-
-      const checkOrderAccepted = async () => {
-        const { data } = await supabase
-          .from('orders')
-          .select('status, driver_id')
-          .eq('id', orderId)
-          .single();
-
-        return data?.status === 'accepted' && data?.driver_id;
-      };
-
-      const initialDrivers = await findDriversInRadius(initialRadius);
-      if (initialDrivers.length > 0) {
-        await notifyDrivers(initialDrivers, initialRadius, orderId, orderPrice);
-      } else {
-        // إذا لم يتم العثور على سائقين في النطاق، نرسل إشعارات لجميع السائقين النشطين
-        console.log('⚠️ لم يتم العثور على سائقين في النطاق الأولي، إرسال إشعارات لجميع السائقين النشطين');
-        try {
-          const { data: allActiveDrivers } = await supabase
-            .from('profiles')
-            .select('id')
-            .eq('role', 'driver')
-            .eq('status', 'active')
-            .eq('approval_status', 'approved');
-
-          if (allActiveDrivers && allActiveDrivers.length > 0) {
-            const title = 'طلب جديد متاح';
-            const message = `يوجد طلب جديد متاح. السعر: ${orderPrice} ج.م`;
-            const type = 'info';
-
-            let successCount = 0;
-            let errorCount = 0;
-
-            for (const driver of allActiveDrivers) {
-              try {
-                const { error } = await supabase.rpc('insert_notification_for_driver', {
-                  p_user_id: driver.id,
-                  p_title: title,
-                  p_message: message,
-                  p_type: type,
-                  p_order_id: orderId,
-                });
-
-                if (error) {
-                  console.error(`❌ خطأ في إرسال إشعار بديل للسائق ${driver.id}:`, error);
-                  errorCount++;
-                } else {
-                  successCount++;
-                }
-              } catch (err) {
-                console.error(`❌ خطأ في إرسال إشعار بديل للسائق ${driver.id}:`, err);
-                errorCount++;
-              }
-            }
-
-            if (successCount > 0) {
-              console.log(`✅ تم إرسال ${successCount} إشعار بديل لجميع السائقين النشطين`);
-            }
-            if (errorCount > 0) {
-              console.error(`❌ فشل إرسال ${errorCount} إشعار بديل`);
-            }
-          }
-        } catch (fallbackErr) {
-          console.error('❌ خطأ في إرسال الإشعارات البديلة:', fallbackErr);
-        }
+      } catch (navError) {
+        console.error('❌ Navigation error:', navError);
+        showSimpleAlert('✅ نجح', message, 'success');
       }
-
-      const initialStartTime = Date.now();
-      const checkInterval = setInterval(async () => {
-        const accepted = await checkOrderAccepted();
-        if (accepted) {
-          clearInterval(checkInterval);
-          await supabase
-            .from('orders')
-            .update({ search_status: 'found' })
-            .eq('id', orderId);
-          return;
-        }
-
-        if (Date.now() - initialStartTime >= initialDuration * 1000) {
-          clearInterval(checkInterval);
-          
-          await supabase
-            .from('orders')
-            .update({
-              search_status: 'expanded',
-              search_expanded_at: new Date().toISOString(),
-            })
-            .eq('id', orderId);
-
-          const expandedDrivers = await findDriversInRadius(expandedRadius);
-          const newDrivers = expandedDrivers.filter(
-            ed => !initialDrivers.some(id => id.driver_id === ed.driver_id)
-          );
-          
-          if (newDrivers.length > 0) {
-            await notifyDrivers(newDrivers, expandedRadius, orderId, orderPrice);
-          }
-
-          const expandedStartTime = Date.now();
-          const expandedCheckInterval = setInterval(async () => {
-            const accepted = await checkOrderAccepted();
-            if (accepted) {
-              clearInterval(expandedCheckInterval);
-              await supabase
-                .from('orders')
-                .update({ search_status: 'found' })
-                .eq('id', orderId);
-              return;
-            }
-
-            if (Date.now() - expandedStartTime >= expandedDuration * 1000) {
-              clearInterval(expandedCheckInterval);
-              await supabase
-                .from('orders')
-                .update({ search_status: 'stopped' })
-                .eq('id', orderId);
-            }
-          }, 1000);
-        }
-      }, 1000);
-    } catch (error) {
-      console.error('Error in order search:', error);
+    } catch (error: any) {
+      console.error('❌ Error in handleSubmit:', error);
+      setLoading(false);
+      showSimpleAlert('خطأ', error.message || 'فشل إرسال الطلب', 'error');
     }
   };
+
 
   return (
     <SafeAreaView style={styles.container}>

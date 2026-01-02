@@ -13,13 +13,10 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { useTranslation } from 'react-i18next';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { getCurrentLocation, requestLocationPermission } from '@/lib/webUtils';
 import responsive, { createShadowStyle } from '@/utils/responsive';
-import { createNotification } from '@/lib/notifications';
-import OrderCard from '@/components/OrderCard';
-import { showSimpleAlert, showToast } from '@/lib/alert';
+import { showSimpleAlert } from '@/lib/alert';
 
 interface Order {
   id: string;
@@ -33,12 +30,8 @@ interface Order {
   delivery_address: string;
   total_fee: number;
   created_at: string;
-  search_status?: string;
-  negotiated_price?: number;
-  negotiation_status?: string;
-  driver_proposed_price?: number;
-  customer_proposed_price?: number;
-  negotiation_history?: any[];
+  expires_at?: string | null;
+  created_by_role?: 'customer' | 'driver' | 'admin';
   customer?: {
     full_name?: string;
     phone?: string;
@@ -47,184 +40,290 @@ interface Order {
 
 export default function DriverTripsScreen() {
   const { user } = useAuth();
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [activeOrder, setActiveOrder] = useState<Order | null>(null);
+  const [availableOrders, setAvailableOrders] = useState<Order[]>([]);
+  const [activeOrders, setActiveOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const { t } = useTranslation();
   const router = useRouter();
+  const isLoadingOrdersRef = useRef(false);
+  const locallyAcceptedOrdersRef = useRef<Order[]>([]); // حفظ الطلبات المقبولة محلياً
   
-  // Calculate tab bar padding for web
   const tabBarBottomPadding = Platform.OS === 'web' ? responsive.getTabBarBottomPadding() : 0;
   const styles = getStyles(tabBarBottomPadding);
   
-  // Reference لتتبع interval الموقع
-  const locationIntervalRef = useRef<NodeJS.Timeout | null>(null);
-
   useEffect(() => {
     if (user) {
-      loadNewOrders();
-      loadActiveOrder();
+      console.log('🔄 [trips] useEffect triggered:', {
+        userId: user.id,
+        userRole: user.role,
+      });
       
-      // الاشتراك في تحديثات الطلبات المعلقة
+      // تنظيف الـ state المحلي عند تحميل الصفحة
+      // هذا يضمن أن الـ state متزامن مع قاعدة البيانات
+      setActiveOrders([]);
+      setAvailableOrders([]);
+      locallyAcceptedOrdersRef.current = []; // تنظيف الطلبات المقبولة محلياً
+      
+      loadOrders();
+      
+      // الاشتراك في تحديثات الطلبات
       const subscription = supabase
-        .channel('driver_orders')
+        .channel(`driver_orders_${user.id}_${Date.now()}`)
         .on(
           'postgres_changes',
           {
             event: '*',
             schema: 'public',
             table: 'orders',
-            filter: 'status=eq.pending',
-          },
-          () => {
-            loadNewOrders();
-          }
-        )
-        .subscribe();
-
-      // الاشتراك في تحديثات الطلبات المقبولة في حالة التفاوض
-      const negotiatingOrdersSubscription = supabase
-        .channel(`driver_negotiating_orders_${user.id}`)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'orders',
-            filter: `driver_id=eq.${user.id}`,
           },
           (payload) => {
-            const updatedOrder = payload.new as any;
-            // إذا كان الطلب مقبولاً وفي حالة التفاوض (negotiation_status != 'accepted' أو null)
-            if (updatedOrder.status === 'accepted' && updatedOrder.negotiation_status !== 'accepted') {
-              loadNewOrders();
-            }
+            console.log('🔄 [trips] Realtime event received:', {
+              event: payload.eventType,
+              order_id: payload.new?.id || payload.old?.id,
+              status: payload.new?.status,
+              driver_id: payload.new?.driver_id,
+            });
+            loadOrders();
           }
         )
-        .subscribe();
-
-      // الاشتراك في تحديثات الرحلة النشطة
-      const activeOrderSubscription = supabase
-        .channel(`driver_active_order_${user.id}`)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'orders',
-            filter: `driver_id=eq.${user.id}`,
-          },
-          () => {
-            loadActiveOrder();
-          }
-        )
-        .subscribe();
-
+        .subscribe((status) => {
+          console.log('🔄 [trips] Subscription status:', status);
+        });
+      
       return () => {
         subscription.unsubscribe();
-        negotiatingOrdersSubscription.unsubscribe();
-        activeOrderSubscription.unsubscribe();
       };
     }
   }, [user]);
 
   const onRefresh = async () => {
-    console.log('🔄 [Pull to Refresh] Driver trips refresh started');
     setRefreshing(true);
     try {
-      await loadNewOrders();
-      console.log('✅ [Pull to Refresh] New orders loaded');
-      await loadActiveOrder();
-      console.log('✅ [Pull to Refresh] Active order loaded');
-      showToast('تم تحديث الطلبات', 'success');
-    } catch (error) {
-      console.error('❌ [Pull to Refresh] Error during refresh:', error);
-      showToast('حدث خطأ أثناء التحديث', 'error');
+      await loadOrders();
     } finally {
-      console.log('✅ [Pull to Refresh] Driver trips refresh completed');
       setRefreshing(false);
     }
   };
 
-  const loadNewOrders = async () => {
+  const loadOrders = async () => {
+    if (!user) return;
+    
+    // منع الاستدعاءات المتكررة
+    if (isLoadingOrdersRef.current) {
+      console.log('📊 [loadOrders] Already loading, skipping...');
+      return;
+    }
+    
     try {
+      isLoadingOrdersRef.current = true;
       setLoading(true);
-      // جلب الطلبات الموجهة لهذا السائق (driver_id = user.id) أو الطلبات العامة (driver_id = null)
-      // استخدام استعلامين منفصلين ثم دمج النتائج لتجنب مشاكل .or()
-      // أيضاً إظهار الطلبات المقبولة التي في حالة التفاوض (status = 'accepted' و driver_id = user.id و لا يوجد driver_proposed_price بعد)
-      const [assignedOrders, generalOrders, negotiatingOrders] = await Promise.all([
-        // الطلبات الموجهة لهذا السائق والمعلقة
-        supabase
-          .from('orders')
-          .select('*')
-          .eq('status', 'pending')
-          .eq('driver_id', user?.id)
-          .order('created_at', { ascending: false }),
-        // الطلبات العامة (بدون سائق)
-        supabase
-          .from('orders')
-          .select('*')
-          .eq('status', 'pending')
-          .is('driver_id', null)
-          .order('created_at', { ascending: false }),
-        // الطلبات المقبولة التي في حالة التفاوض (جميع حالات التفاوض)
-        // - negotiation_status = null (قبل إرسال اقتراح)
-        // - negotiation_status = 'driver_proposed' (بعد إرسال السائق لاقتراح)
-        // - negotiation_status = 'customer_proposed' (بعد إرسال العميل لاقتراح)
-        supabase
-          .from('orders')
-          .select('*')
-          .eq('status', 'accepted')
-          .eq('driver_id', user?.id)
-          .or('negotiation_status.is.null,negotiation_status.eq.driver_proposed,negotiation_status.eq.customer_proposed') // تضمين جميع حالات التفاوض
-          .order('created_at', { ascending: false }),
-      ]);
-
-      if (assignedOrders.error) throw assignedOrders.error;
-      if (generalOrders.error) throw generalOrders.error;
-      if (negotiatingOrders.error) throw negotiatingOrders.error;
-
-      // دمج النتائج وإزالة التكرارات (بما في ذلك الطلبات في حالة التفاوض)
-      const allOrders = [
-        ...(assignedOrders.data || []), 
-        ...(generalOrders.data || []),
-        ...(negotiatingOrders.data || [])
-      ];
-      const uniqueOrders = allOrders.filter((order, index, self) =>
-        index === self.findIndex((o) => o.id === order.id)
-      );
       
-      // تصفية الطلبات التي توقف البحث عنها (لا تظهر للسائقين)
-      const activeSearchOrders = uniqueOrders.filter((order: any) => {
-        // إخفاء الطلبات التي search_status = 'stopped'
-        if (order.search_status === 'stopped') {
-          console.log('🛑 طلب متوقف، تم إخفاؤه من قائمة السائقين:', order.id);
-          return false;
-        }
-        return true;
+      // جلب الطلبات النشطة (مقبولة من هذا السائق) - استخدام نفس النهج الذي يستخدمه useMyOrders
+      console.log('🔍 [loadOrders] جلب الطلبات النشطة للسائق:', {
+        userId: user.id,
+        userRole: user.role,
       });
       
-      // ترتيب حسب التاريخ
-      activeSearchOrders.sort((a, b) => 
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      );
+      // التحقق من session و auth.uid()
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      const { data: { user: authUser } } = await supabase.auth.getUser();
       
-      // جلب بيانات العملاء بشكل منفصل
-      const customerIds = activeSearchOrders
-        .map((order: any) => order.customer_id)
-        .filter((id): id is string => id != null);
+      console.log('🔐 [loadOrders] Auth check:', {
+        userId: user.id,
+        authUserId: authUser?.id,
+        sessionUserId: currentSession?.user?.id,
+        sessionExists: !!currentSession,
+        authUserExists: !!authUser,
+        match: user.id === authUser?.id && user.id === currentSession?.user?.id,
+      });
+      
+      // تعريف المتغيرات
+      let allDriverOrders: any[] | null = null;
+      let activeError: any = null;
+      
+      // إذا لم يكن هناك session، نحاول استخدام Edge Function لتجاوز RLS
+      if (!currentSession || !authUser) {
+        console.warn('⚠️ [loadOrders] No active session, using Edge Function to bypass RLS...');
+        
+        try {
+          const { data: edgeData, error: edgeError } = await supabase.functions.invoke('get-driver-orders', {
+            body: {
+              driverId: user.id,
+            },
+          });
+
+          if (!edgeError && edgeData?.success && edgeData?.orders) {
+            console.log('✅ [loadOrders] Orders loaded via Edge Function:', edgeData.orders.length);
+            allDriverOrders = edgeData.orders;
+            activeError = null;
+          } else {
+            console.error('❌ [loadOrders] Edge Function failed:', edgeError);
+            // نستمر مع الاستعلام العادي
+          }
+        } catch (edgeErr) {
+          console.error('❌ [loadOrders] Edge Function exception:', edgeErr);
+          // نستمر مع الاستعلام العادي
+        }
+      }
+      
+      // إذا لم نستخدم Edge Function، نستخدم الاستعلام العادي
+      if (!allDriverOrders) {
+        // استخدام استعلام بسيط مثل useMyOrders (بدون filter على status)
+        // ثم تصفية محلياً للطلبات النشطة فقط
+        console.log('🔍 [loadOrders] Executing query for driver:', user.id);
+        
+        const { data: driverOrders, error: queryError } = await supabase
+          .from('orders')
+          .select('id, status, order_type, items, pickup_address, delivery_address, total_fee, created_at, expires_at, customer_id, driver_id, created_by_role')
+          .eq('driver_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(50);
+        
+        allDriverOrders = driverOrders;
+        activeError = queryError;
+      }
+
+      console.log('📊 [loadOrders] Query result:', {
+        hasData: !!allDriverOrders,
+        dataLength: allDriverOrders?.length || 0,
+        hasError: !!activeError,
+        errorCode: activeError?.code,
+        errorMessage: activeError?.message,
+        errorDetails: activeError?.details,
+        errorHint: activeError?.hint,
+        firstOrder: allDriverOrders?.[0] ? {
+          id: allDriverOrders[0].id,
+          status: allDriverOrders[0].status,
+          driver_id: allDriverOrders[0].driver_id,
+        } : null,
+      });
+
+      // تصفية محلياً للطلبات النشطة فقط
+      let activeData = (allDriverOrders || []).filter(order => 
+        ['accepted', 'pickedUp', 'inTransit'].includes(order.status)
+      );
+
+      console.log('🔍 [loadOrders] After filtering for active status:', {
+        totalOrders: allDriverOrders?.length || 0,
+        activeOrders: activeData.length,
+        allStatuses: allDriverOrders?.map(o => o.status) || [],
+      });
+
+      // إذا لم يتم جلب أي طلبات، قد تكون المشكلة في RLS
+      // في هذه الحالة، سنحاول استخدام استعلام بدون filter على driver_id
+      // ثم تصفية محلياً (مثل ما يحدث في useMyOrders للعميل)
+      if ((!allDriverOrders || allDriverOrders.length === 0) && !activeError) {
+        console.warn('⚠️ [loadOrders] No orders found, trying alternative query without driver_id filter...');
+        
+        try {
+          // محاولة جلب جميع الطلبات النشطة ثم تصفية محلياً
+          const { data: allActiveOrders, error: altError } = await supabase
+            .from('orders')
+            .select('id, status, order_type, items, pickup_address, delivery_address, total_fee, created_at, expires_at, customer_id, driver_id, created_by_role')
+            .in('status', ['accepted', 'pickedUp', 'inTransit'])
+            .order('created_at', { ascending: false })
+            .limit(50);
+          
+          if (!altError && allActiveOrders) {
+            // تصفية محلياً للطلبات التي driver_id = user.id
+            const filtered = allActiveOrders.filter(o => o.driver_id === user.id);
+            console.log('✅ [loadOrders] Alternative query found orders:', {
+              total: allActiveOrders.length,
+              filtered: filtered.length,
+            });
+            allDriverOrders = filtered;
+            activeData = filtered;
+          } else {
+            console.error('❌ [loadOrders] Alternative query also failed:', altError);
+          }
+        } catch (altErr) {
+          console.error('❌ [loadOrders] Alternative query exception:', altErr);
+        }
+      }
+
+      if (activeError) {
+        console.error('❌ [loadOrders] خطأ في جلب الطلبات النشطة:', {
+          error: activeError,
+          code: activeError.code,
+          message: activeError.message,
+          details: activeError.details,
+          hint: activeError.hint,
+        });
+        // لا نرمي الخطأ، بل نستمر مع قائمة فارغة
+        activeData = [];
+      }
+      
+      console.log('📦 [loadOrders] الطلبات النشطة من قاعدة البيانات:', {
+        count: activeData?.length || 0,
+        orders: activeData?.map(o => ({ 
+          id: o.id, 
+          status: o.status, 
+          driver_id: o.driver_id,
+          customer_id: o.customer_id,
+        })) || [],
+      });
+
+      // جلب الطلبات المتاحة (pending وليس لها driver_id أو driver_id = null)
+      // واستبعاد الطلبات المنتهية الصلاحية أو الملغاة
+      const now = new Date().toISOString();
+      const { data: availableData, error: availableError } = await supabase
+        .from('orders')
+        .select('id, status, order_type, items, pickup_address, delivery_address, total_fee, created_at, expires_at, customer_id, driver_id, created_by_role')
+        .eq('status', 'pending')
+        .is('driver_id', null)
+        .order('created_at', { ascending: false })
+        .limit(50); // تحديد عدد الطلبات
+
+      // تصفية الطلبات المنتهية الصلاحية أو الملغاة
+      const filteredAvailable = (availableData || []).filter((order: any) => {
+        // استبعاد الطلبات الملغاة
+        if (order.status === 'cancelled') return false;
+        
+        // استبعاد الطلبات المنتهية الصلاحية
+        if (order.expires_at) {
+          const expiresAt = new Date(order.expires_at).getTime();
+          const nowTime = new Date().getTime();
+          if (expiresAt < nowTime) {
+            // تحديث حالة الطلب إلى cancelled تلقائياً
+            supabase
+              .from('orders')
+              .update({
+                status: 'cancelled',
+                cancelled_at: new Date().toISOString(),
+              })
+              .eq('id', order.id)
+              .then(() => {
+                console.log('تم تحديث الطلب المنتهي الصلاحية:', order.id);
+              });
+            return false;
+          }
+        }
+        
+        return true;
+      });
+
+      if (availableError) throw availableError;
+
+      // جلب بيانات العملاء بشكل متوازي (parallel) لتحسين الأداء
+      const customerIds = [
+        ...(activeData || []).map(o => o.customer_id),
+        ...filteredAvailable.map(o => o.customer_id),
+      ].filter((id): id is string => id != null);
       
       const customerProfilesMap = new Map<string, { full_name?: string; phone?: string }>();
       
+      // جلب بيانات العملاء فقط إذا كان هناك عملاء
       if (customerIds.length > 0) {
         const uniqueCustomerIds = [...new Set(customerIds)];
-        const { data: profiles, error: profilesError } = await supabase
+        // استخدام Promise.all لجلب البيانات بشكل متوازي
+        const { data: profiles } = await supabase
           .from('profiles')
           .select('id, full_name, phone')
-          .in('id', uniqueCustomerIds);
+          .in('id', uniqueCustomerIds)
+          .limit(100); // تحديد عدد العملاء
         
-        if (!profilesError && profiles) {
+        if (profiles) {
           profiles.forEach((profile: any) => {
             customerProfilesMap.set(profile.id, {
               full_name: profile.full_name,
@@ -233,376 +332,312 @@ export default function DriverTripsScreen() {
           });
         }
       }
+
+      // إضافة بيانات العملاء للطلبات
+      const activeWithCustomers = (activeData || []).map(order => ({
+        ...order,
+        customer: order.customer_id ? (customerProfilesMap.get(order.customer_id) || null) : null,
+      }));
+
+      const availableWithCustomers = filteredAvailable.map(order => ({
+        ...order,
+        customer: order.customer_id ? (customerProfilesMap.get(order.customer_id) || null) : null,
+      }));
+
+      // دمج الطلبات من قاعدة البيانات مع الطلبات المقبولة محلياً
+      // هذا يضمن أن الطلبات المقبولة تظهر فوراً حتى لو كان هناك تأخير في قاعدة البيانات
+      const currentActiveOrderIds = new Set(activeWithCustomers.map(o => o.id));
       
-      // تحويل البيانات وتضمين بيانات العميل
-      const formattedOrders = activeSearchOrders.map((order: any) => {
-        // تسجيل البيانات للتأكد من وجود items
-        if (order.items) {
-          console.log('📍 طلب جديد يحتوي على items:', {
-            orderId: order.id,
-            itemsType: typeof order.items,
-            isArray: Array.isArray(order.items),
-            itemsLength: Array.isArray(order.items) ? order.items.length : 'N/A',
-          });
-        }
-        return {
-          ...order,
-          customer: order.customer_id ? (customerProfilesMap.get(order.customer_id) || null) : null,
-        };
+      // استخدام الطلبات المقبولة محلياً من useRef
+      const locallyAcceptedOrders = locallyAcceptedOrdersRef.current.filter(o => 
+        o.status === 'accepted' && 
+        o.driver_id === user.id && 
+        !currentActiveOrderIds.has(o.id)
+      );
+      
+      // دمج الطلبات: قاعدة البيانات أولاً، ثم الطلبات المقبولة محلياً
+      const mergedActiveOrders = [...activeWithCustomers, ...locallyAcceptedOrders];
+      
+      // إزالة الطلبات المقبولة من availableOrders إذا كانت موجودة
+      const mergedAvailableOrders = availableWithCustomers.filter(o => 
+        !locallyAcceptedOrders.some(lao => lao.id === o.id)
+      );
+      
+      // تنظيف الطلبات المقبولة محلياً إذا كانت موجودة في قاعدة البيانات
+      locallyAcceptedOrdersRef.current = locallyAcceptedOrdersRef.current.filter(o => 
+        !currentActiveOrderIds.has(o.id)
+      );
+
+      // تحديث الـ state
+      console.log('🔄 [loadOrders] Updating state:', {
+        mergedActiveCount: mergedActiveOrders.length,
+        mergedAvailableCount: mergedAvailableOrders.length,
+        activeDataCount: activeData?.length || 0,
+        activeWithCustomersCount: activeWithCustomers.length,
+        locallyAcceptedCount: locallyAcceptedOrders.length,
       });
       
-      setOrders(formattedOrders);
+      setActiveOrders(mergedActiveOrders);
+      setAvailableOrders(mergedAvailableOrders);
+      
+      // التحقق من أن الـ state تم تحديثه
+      setTimeout(() => {
+        console.log('✅ [loadOrders] State updated:', {
+          activeOrdersCount: mergedActiveOrders.length,
+          availableOrdersCount: mergedAvailableOrders.length,
+          activeOrdersIds: mergedActiveOrders.map(o => o.id),
+        });
+      }, 100);
+      
+      console.log('📊 [loadOrders] Orders loaded:', {
+        active: activeWithCustomers.length,
+        available: availableWithCustomers.length,
+        mergedActive: mergedActiveOrders.length,
+        mergedAvailable: mergedAvailableOrders.length,
+        activeIds: activeWithCustomers.map(o => o.id),
+        availableIds: availableWithCustomers.map(o => o.id),
+        activeOrdersDetails: activeWithCustomers.map(o => ({
+          id: o.id,
+          status: o.status,
+          driver_id: o.driver_id,
+          customer_id: o.customer_id,
+        })),
+      });
     } catch (error) {
       console.error('Error loading orders:', error);
+      showSimpleAlert('خطأ', 'فشل تحميل الطلبات', 'error');
     } finally {
       setLoading(false);
+      isLoadingOrdersRef.current = false;
     }
   };
 
+  const handleAcceptOrder = async (order: Order) => {
+    console.log('🔄 [handleAcceptOrder] بدء قبول الطلب:', {
+      orderId: order.id,
+      userId: user?.id,
+      orderStatus: order.status,
+    });
 
-  // دالة قبول الطلب بالسعر الأصلي
-  const handleAcceptOrder = async (order: any) => {
-    setLoading(true);
+    if (!user?.id) {
+      console.error('❌ [handleAcceptOrder] لا يوجد مستخدم');
+      showSimpleAlert('خطأ', 'يجب تسجيل الدخول أولاً', 'error');
+      return;
+    }
+
     try {
-      // استخدام Edge Function لتحديث الطلب (لتجاوز RLS)
+      setLoading(true);
+      
+      // التحقق من أن الطلب لا يزال متاحاً (pending و driver_id = null)
+      console.log('🔍 [handleAcceptOrder] التحقق من الطلب...');
+      const { data: checkData, error: checkError } = await supabase
+        .from('orders')
+        .select('id, status, driver_id')
+        .eq('id', order.id)
+        .maybeSingle();
+
+      if (checkError) {
+        console.error('❌ [handleAcceptOrder] خطأ في التحقق من الطلب:', checkError);
+        throw checkError;
+      }
+
+      if (!checkData) {
+        console.error('❌ [handleAcceptOrder] الطلب غير موجود');
+        throw new Error('الطلب غير موجود');
+      }
+
+      console.log('✅ [handleAcceptOrder] بيانات الطلب:', checkData);
+
+      // التحقق من أن الطلب لا يزال متاحاً
+      if (checkData.status !== 'pending' || checkData.driver_id !== null) {
+        console.warn('⚠️ [handleAcceptOrder] الطلب لم يعد متاحاً:', {
+          status: checkData.status,
+          driver_id: checkData.driver_id,
+        });
+        showSimpleAlert('تنبيه', 'هذا الطلب لم يعد متاحاً', 'warning');
+        // إعادة تحميل الطلبات لإزالة الطلب من القائمة
+        await loadOrders();
+        return;
+      }
+
+      // تحديث الطلب في قاعدة البيانات باستخدام Edge Function (لتجاوز RLS)
+      console.log('💾 [handleAcceptOrder] تحديث الطلب في قاعدة البيانات...');
       const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-order', {
         body: {
           orderId: order.id,
           status: 'accepted',
-          driverId: user?.id,
-          negotiationStatus: 'accepted',
-          negotiatedPrice: order.total_fee,
+          driverId: user.id,
         },
       });
 
       if (edgeFunctionError) {
-        console.error('Error updating order via Edge Function:', edgeFunctionError);
+        console.error('❌ [handleAcceptOrder] خطأ في تحديث الطلب:', edgeFunctionError);
         throw edgeFunctionError;
       }
 
       if (!edgeFunctionData || !edgeFunctionData.success) {
-        console.error('Edge Function returned error:', edgeFunctionData?.error);
-        throw new Error(edgeFunctionData?.error || 'فشل قبول الطلب');
+        console.error('❌ [handleAcceptOrder] Edge Function returned error:', edgeFunctionData?.error);
+        throw new Error(edgeFunctionData?.error || 'فشل تحديث الطلب');
       }
+
+      console.log('✅ [handleAcceptOrder] تم تحديث الطلب بنجاح:', edgeFunctionData.order);
+
+      // تحديث الـ state المحلي فوراً لإظهار الطلب في "الرحلات النشطة"
+      // هذا يضمن أن الطلب يظهر فوراً حتى لو كان هناك تأخير في قاعدة البيانات
+      const acceptedOrder: Order = {
+        ...order,
+        status: 'accepted',
+        driver_id: user.id,
+      };
       
+      // حفظ الطلب المقبول محلياً
+      locallyAcceptedOrdersRef.current = [
+        ...locallyAcceptedOrdersRef.current.filter(o => o.id !== order.id),
+        acceptedOrder,
+      ];
+      
+      // إزالة الطلب من availableOrders وإضافته إلى activeOrders
+      setAvailableOrders(prev => prev.filter(o => o.id !== order.id));
+      setActiveOrders(prev => {
+        // التحقق من أن الطلب غير موجود بالفعل في activeOrders
+        if (prev.some(o => o.id === order.id)) {
+          return prev;
+        }
+        // إضافة الطلب في البداية (أعلى القائمة)
+        return [acceptedOrder, ...prev];
+      });
+      
+      console.log('✅ [handleAcceptOrder] تم تحديث الـ state المحلي فوراً');
+
       // إرسال إشعار للعميل
       if (order.customer_id) {
-        await createNotification({
-          user_id: order.customer_id,
-          title: 'تم قبول طلبك',
-          message: 'تم قبول طلبك وسيتم البدء في التوصيل قريباً.',
-          type: 'success',
-          order_id: order.id,
-        });
-      }
-      
-      // إعادة تحميل الرحلة النشطة مع بيانات العميل
-      await loadActiveOrder();
-      startLocationTracking(order.id);
-      loadNewOrders(); // إعادة تحميل قائمة الطلبات
-      showSimpleAlert('نجح', 'تم قبول الطلب بنجاح', 'success');
-    } catch (error: any) {
-      showSimpleAlert('خطأ', error.message || 'فشل قبول الطلب', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-
-  const startLocationTracking = async (orderId: string) => {
-    // إيقاف أي تتبع سابق
-    stopLocationTracking();
-    
-    const hasPermission = await requestLocationPermission();
-    if (!hasPermission) {
-      showSimpleAlert('خطأ', 'يجب السماح بالوصول إلى الموقع', 'error');
-      return;
-    }
-
-    // بدء تتبع الموقع كل 5 ثوانٍ
-    locationIntervalRef.current = setInterval(async () => {
-      try {
-        if (!user?.id) return;
-        
-        const location = await getCurrentLocation({
-          enableHighAccuracy: true,
-          timeout: 5000,
-        });
-        
-        // استخدام Edge Function لتحديث الموقع (لتجاوز RLS)
-        const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-driver-location', {
-          body: {
-            driverId: user.id,
-            latitude: location.latitude,
-            longitude: location.longitude,
-            orderId: orderId,
-          },
-        });
-
-        if (edgeFunctionError) {
-          console.error('Error updating driver location via Edge Function:', edgeFunctionError);
-          return;
-        }
-
-        if (!edgeFunctionData || !edgeFunctionData.success) {
-          console.error('Edge Function returned error:', edgeFunctionData?.error);
-          return;
-        }
-      } catch (error) {
-        console.error('Error updating driver location:', error);
-      }
-    }, 5000);
-  };
-
-  const stopLocationTracking = () => {
-    if (locationIntervalRef.current) {
-      clearInterval(locationIntervalRef.current);
-      locationIntervalRef.current = null;
-    }
-  };
-
-  const markPickedUp = async () => {
-    if (!activeOrder) return;
-
-    setLoading(true);
-    try {
-      // استخدام Edge Function لتحديث الطلب (لتجاوز RLS)
-      const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-order', {
-        body: {
-          orderId: activeOrder.id,
-          status: 'pickedUp',
-        },
-      });
-
-      if (edgeFunctionError) {
-        console.error('Error updating order via Edge Function:', edgeFunctionError);
-        throw edgeFunctionError;
-      }
-
-      if (!edgeFunctionData || !edgeFunctionData.success) {
-        console.error('Edge Function returned error:', edgeFunctionData?.error);
-        throw new Error(edgeFunctionData?.error || 'فشل تحديث حالة الطلب');
-      }
-      
-      // إرسال إشعار للعميل
-      if (activeOrder.customer_id) {
         try {
-          await createNotification({
-            user_id: activeOrder.customer_id,
-            title: 'تم استلام طلبك',
-            message: 'تم استلام طلبك من نقطة الاستلام.',
-            type: 'info'
+          console.log('📧 [handleAcceptOrder] إرسال إشعار للعميل...');
+          const { error: notifError } = await supabase.rpc('insert_notification_for_customer_by_driver', {
+            p_user_id: order.customer_id,
+            p_title: 'تم قبول طلبك',
+            p_message: 'تم قبول طلبك وسيتم البدء في التوصيل قريباً.',
+            p_type: 'success',
+            p_order_id: order.id,
           });
-        } catch (notifErr) {
-          console.error('Error sending notification to customer:', notifErr);
+          
+          if (notifError) {
+            console.error('⚠️ [handleAcceptOrder] خطأ في إرسال الإشعار:', notifError);
+          } else {
+            console.log('✅ [handleAcceptOrder] تم إرسال إشعار للعميل');
+          }
+        } catch (notifError) {
+          console.error('⚠️ [handleAcceptOrder] خطأ في إرسال الإشعار:', notifError);
+          // لا نوقف العملية إذا فشل الإشعار
         }
       }
+
+      // إعادة تحميل الطلبات بعد تأخير للتأكد من تحديث قاعدة البيانات
+      // هذا يضمن أن التحديثات قد تم تطبيقها قبل إعادة التحميل
+      // خاصة في حالة replication lag
+      console.log('🔄 [handleAcceptOrder] إعادة تحميل الطلبات بعد تأخير...');
+      setTimeout(async () => {
+        await loadOrders();
+      }, 1500); // تأخير 1500ms للتأكد من تحديث قاعدة البيانات
       
-      showSimpleAlert('نجح', 'تم تحديث حالة الطلب', 'success');
-      loadActiveOrder(); // إعادة تحميل الطلب النشط
+      console.log('✅ [handleAcceptOrder] تم قبول الطلب بنجاح');
     } catch (error: any) {
-      showSimpleAlert('خطأ', error.message || 'فشل تحديث حالة الطلب', 'error');
+      console.error('❌ [handleAcceptOrder] خطأ في قبول الطلب:', error);
+      const errorMessage = error?.message || error?.details || 'فشل قبول الطلب';
+      showSimpleAlert('خطأ', errorMessage, 'error');
+      // إعادة تحميل الطلبات في حالة الخطأ
+      try {
+        await loadOrders();
+      } catch (reloadError) {
+        console.error('❌ [handleAcceptOrder] خطأ في إعادة تحميل الطلبات:', reloadError);
+      }
     } finally {
       setLoading(false);
+      console.log('🏁 [handleAcceptOrder] انتهى قبول الطلب');
     }
   };
 
-  const markDelivered = async () => {
-    if (!activeOrder) return;
-
-    setLoading(true);
+  const handleCancelOrder = async (order: Order) => {
     try {
-      // استخدام Edge Function لتحديث الطلب (لتجاوز RLS)
-      const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-order', {
-        body: {
-          orderId: activeOrder.id,
-          status: 'completed',
-          completedAt: new Date().toISOString(),
-        },
-      });
+      setLoading(true);
+      
+      // التحقق من أن المستخدم هو من أنشأ الطلب
+      // السائق يمكنه إلغاء الطلب إذا كان created_by_role = 'driver' و customer_id = user.id
+      // العميل يمكنه إلغاء الطلب إذا كان customer_id = user.id
+      // الأدمن يمكنه إلغاء أي طلب
+      const canCancel = 
+        (order.created_by_role === 'driver' && order.customer_id === user?.id) ||
+        (order.customer_id === user?.id) ||
+        (user?.role === 'admin');
 
-      if (edgeFunctionError) {
-        console.error('Error updating order via Edge Function:', edgeFunctionError);
-        throw edgeFunctionError;
-      }
-
-      if (!edgeFunctionData || !edgeFunctionData.success) {
-        console.error('Edge Function returned error:', edgeFunctionData?.error);
-        throw new Error(edgeFunctionData?.error || 'فشل تحديث حالة الطلب');
-      }
-
-      // إضافة المبلغ إلى محفظة السائق
-      const commission = activeOrder.total_fee * 0.1;
-      await supabase.from('wallets').insert({
-        driver_id: user?.id,
-        order_id: activeOrder.id,
-        amount: activeOrder.total_fee - commission,
-        commission: commission,
-        type: 'earning',
-      });
-
-      // إرسال إشعار للعميل
-      if (activeOrder.customer_id) {
-        await createNotification({
-          user_id: activeOrder.customer_id,
-          title: 'تم إكمال طلبك',
-          message: `تم إكمال طلبك بنجاح. شكراً لاستخدامك Flash Delivery!`,
-          type: 'success'
-        });
-      }
-
-      stopLocationTracking(); // إيقاف تتبع الموقع
-      setActiveOrder(null);
-      showSimpleAlert('نجح', 'تم إكمال الطلب', 'success');
-      loadNewOrders();
-    } catch (error: any) {
-      showSimpleAlert('خطأ', error.message || 'فشل إكمال الطلب', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadActiveOrder = async () => {
-    if (!user) return;
-    try {
-      // جلب الطلبات النشطة (مستثنياً الطلبات في حالة التفاوض)
-      // الطلبات في حالة التفاوض: status = 'accepted' و driver_id = user.id و !driver_proposed_price و !negotiation_status
-      const { data, error } = await supabase
-        .from('orders')
-        .select('*')
-        .eq('driver_id', user.id)
-        .in('status', ['accepted', 'pickedUp', 'inTransit'])
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      if (error) {
-        console.error('Error loading active order:', error);
+      if (!canCancel) {
+        showSimpleAlert('خطأ', 'ليس لديك صلاحية لإلغاء هذا الطلب', 'error');
         return;
       }
 
-      // تصفية الطلبات في حالة التفاوض (لا نعرضها كرحلة نشطة)
-      // الرحلة النشطة تبدأ فقط عندما negotiation_status = 'accepted' (تم الاتفاق على السعر)
-      const filteredData = data?.filter((order: any) => {
-        // إذا كان الطلب في حالة accepted و negotiation_status != 'accepted'
-        // فهذا يعني أنه في حالة التفاوض، يجب استبعاده من الرحلة النشطة
-        if (order.status === 'accepted' && order.negotiation_status !== 'accepted') {
-          return false; // استبعاد الطلبات في حالة التفاوض
-        }
-        return true;
-      });
+      const { error } = await supabase
+        .from('orders')
+        .update({
+          status: 'cancelled',
+          cancelled_by: user?.id,
+          cancelled_at: new Date().toISOString(),
+        })
+        .eq('id', order.id);
 
-      // استخدام البيانات المفلترة (بدون الطلبات في حالة التفاوض)
-      const activeOrderData = filteredData && filteredData.length > 0 ? filteredData[0] : null;
+      if (error) throw error;
 
-      // إذا كان هناك طلب نشط (وليس في حالة التفاوض)، استخدمه
-      if (activeOrderData) {
-        const orderData = activeOrderData;
-        
-        // جلب بيانات العميل بشكل منفصل
-        let customerData = null;
-        if (orderData.customer_id) {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('full_name, phone')
-            .eq('id', orderData.customer_id)
-            .single();
-          
-          if (profile) {
-            customerData = {
-              full_name: profile.full_name,
-              phone: profile.phone,
-            };
-          }
-        }
-        
-        setActiveOrder({
-          ...orderData,
-          customer: customerData,
-        });
-        
-        // بدء تتبع الموقع
-        startLocationTracking(orderData.id);
-      } else {
-        // لا يوجد طلب نشط (أو جميع الطلبات في حالة التفاوض)
-        setActiveOrder(null);
-        stopLocationTracking();
-      }
-    } catch (error) {
-      console.error('Error loading active order:', error);
+      showSimpleAlert('نجح', 'تم إلغاء الطلب', 'success');
+      loadOrders();
+    } catch (error: any) {
+      showSimpleAlert('خطأ', error.message || 'فشل إلغاء الطلب', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
-  // تنظيف interval عند unmount
-  useEffect(() => {
-    return () => {
-      stopLocationTracking();
-    };
-  }, []);
+  const handleTrackTrip = async (order: Order) => {
+    console.log('🔄 [handleTrackTrip] Navigating to track-trip:', {
+      orderId: order.id,
+      status: order.status,
+      driver_id: order.driver_id,
+    });
+    
+    if (!order.id) {
+      console.error('❌ [handleTrackTrip] Order ID is missing');
+      showSimpleAlert('خطأ', 'معرف الطلب غير موجود', 'error');
+      return;
+    }
+    
+    // إضافة تأخير أطول للتأكد من التزام قاعدة البيانات
+    // هذا يساعد في تجنب مشاكل التوقيت عند الانتقال مباشرة بعد قبول الطلب
+    // خاصة في حالة replication lag
+    console.log('⏳ [handleTrackTrip] Waiting for database commit...');
+    await new Promise(resolve => setTimeout(resolve, 800));
+    
+    router.push({
+      pathname: '/driver/track-trip',
+      params: { orderId: order.id },
+    });
+  };
 
-  if (activeOrder) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.title}>رحلة نشطة</Text>
-          <TouchableOpacity
-            onPress={() => setActiveOrder(null)}
-            style={styles.backButton}
-          >
-            <Ionicons name="arrow-back" size={24} color="#007AFF" />
-          </TouchableOpacity>
-        </View>
-        <ScrollView 
-          contentContainerStyle={styles.activeTripContainer}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-        >
-          <OrderCard
-            order={{
-              ...activeOrder,
-              deadline: activeOrder.deadline, // إضافة deadline للعد التنازلي
-            } as any}
-            showActions={false} // لا نعرض أزرار الإجراءات في OrderCard لأن لدينا أزرار مخصصة هنا
-          />
+  const getTimeRemaining = (expiresAt: string | null | undefined): number | null => {
+    if (!expiresAt) return null;
+    const now = new Date().getTime();
+    const expires = new Date(expiresAt).getTime();
+    const remaining = Math.max(0, Math.floor((expires - now) / 1000)); // بالثواني
+    return remaining;
+  };
 
-          <View style={styles.actionsContainer}>
-            {/* زر "تم الاستلام" - يظهر فقط إذا كان الطلب في حالة accepted */}
-            {activeOrder.status === 'accepted' && (
-              <TouchableOpacity
-                style={[styles.actionButton, styles.pickupButton]}
-                onPress={markPickedUp}
-                disabled={loading}
-              >
-                <Ionicons name="checkmark-circle" size={24} color="#fff" />
-                <Text style={styles.actionButtonText}>
-                  {t('driver.pickupReceived')}
-                </Text>
-              </TouchableOpacity>
-            )}
-
-            {/* زر "تم التوصيل" - يظهر إذا كان الطلب في حالة pickedUp أو inTransit */}
-            {(activeOrder.status === 'pickedUp' || activeOrder.status === 'inTransit' || activeOrder.status === 'accepted') && (
-              <TouchableOpacity
-                style={[styles.actionButton, styles.deliveryButton]}
-                onPress={markDelivered}
-                disabled={loading || activeOrder.status === 'accepted'}
-              >
-                <Ionicons name="checkmark-done" size={24} color="#fff" />
-                <Text style={styles.actionButtonText}>
-                  {t('driver.deliveryCompleted')}
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
+  const formatTime = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>{t('driver.newTrips')}</Text>
+        <Text style={styles.title}>الرحلات</Text>
       </View>
 
       <ScrollView 
@@ -611,43 +646,191 @@ export default function DriverTripsScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {orders.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Ionicons name="time-outline" size={64} color="#999" />
-            <Text style={styles.emptyText}>لا توجد طلبات جديدة</Text>
-          </View>
-        ) : (
-          orders.map((order) => {
-            // تحويل Order من trips.tsx إلى Order من useMyOrders
-            const orderCardData: any = {
-              id: order.id,
-              status: order.status,
-              order_type: order.order_type || 'package',
-              pickup_address: order.pickup_address,
-              delivery_address: order.delivery_address,
-              total_fee: order.total_fee,
-              created_at: order.created_at,
-              items: order.items,
-              negotiated_price: order.negotiated_price,
-              negotiation_status: order.negotiation_status,
-              driver_proposed_price: order.driver_proposed_price,
-              customer_proposed_price: order.customer_proposed_price,
-              customer_id: order.customer_id,
-              driver_id: order.driver_id,
-              search_status: order.search_status,
-              deadline: order.deadline, // إضافة deadline للعد التنازلي
-            };
-                    
-                    return (
-              <OrderCard
-                key={order.id}
-                order={orderCardData}
-                onAccept={handleAcceptOrder}
-                onOrderUpdated={loadNewOrders}
-              />
-            );
-          })
-        )}
+        {/* الطلبات النشطة */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            الرحلات النشطة {activeOrders.length > 0 && `(${activeOrders.length})`}
+          </Text>
+          {(() => {
+            console.log('🎨 [trips] Rendering active orders:', {
+              count: activeOrders.length,
+              ids: activeOrders.map(o => o.id),
+            });
+            return null;
+          })()}
+          {activeOrders.length > 0 ? (
+            activeOrders.map((order) => (
+              <View key={order.id} style={styles.orderCard}>
+                <View style={styles.orderHeader}>
+                  <View>
+                    <Text style={styles.orderType}>
+                      {order.order_type === 'package' ? 'توصيل طرد' : 'طلب شراء'}
+                    </Text>
+                    <Text style={styles.orderDate}>
+                      {new Date(order.created_at).toLocaleDateString('ar-EG', {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </Text>
+                  </View>
+                  <View style={[styles.statusBadge, { backgroundColor: '#007AFF20' }]}>
+                    <Text style={[styles.statusText, { color: '#007AFF' }]}>
+                      {order.status === 'accepted' ? 'مقبول' : 
+                       order.status === 'pickedUp' ? 'تم الاستلام' : 
+                       order.status === 'inTransit' ? 'قيد التوصيل' : order.status}
+                    </Text>
+                  </View>
+                </View>
+
+                {order.items && Array.isArray(order.items) && order.items.length > 2 ? (
+                  <View style={styles.multiPointContainer}>
+                    <Text style={styles.multiPointTitle}>
+                      مسار متعدد النقاط ({order.items.length} نقاط)
+                    </Text>
+                  </View>
+                ) : (
+                  <>
+                    <View style={styles.addressRow}>
+                      <Ionicons name="location" size={16} color="#34C759" />
+                      <Text style={styles.address}>من: {order.pickup_address}</Text>
+                    </View>
+                    <View style={styles.addressRow}>
+                      <Ionicons name="location" size={16} color="#FF3B30" />
+                      <Text style={styles.address}>إلى: {order.delivery_address}</Text>
+                    </View>
+                  </>
+                )}
+
+                <View style={styles.footer}>
+                  <Text style={styles.fee}>الأجرة: {order.total_fee} ج.م</Text>
+                  <TouchableOpacity
+                    style={styles.trackButton}
+                    onPress={() => handleTrackTrip(order)}
+                  >
+                    <Ionicons name="navigate" size={20} color="#fff" />
+                    <Text style={styles.trackButtonText}>متابعة الرحلة</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))
+          ) : (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="time-outline" size={48} color="#999" />
+              <Text style={styles.emptyText}>لا توجد رحلات نشطة</Text>
+            </View>
+          )}
+        </View>
+
+        {/* الطلبات المتاحة */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>الطلبات المتاحة</Text>
+          {loading && availableOrders.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <ActivityIndicator size="large" color="#007AFF" />
+            </View>
+          ) : availableOrders.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="time-outline" size={64} color="#999" />
+              <Text style={styles.emptyText}>لا توجد طلبات متاحة</Text>
+            </View>
+          ) : (
+            availableOrders.map((order) => {
+              const timeRemaining = getTimeRemaining(order.expires_at);
+              return (
+                <View key={order.id} style={styles.orderCard}>
+                  <View style={styles.orderHeader}>
+                    <View>
+                      <Text style={styles.orderType}>
+                        {order.order_type === 'package' ? 'توصيل طرد' : 'طلب شراء'}
+                      </Text>
+                      <Text style={styles.orderDate}>
+                        {new Date(order.created_at).toLocaleDateString('ar-EG', {
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </Text>
+                    </View>
+                    <View style={[styles.statusBadge, { backgroundColor: '#FF950020' }]}>
+                      <Text style={[styles.statusText, { color: '#FF9500' }]}>
+                        قيد الانتظار
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* شريط زمني */}
+                  {timeRemaining !== null && timeRemaining > 0 && (
+                    <View style={styles.timerContainer}>
+                      <Ionicons name="time" size={16} color="#FF9500" />
+                      <Text style={styles.timerText}>
+                        متبقي: {formatTime(timeRemaining)}
+                      </Text>
+                    </View>
+                  )}
+
+                  {order.items && Array.isArray(order.items) && order.items.length > 2 ? (
+                    <View style={styles.multiPointContainer}>
+                      <Text style={styles.multiPointTitle}>
+                        مسار متعدد النقاط ({order.items.length} نقاط)
+                      </Text>
+                    </View>
+                  ) : (
+                    <>
+                      <View style={styles.addressRow}>
+                        <Ionicons name="location" size={16} color="#34C759" />
+                        <Text style={styles.address}>من: {order.pickup_address}</Text>
+                      </View>
+                      <View style={styles.addressRow}>
+                        <Ionicons name="location" size={16} color="#FF3B30" />
+                        <Text style={styles.address}>إلى: {order.delivery_address}</Text>
+                      </View>
+                    </>
+                  )}
+
+                  <View style={styles.footer}>
+                    <Text style={styles.fee}>الأجرة: {order.total_fee} ج.م</Text>
+                    <View style={styles.footerButtons}>
+                      {/* زر إلغاء - يظهر فقط إذا كان السائق هو من أنشأ الطلب أو إذا كان العميل */}
+                      {((order.created_by_role === 'driver' && order.customer_id === user?.id) || 
+                        (order.customer_id === user?.id && order.created_by_role !== 'driver')) && (
+                        <TouchableOpacity
+                          style={styles.cancelButton}
+                          onPress={() => handleCancelOrder(order)}
+                          disabled={loading}
+                        >
+                          <Ionicons name="close-circle" size={18} color="#FF3B30" />
+                          <Text style={styles.cancelButtonText}>إلغاء</Text>
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity
+                        style={[styles.acceptButton, (loading || (timeRemaining !== null && timeRemaining <= 0)) && styles.acceptButtonDisabled]}
+                        onPress={() => {
+                          console.log('👆 [trips] تم الضغط على قبول الطلب:', order.id);
+                          handleAcceptOrder(order);
+                        }}
+                        disabled={loading || (timeRemaining !== null && timeRemaining <= 0)}
+                      >
+                        {loading ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <>
+                            <Ionicons name="checkmark-circle" size={20} color="#fff" />
+                            <Text style={styles.acceptButtonText}>قبول الطلب</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
+              );
+            })
+          )}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -689,11 +872,21 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
       width: '100%',
     }),
   },
+  section: {
+    marginBottom: 24,
+  },
+  sectionTitle: {
+    fontSize: responsive.getResponsiveFontSize(20),
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+    marginBottom: 16,
+    textAlign: 'right',
+  },
   orderCard: {
     backgroundColor: '#fff',
     borderRadius: 16,
-    padding: responsive.isTablet() ? 24 : 20,
-    marginBottom: responsive.isTablet() ? 20 : 16,
+    padding: 16,
+    marginBottom: 16,
     ...createShadowStyle({
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 2 },
@@ -701,122 +894,148 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
       shadowRadius: 8,
       elevation: 4,
     }),
-    ...(responsive.isLargeScreen() && {
-      maxWidth: responsive.getMaxContentWidth() - (responsive.getResponsivePadding() * 2),
-      alignSelf: 'center',
-      width: '100%',
-    }),
   },
   orderHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
     marginBottom: 12,
   },
-  orderId: {
-    fontSize: 16,
+  orderType: {
+    fontSize: responsive.getResponsiveFontSize(16),
     fontWeight: '600',
     color: '#1a1a1a',
+    marginBottom: 4,
   },
-  orderFee: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#007AFF',
-  },
-  orderAddress: {
-    fontSize: 14,
+  orderDate: {
+    fontSize: responsive.getResponsiveFontSize(12),
     color: '#666',
-    marginBottom: 8,
+  },
+  statusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  statusText: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    fontWeight: '600',
+  },
+  timerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#FFF4E6',
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+  },
+  timerText: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    fontWeight: '600',
+    color: '#FF9500',
+  },
+  addressRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 8,
+  },
+  address: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#666',
+    flex: 1,
     textAlign: 'right',
   },
-  acceptButton: {
-    backgroundColor: '#34C759',
+  multiPointContainer: {
+    backgroundColor: '#f9f9f9',
     borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
+    padding: 12,
+    marginTop: 8,
+  },
+  multiPointTitle: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    fontWeight: '600',
+    color: '#007AFF',
+    textAlign: 'right',
+  },
+  footer: {
     marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  footerButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+  fee: {
+    fontSize: responsive.getResponsiveFontSize(18),
+    fontWeight: 'bold',
+    color: '#34C759',
+  },
+  acceptButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#34C759',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  acceptButtonDisabled: {
+    opacity: 0.5,
+    backgroundColor: '#999',
   },
   acceptButtonText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: responsive.getResponsiveFontSize(14),
+    fontWeight: '600',
+  },
+  trackButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  cancelButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FF3B3020',
+    borderWidth: 1,
+    borderColor: '#FF3B30',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  cancelButtonText: {
+    color: '#FF3B30',
+    fontSize: responsive.getResponsiveFontSize(14),
+    fontWeight: '600',
+  },
+  trackButtonText: {
+    color: '#fff',
+    fontSize: responsive.getResponsiveFontSize(14),
     fontWeight: '600',
   },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingVertical: 40,
   },
   emptyText: {
     fontSize: responsive.getResponsiveFontSize(18),
     color: '#999',
     marginTop: 16,
-  },
-  activeTripContainer: {
-    flex: 1,
-    padding: responsive.getResponsivePadding(),
-    ...(responsive.isLargeScreen() && {
-      maxWidth: responsive.getMaxContentWidth(),
-      alignSelf: 'center',
-      width: '100%',
-    }),
-  },
-  actionsContainer: {
-    gap: responsive.isTablet() ? 20 : 16,
-  },
-  actionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    padding: responsive.isTablet() ? 20 : 16,
-    gap: 8,
-  },
-  pickupButton: {
-    backgroundColor: '#FF9500',
-  },
-  deliveryButton: {
-    backgroundColor: '#34C759',
-  },
-  actionButtonText: {
-    color: '#fff',
-    fontSize: responsive.getResponsiveFontSize(18),
-    fontWeight: '600',
-  },
-  orderHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  timeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-  },
-  timeText: {
-    fontSize: responsive.getResponsiveFontSize(12),
-    color: '#999',
-  },
-  searchStatusContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    backgroundColor: '#FFF4E6',
-    borderRadius: 6,
-    alignSelf: 'flex-start',
-  },
-  searchStatusText: {
-    fontSize: responsive.getResponsiveFontSize(12),
-    color: '#FF9500',
-    fontWeight: '500',
-  },
-  backButton: {
-    padding: 4,
   },
 });
 

@@ -423,8 +423,8 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="driver/dashboard"
         options={{
-          title: t('driver.dashboard'),
-          tabBarLabel: t('driver.dashboard'),
+          title: 'الرئيسية',
+          tabBarLabel: 'الرئيسية',
           tabBarIcon: ({ color }) => <Ionicons name="home" size={tabBarIconSize} color={color} />,
           tabBarButton: shouldHideTab(['driver']) ? () => null : undefined,
         }}
@@ -432,8 +432,8 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="driver/trips"
         options={{
-          title: t('driver.newTrips'),
-          tabBarLabel: t('driver.newTrips'),
+          title: 'الرحلات',
+          tabBarLabel: 'الرحلات',
           tabBarIcon: ({ color }) => <Ionicons name="navigate" size={tabBarIconSize} color={color} />,
           tabBarButton: shouldHideTab(['driver']) ? () => null : undefined,
         }}
@@ -441,8 +441,8 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="driver/wallet"
         options={{
-          title: t('driver.wallet'),
-          tabBarLabel: t('driver.wallet'),
+          title: 'المحفظة',
+          tabBarLabel: 'المحفظة',
           tabBarIcon: ({ color }) => <Ionicons name="wallet" size={tabBarIconSize} color={color} />,
           tabBarButton: shouldHideTab(['driver']) ? () => null : undefined,
         }}
@@ -450,19 +450,17 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="driver/history"
         options={{
-          title: t('driver.tripHistory'),
-          tabBarLabel: t('driver.tripHistory'),
+          title: 'السجل',
+          tabBarLabel: 'السجل',
           tabBarIcon: ({ color }) => <Ionicons name="time-outline" size={tabBarIconSize} color={color} />,
           tabBarButton: shouldHideTab(['driver']) ? () => null : undefined,
         }}
       />
+      {/* driver/my-orders مخفي من شريط التنقل - الطلبات موجودة في trips و history */}
       <Tabs.Screen
         name="driver/my-orders"
         options={{
-          title: 'طلباتي',
-          tabBarLabel: 'طلباتي',
-          tabBarIcon: ({ color }) => <Ionicons name="document-text" size={tabBarIconSize} color={color} />,
-          tabBarButton: shouldHideTab(['driver']) ? () => null : undefined,
+          tabBarButton: () => null, // إخفاء من شريط التنقل
         }}
       />
 

@@ -72,6 +72,9 @@ export default function OrderCard({
   
   // للسائق: عرض اقتراح العميل إذا كان الطلب مقبولاً وهناك اقتراح من العميل
   const showDriverCustomerProposal = isDriver && order.status === 'accepted' && order.negotiation_status === 'customer_proposed' && order.customer_proposed_price;
+  
+  // للعميل: إمكانية متابعة الطلب (للطلبات النشطة التي لديها سائق)
+  const canTrackOrder = isCustomer && isActive && order.driver_id && ['accepted', 'pickedUp', 'inTransit'].includes(order.status);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -782,6 +785,19 @@ export default function OrderCard({
             </>
           )}
           
+          {/* للعميل: زر متابعة الطلب */}
+          {canTrackOrder && (
+            <TouchableOpacity
+              style={[styles.actionButton, styles.trackButton]}
+              onPress={() => router.push(`/customer/track-order?orderId=${order.id}`)}
+            >
+              <Ionicons name="location" size={18} color="#007AFF" />
+              <Text style={[styles.actionButtonText, styles.trackButtonText]}>
+                متابعة الطلب
+              </Text>
+            </TouchableOpacity>
+          )}
+          
           {/* للعميل: زر إلغاء (عندما البحث غير متوقف) */}
           {isCustomer && canCancel && (order.search_status !== 'stopped' || !order.search_status) && (
             <TouchableOpacity
@@ -1006,6 +1022,16 @@ const styles = StyleSheet.create({
   },
   restartSearchButtonText: {
     color: '#007AFF',
+  },
+  trackButton: {
+    backgroundColor: '#E3F2FD',
+    borderWidth: 1,
+    borderColor: '#007AFF',
+  },
+  trackButtonText: {
+    color: '#007AFF',
+    fontSize: responsive.getResponsiveFontSize(14),
+    fontWeight: '600',
   },
   driverProposalContainer: {
     marginTop: 12,

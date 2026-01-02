@@ -71,10 +71,7 @@ export default function OutsideOrderScreen() {
   const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<{ uri: string; placeId: string; itemId: string } | null>(null);
-  const [calculatedPrice, setCalculatedPrice] = useState<number | null>(null);
-  const [priceSuggestions, setPriceSuggestions] = useState<number[]>([]);
   const [selectedPrice, setSelectedPrice] = useState<number | null>(null);
-  const [showPriceModal, setShowPriceModal] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -325,340 +322,6 @@ export default function OutsideOrderScreen() {
     return R * c;
   };
 
-  // دالة لبدء البحث التلقائي عن السائقين
-  const startOrderSearch = async (
-    orderId: string,
-    searchPoint: { lat: number; lon: number },
-    initialRadius: number,
-    expandedRadius: number,
-    initialDuration: number,
-    expandedDuration: number
-  ) => {
-    try {
-      // جلب سعر الطلب من قاعدة البيانات
-      const { data: orderData, error: orderError } = await supabase
-        .from('orders')
-        .select('total_fee')
-        .eq('id', orderId)
-        .single();
-
-      if (orderError || !orderData) {
-        console.error('❌ خطأ في جلب بيانات الطلب:', orderError);
-        return;
-      }
-
-      const orderPrice = orderData.total_fee || 0;
-      console.log(`💰 سعر الطلب: ${orderPrice} ج.م`);
-
-      // حساب المسافة بين نقطتين
-      const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-        const R = 6371;
-        const dLat = (lat2 - lat1) * Math.PI / 180;
-        const dLon = (lon2 - lon1) * Math.PI / 180;
-        const a = 
-          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-          Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c;
-      };
-
-      // البحث عن السائقين في نطاق معين
-      const findDriversInRadius = async (radius: number) => {
-        console.log(`🔍 البحث عن سائقين في نطاق ${radius} كم من النقطة:`, searchPoint);
-        
-        // أولاً: التحقق من جميع السائقين (للتشخيص)
-        const { data: allDriversCheck, error: checkError } = await supabase
-          .from('profiles')
-          .select('id, status, approval_status, role')
-          .eq('role', 'driver');
-        
-        if (checkError) {
-          console.error('❌ خطأ في جلب جميع السائقين:', checkError);
-        } else {
-          console.log(`📊 إجمالي السائقين في قاعدة البيانات: ${allDriversCheck?.length || 0}`);
-          if (allDriversCheck && allDriversCheck.length > 0) {
-            const statusCounts = allDriversCheck.reduce((acc: any, d: any) => {
-              const key = `${d.status || 'null'}_${d.approval_status || 'null'}`;
-              acc[key] = (acc[key] || 0) + 1;
-              return acc;
-            }, {});
-            console.log('📊 توزيع حالات السائقين:', statusCounts);
-          }
-        }
-        
-        const { data: allDrivers, error: driversError } = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('role', 'driver')
-          .eq('status', 'active')
-          .eq('approval_status', 'approved');
-
-        if (driversError) {
-          console.error('❌ خطأ في جلب السائقين:', driversError);
-          return [];
-        }
-
-        if (!allDrivers || allDrivers.length === 0) {
-          console.log('⚠️ لا يوجد سائقين نشطين وموافق عليهم');
-          console.log('💡 تأكد من:');
-          console.log('   1. وجود سائقين في قاعدة البيانات');
-          console.log('   2. أن status = "active"');
-          console.log('   3. أن approval_status = "approved"');
-          return [];
-        }
-
-        console.log(`✅ تم العثور على ${allDrivers.length} سائق نشط وموافق عليه`);
-
-        const driverIds = allDrivers.map(d => d.id);
-        const { data: locationsData, error: locationsError } = await supabase
-          .from('driver_locations')
-          .select('driver_id, latitude, longitude, updated_at')
-          .in('driver_id', driverIds)
-          .order('updated_at', { ascending: false });
-
-        if (locationsError) {
-          console.error('❌ خطأ في جلب مواقع السائقين:', locationsError);
-        }
-
-        if (!locationsData || locationsData.length === 0) {
-          console.log('⚠️ لا توجد مواقع محدثة للسائقين');
-          return [];
-        }
-
-        console.log(`📍 تم العثور على ${locationsData.length} موقع سائق`);
-
-        const latestLocations = new Map<string, { driver_id: string; latitude: number; longitude: number }>();
-        locationsData.forEach(loc => {
-          if (loc.latitude && loc.longitude && !latestLocations.has(loc.driver_id)) {
-            latestLocations.set(loc.driver_id, {
-              driver_id: loc.driver_id,
-              latitude: loc.latitude,
-              longitude: loc.longitude,
-            });
-          }
-        });
-
-        console.log(`📍 ${latestLocations.size} سائق لديه موقع محدث`);
-
-        const driversInRadius: { driver_id: string; latitude: number; longitude: number }[] = [];
-        latestLocations.forEach((driver) => {
-          const distance = calculateDistance(
-            searchPoint.lat,
-            searchPoint.lon,
-            driver.latitude,
-            driver.longitude
-          );
-          if (distance <= radius) {
-            driversInRadius.push(driver);
-            console.log(`✅ سائق في النطاق: ${driver.driver_id} على بعد ${distance.toFixed(2)} كم`);
-          }
-        });
-
-        console.log(`✅ تم العثور على ${driversInRadius.length} سائق في نطاق ${radius} كم`);
-        return driversInRadius;
-      };
-
-      // إرسال إشعارات للسائقين
-      const notifyDrivers = async (drivers: { driver_id: string }[], radius: number, orderId: string, orderPrice: number) => {
-        if (drivers.length === 0) {
-          console.log('⚠️ لا يوجد سائقين لإرسال إشعارات لهم');
-          return;
-        }
-
-        console.log(`📧 إرسال إشعارات لـ ${drivers.length} سائق`);
-
-        // جلب تفاصيل الطلب
-        const { data: orderData } = await supabase
-          .from('orders')
-          .select('order_type, pickup_address, delivery_address, items')
-          .eq('id', orderId)
-          .single();
-
-        // بناء رسالة الإشعار مع التركيز على النقاط
-        let title = 'مسار جديد متاح';
-        let message = '';
-        
-        // إذا كان الطلب يحتوي على عدة نقاط، نركز على النقاط
-        if (orderData?.items && Array.isArray(orderData.items) && orderData.items.length > 0) {
-          const firstPoint = orderData.items[0];
-          const lastPoint = orderData.items[orderData.items.length - 1];
-          const firstAddress = typeof firstPoint === 'object' ? (firstPoint.address || firstPoint.description || 'نقطة الانطلاق') : firstPoint;
-          const lastAddress = typeof lastPoint === 'object' ? (lastPoint.address || lastPoint.description || 'نقطة الوصول') : lastPoint;
-          
-          title = `مسار متعدد النقاط (${orderData.items.length} نقطة)`;
-          message = `من: ${firstAddress}\nإلى: ${lastAddress}\nالسعر: ${orderPrice} ج.م\nفي نطاق ${radius} كم`;
-        } else {
-          // طلب بسيط (نقطتان فقط)
-          message = `من: ${orderData?.pickup_address || 'نقطة الانطلاق'}\nإلى: ${orderData?.delivery_address || 'نقطة الوصول'}\nالسعر: ${orderPrice} ج.م\nفي نطاق ${radius} كم`;
-        }
-        
-        // استخدام الدالة insert_notification_for_driver لتجاوز مشاكل RLS
-        const type = 'info';
-
-        let successCount = 0;
-        let errorCount = 0;
-
-        // إرسال إشعار لكل سائق باستخدام الدالة مع order_id
-        for (const driver of drivers) {
-          try {
-            const { data, error } = await supabase.rpc('insert_notification_for_driver', {
-              p_user_id: driver.driver_id,
-              p_title: title,
-              p_message: message,
-              p_type: type,
-              p_order_id: orderId,
-            });
-
-            if (error) {
-              console.error(`❌ خطأ في إرسال إشعار للسائق ${driver.driver_id}:`, error);
-              errorCount++;
-            } else {
-              successCount++;
-            }
-          } catch (err) {
-            console.error(`❌ خطأ في إرسال إشعار للسائق ${driver.driver_id}:`, err);
-            errorCount++;
-          }
-        }
-
-        if (successCount > 0) {
-          console.log(`✅ تم إرسال ${successCount} إشعار بنجاح`);
-        }
-        if (errorCount > 0) {
-          console.error(`❌ فشل إرسال ${errorCount} إشعار`);
-        }
-      };
-
-      // التحقق من قبول الطلب
-      const checkOrderAccepted = async () => {
-        const { data } = await supabase
-          .from('orders')
-          .select('status, driver_id')
-          .eq('id', orderId)
-          .single();
-
-        return data?.status === 'accepted' && data?.driver_id;
-      };
-
-      // البحث الأولي
-      const initialDrivers = await findDriversInRadius(initialRadius);
-      if (initialDrivers.length > 0) {
-        await notifyDrivers(initialDrivers, initialRadius, orderId, orderPrice);
-      } else {
-        // إذا لم يتم العثور على سائقين في النطاق، نرسل إشعارات لجميع السائقين النشطين
-        console.log('⚠️ لم يتم العثور على سائقين في النطاق الأولي، إرسال إشعارات لجميع السائقين النشطين');
-        try {
-          const { data: allActiveDrivers } = await supabase
-            .from('profiles')
-            .select('id')
-            .eq('role', 'driver')
-            .eq('status', 'active')
-            .eq('approval_status', 'approved');
-
-          if (allActiveDrivers && allActiveDrivers.length > 0) {
-            const title = 'طلب جديد متاح';
-            const message = `يوجد طلب جديد متاح. السعر: ${orderPrice} ج.م`;
-            const type = 'info';
-
-            let successCount = 0;
-            let errorCount = 0;
-
-            for (const driver of allActiveDrivers) {
-              try {
-                const { error } = await supabase.rpc('insert_notification_for_driver', {
-                  p_user_id: driver.id,
-                  p_title: title,
-                  p_message: message,
-                  p_type: type,
-                  p_order_id: orderId,
-                });
-
-                if (error) {
-                  console.error(`❌ خطأ في إرسال إشعار بديل للسائق ${driver.id}:`, error);
-                  errorCount++;
-                } else {
-                  successCount++;
-                }
-              } catch (err) {
-                console.error(`❌ خطأ في إرسال إشعار بديل للسائق ${driver.id}:`, err);
-                errorCount++;
-              }
-            }
-
-            if (successCount > 0) {
-              console.log(`✅ تم إرسال ${successCount} إشعار بديل لجميع السائقين النشطين`);
-            }
-            if (errorCount > 0) {
-              console.error(`❌ فشل إرسال ${errorCount} إشعار بديل`);
-            }
-          }
-        } catch (fallbackErr) {
-          console.error('❌ خطأ في إرسال الإشعارات البديلة:', fallbackErr);
-        }
-      }
-
-      // انتظار المدة الأولية مع التحقق من القبول
-      const initialStartTime = Date.now();
-      const checkInterval = setInterval(async () => {
-        const accepted = await checkOrderAccepted();
-        if (accepted) {
-          clearInterval(checkInterval);
-          await supabase
-            .from('orders')
-            .update({ search_status: 'found' })
-            .eq('id', orderId);
-          return;
-        }
-
-        if (Date.now() - initialStartTime >= initialDuration * 1000) {
-          clearInterval(checkInterval);
-          
-          // الانتقال للبحث الموسع
-          await supabase
-            .from('orders')
-            .update({
-              search_status: 'expanded',
-              search_expanded_at: new Date().toISOString(),
-            })
-            .eq('id', orderId);
-
-          const expandedDrivers = await findDriversInRadius(expandedRadius);
-          const newDrivers = expandedDrivers.filter(
-            ed => !initialDrivers.some(id => id.driver_id === ed.driver_id)
-          );
-          
-          if (newDrivers.length > 0) {
-            await notifyDrivers(newDrivers, expandedRadius, orderId, orderPrice);
-          }
-
-          // انتظار المدة الموسعة
-          const expandedStartTime = Date.now();
-          const expandedCheckInterval = setInterval(async () => {
-            const accepted = await checkOrderAccepted();
-            if (accepted) {
-              clearInterval(expandedCheckInterval);
-              await supabase
-                .from('orders')
-                .update({ search_status: 'found' })
-                .eq('id', orderId);
-              return;
-            }
-
-            if (Date.now() - expandedStartTime >= expandedDuration * 1000) {
-              clearInterval(expandedCheckInterval);
-              await supabase
-                .from('orders')
-                .update({ search_status: 'stopped' })
-                .eq('id', orderId);
-            }
-          }, 1000);
-        }
-      }, 1000);
-    } catch (error) {
-      console.error('Error in order search:', error);
-    }
-  };
 
   const getCityFromLocation = async (lat: number, lon: number): Promise<string | null> => {
     try {
@@ -1008,31 +671,29 @@ export default function OutsideOrderScreen() {
         basePrice = calculateDeliveryPrice(totalItemsCount, 3);
       }
       
-      // إنشاء اقتراحات الأسعار
-      const suggestions = generatePriceSuggestions(basePrice);
-      setCalculatedPrice(basePrice);
-      setPriceSuggestions(suggestions);
+      // استخدام السعر المحسوب مباشرة (بدون تفاوض)
       setSelectedPrice(basePrice);
       
-      // عرض modal للتفاوض في السعر
-      setShowPriceModal(true);
-      return; // إيقاف التنفيذ حتى يختار المستخدم السعر
+      // إرسال الطلب مباشرة - تمرير السعر مباشرة
+      await handleConfirmPriceAndSubmit(basePrice);
     } catch (error: any) {
-      console.error('Error in handleSubmit:', error);
-      Alert.alert('خطأ', error.message || 'فشل إرسال الطلب');
+      console.error('❌ Error in handleSubmit:', error);
       setLoading(false);
+      Alert.alert('خطأ', error.message || 'فشل إرسال الطلب');
     }
   };
 
   // دالة لإرسال الطلبات بعد اختيار السعر
-  const handleConfirmPriceAndSubmit = async () => {
-    if (!selectedPrice) {
+  const handleConfirmPriceAndSubmit = async (price?: number) => {
+    const finalPrice = price || selectedPrice;
+    
+    if (!finalPrice) {
       Alert.alert('خطأ', 'الرجاء اختيار سعر');
+      setLoading(false);
       return;
     }
 
     setLoading(true);
-    setShowPriceModal(false);
     
     try {
       // إعادة حساب كل شيء (نفس الكود من handleSubmit)
@@ -1154,82 +815,52 @@ export default function OutsideOrderScreen() {
           status: 'pending', // دائماً pending حتى يظهر في قائمة الطلبات الجديدة ويتلقى السائق الإشعار
           pickupAddress: routePoints[0]?.address || 'نقطة الانطلاق', // أول نقطة
           deliveryAddress: routePoints[routePoints.length - 1]?.address || customerAddressText, // آخر نقطة (عنوان العميل)
-          totalFee: selectedPrice, // استخدام السعر المختار
+          totalFee: finalPrice, // استخدام السعر المختار
           images: allImages.length > 0 ? allImages : null,
           orderType: 'outside', // تحديد نوع الطلب كطلب من خارج
+          createdByRole: user?.role || 'customer', // من أنشأ الطلب
         },
       });
 
       if (edgeFunctionError) {
-        console.error('Error creating order via Edge Function:', edgeFunctionError);
+        console.error('❌ Error creating order via Edge Function:', edgeFunctionError);
         throw edgeFunctionError;
       }
 
       if (!edgeFunctionData || !edgeFunctionData.success) {
-        console.error('Edge Function returned error:', edgeFunctionData?.error);
+        console.error('❌ Edge Function returned error:', edgeFunctionData?.error);
         throw new Error(edgeFunctionData?.error || 'فشل إنشاء الطلب');
       }
 
-      const data = [edgeFunctionData.order]; // تحويل إلى array للتوافق مع الكود الموجود
+      console.log('✅ Order created successfully:', edgeFunctionData.order?.id);
 
-      // بدء البحث التلقائي عن السائقين
-      // استخدام أبعد مكان كنقطة البحث
-      if (farthestPlace && data && data.length > 0) {
-        const order = data[0]; // طلب واحد فقط
-        try {
-          // تحديث حالة البحث
-          await supabase
-            .from('orders')
-            .update({
-              search_status: 'searching',
-              search_started_at: new Date().toISOString(),
-            })
-            .eq('id', order.id);
-
-          // جلب الإعدادات
-          const { data: settings } = await supabase
-            .from('order_search_settings')
-            .select('setting_key, setting_value');
-
-          const initialRadius = parseFloat(
-            settings?.find(s => s.setting_key === 'initial_search_radius_km')?.setting_value || '3'
-          );
-          const expandedRadius = parseFloat(
-            settings?.find(s => s.setting_key === 'expanded_search_radius_km')?.setting_value || '6'
-          );
-          const initialDuration = parseFloat(
-            settings?.find(s => s.setting_key === 'initial_search_duration_seconds')?.setting_value || '10'
-          );
-          const expandedDuration = parseFloat(
-            settings?.find(s => s.setting_key === 'expanded_search_duration_seconds')?.setting_value || '10'
-          );
-
-          // بدء البحث
-          startOrderSearch(order.id, farthestPlace, initialRadius, expandedRadius, initialDuration, expandedDuration);
-        } catch (searchError) {
-          console.error(`Error starting search for order ${order.id}:`, searchError);
-        }
-      }
-
-      const message = 'تم إرسال طلبك بنجاح! جاري البحث عن سائق...';
+      const message = 'تم إرسال طلبك بنجاح! سيظهر الطلب للسائقين قريباً.';
+      
+      // إيقاف loading قبل التوجيه
+      setLoading(false);
       
       // التوجيه حسب دور المستخدم
+      try {
       if (user?.role === 'driver') {
-        router.replace('/(tabs)/driver/my-orders');
+          router.replace('/(tabs)/driver/trips');
       } else if (user?.role === 'admin') {
         router.replace('/(tabs)/admin/my-orders');
       } else {
         router.replace('/(tabs)/customer/my-orders');
       }
       
+        // عرض رسالة النجاح بعد التوجيه
       setTimeout(() => {
         Alert.alert('✅ نجح', message);
       }, 300);
+      } catch (navError) {
+        console.error('❌ Navigation error:', navError);
+        Alert.alert('✅ نجح', message);
+      }
     } catch (error: any) {
-      console.error('Error in handleConfirmPriceAndSubmit:', error);
-      Alert.alert('خطأ', error.message || 'فشل إرسال الطلب');
-    } finally {
+      console.error('❌ Error in handleConfirmPriceAndSubmit:', error);
       setLoading(false);
+      Alert.alert('خطأ', error.message || 'فشل إرسال الطلب');
     }
   };
 
@@ -1564,68 +1195,6 @@ export default function OutsideOrderScreen() {
         </View>
       </Modal>
 
-      {/* Modal للتفاوض في السعر */}
-      <Modal
-        visible={showPriceModal}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowPriceModal(false)}
-      >
-        <View style={styles.priceModalOverlay}>
-          <View style={styles.priceModalContent}>
-            <Text style={styles.priceModalTitle}>اختر سعر التوصيل</Text>
-            
-            {calculatedPrice && (
-              <View style={styles.priceInfoContainer}>
-                <Text style={styles.priceInfoLabel}>السعر المقترح:</Text>
-                <Text style={styles.priceInfoValue}>{calculatedPrice} جنيه</Text>
-              </View>
-            )}
-
-            <Text style={styles.priceSuggestionsTitle}>اقتراحات إضافية:</Text>
-            <View style={styles.priceSuggestionsContainer}>
-              {priceSuggestions.map((price, index) => (
-                <TouchableOpacity
-                  key={index}
-                  style={[
-                    styles.priceSuggestionButton,
-                    selectedPrice === price && styles.priceSuggestionButtonSelected
-                  ]}
-                  onPress={() => setSelectedPrice(price)}
-                >
-                  <Text style={[
-                    styles.priceSuggestionText,
-                    selectedPrice === price && styles.priceSuggestionTextSelected
-                  ]}>
-                    {price} جنيه
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <View style={styles.priceModalButtons}>
-              <TouchableOpacity
-                style={[styles.priceModalButton, styles.priceModalButtonCancel]}
-                onPress={() => {
-                  setShowPriceModal(false);
-                  setLoading(false);
-                }}
-              >
-                <Text style={styles.priceModalButtonTextCancel}>إلغاء</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.priceModalButton, styles.priceModalButtonConfirm]}
-                onPress={handleConfirmPriceAndSubmit}
-                disabled={!selectedPrice}
-              >
-                <Text style={styles.priceModalButtonTextConfirm}>
-                  تأكيد ({selectedPrice} جنيه)
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -1981,109 +1550,5 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '600',
-  },
-  priceModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  priceModalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 24,
-    width: '90%',
-    maxWidth: 400,
-  },
-  priceModalTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#1a1a1a',
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  priceInfoContainer: {
-    backgroundColor: '#f0f0f0',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 20,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  priceInfoLabel: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'right',
-  },
-  priceInfoValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#007AFF',
-    textAlign: 'left',
-  },
-  priceSuggestionsTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1a1a1a',
-    marginBottom: 12,
-    textAlign: 'right',
-  },
-  priceSuggestionsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginBottom: 24,
-  },
-  priceSuggestionButton: {
-    flex: 1,
-    minWidth: '45%',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    backgroundColor: '#f5f5f5',
-    borderWidth: 2,
-    borderColor: '#e0e0e0',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  priceSuggestionButtonSelected: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
-  },
-  priceSuggestionText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#666',
-  },
-  priceSuggestionTextSelected: {
-    color: '#fff',
-  },
-  priceModalButtons: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  priceModalButton: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  priceModalButtonCancel: {
-    backgroundColor: '#f5f5f5',
-  },
-  priceModalButtonConfirm: {
-    backgroundColor: '#007AFF',
-  },
-  priceModalButtonTextCancel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#666',
-  },
-  priceModalButtonTextConfirm: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
   },
 });

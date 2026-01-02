@@ -39,6 +39,8 @@ interface CreateOrderRequest {
   images?: string[] | null;
   orderType: 'package' | 'outside';
   packageDescription?: string | null;
+  createdByRole?: 'customer' | 'driver' | 'admin'; // من أنشأ الطلب
+  expiresAt?: string; // تاريخ انتهاء الصلاحية (ISO string)
 }
 
 serve(async (req) => {
@@ -74,6 +76,8 @@ serve(async (req) => {
       images,
       orderType,
       packageDescription,
+      createdByRole = 'customer',
+      expiresAt,
     } = body;
 
     // Validate input
@@ -173,6 +177,7 @@ serve(async (req) => {
       delivery_address: deliveryAddress,
       total_fee: totalFee,
       order_type: orderType,
+      created_by_role: createdByRole,
     };
 
     // Add optional fields
@@ -184,6 +189,16 @@ serve(async (req) => {
     }
     if (packageDescription !== undefined && packageDescription !== null) {
       orderData.package_description = packageDescription;
+    }
+    
+    // Set expires_at (30 minutes from now by default, or use provided value)
+    if (expiresAt) {
+      orderData.expires_at = expiresAt;
+    } else {
+      // سيتم تعيينه تلقائياً بواسطة trigger، لكن يمكننا تعيينه هنا أيضاً
+      const expiresDate = new Date();
+      expiresDate.setMinutes(expiresDate.getMinutes() + 30);
+      orderData.expires_at = expiresDate.toISOString();
     }
 
     // Insert order

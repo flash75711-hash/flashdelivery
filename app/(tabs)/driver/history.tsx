@@ -91,7 +91,7 @@ export default function DriverHistoryScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>{t('driver.tripHistory')}</Text>
+        <Text style={styles.title}>السجل</Text>
       </View>
 
       <FlatList

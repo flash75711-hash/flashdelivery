@@ -30,6 +30,7 @@ interface UpdateDriverProfileRequest {
   approval_status?: 'pending' | 'approved' | 'rejected';
   registration_complete?: boolean;
   status?: 'active' | 'inactive' | 'suspended';
+  is_online?: boolean;
 }
 
 serve(async (req) => {
@@ -53,7 +54,7 @@ serve(async (req) => {
 
     // Parse request body
     const body: UpdateDriverProfileRequest = await req.json();
-    const { userId, full_name, phone, id_card_image_url, selfie_image_url, approval_status, registration_complete, status } = body;
+    const { userId, full_name, phone, id_card_image_url, selfie_image_url, approval_status, registration_complete, status, is_online } = body;
 
     // Validate input
     if (!userId) {
@@ -112,17 +113,20 @@ serve(async (req) => {
     if (approval_status !== undefined) updateData.approval_status = approval_status;
     if (registration_complete !== undefined) updateData.registration_complete = registration_complete;
     if (status !== undefined) updateData.status = status;
+    if (is_online !== undefined) updateData.is_online = is_online;
+
+    console.log('[update-driver-profile] Updating profile:', { userId, updateData });
 
     // Update profile
     const { data: updatedProfile, error: updateError } = await supabase
       .from('profiles')
       .update(updateData)
       .eq('id', userId)
-      .select()
+      .select('id, full_name, phone, id_card_image_url, selfie_image_url, approval_status, registration_complete, status, is_online')
       .single();
 
     if (updateError) {
-      console.error('Error updating profile:', updateError);
+      console.error('[update-driver-profile] Error updating profile:', updateError);
       return new Response(
         JSON.stringify({
           success: false,
@@ -134,6 +138,8 @@ serve(async (req) => {
         }
       );
     }
+
+    console.log('[update-driver-profile] Profile updated successfully:', updatedProfile);
 
     return new Response(
       JSON.stringify({
@@ -147,7 +153,7 @@ serve(async (req) => {
       }
     );
   } catch (error: any) {
-    console.error('Error updating driver profile:', error);
+    console.error('[update-driver-profile] Error updating driver profile:', error);
     return new Response(
       JSON.stringify({
         success: false,
