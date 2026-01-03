@@ -10,6 +10,9 @@ import {
   ScrollView,
   Animated,
   Dimensions,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
@@ -18,7 +21,13 @@ import { Ionicons } from '@expo/vector-icons';
 import responsive, { createShadowStyle } from '@/utils/responsive';
 import { showSimpleAlert } from '@/lib/alert';
 import { getCurrentLocation } from '@/lib/webUtils';
+import { createNotification } from '@/lib/notifications';
 // WebView is not supported on web, we'll use iframe instead
+
+// TypeScript declaration for window on web
+declare const window: {
+  open: (url: string, target?: string) => void;
+} | undefined;
 
 interface Order {
   id: string;
@@ -31,6 +40,8 @@ interface Order {
   delivery_address: string;
   total_fee: number;
   created_at: string;
+  is_prepaid?: boolean;
+  prepaid_amount?: number;
   customer?: {
     full_name?: string;
     phone?: string;
@@ -47,6 +58,7 @@ interface OrderItem {
   longitude?: number;
   is_picked_up: boolean;
   picked_up_at?: string | null;
+  item_fee?: number | null;
 }
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -64,6 +76,13 @@ export default function TrackTripScreen() {
   const [loading, setLoading] = useState(true);
   const [driverLocation, setDriverLocation] = useState<{ lat: number; lon: number } | null>(null);
   const [mapHtml, setMapHtml] = useState<string>('');
+  
+  // State for fee input modal
+  const [showFeeModal, setShowFeeModal] = useState(false);
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [itemFee, setItemFee] = useState<string>('');
+  const [isPrepaid, setIsPrepaid] = useState<boolean>(false);
+  const [prepaidAmount, setPrepaidAmount] = useState<string>('');
   
   // Bottom Sheet Animation
   const bottomSheetY = useRef(new Animated.Value(BOTTOM_SHEET_MAX_HEIGHT)).current;
@@ -221,7 +240,7 @@ export default function TrackTripScreen() {
       // إضافة filter للـ driver_id للتأكد من أن السائق يمكنه قراءة الطلب
       const query = supabase
         .from('orders')
-        .select('id, customer_id, driver_id, status, order_type, items, pickup_address, delivery_address, total_fee, created_at, expires_at, created_by_role, package_description')
+        .select('id, customer_id, driver_id, status, order_type, items, pickup_address, delivery_address, total_fee, created_at, expires_at, created_by_role, package_description, is_prepaid, prepaid_amount')
         .eq('id', orderId);
       
       // إضافة filter للـ driver_id إذا كان موجوداً
@@ -862,22 +881,300 @@ export default function TrackTripScreen() {
     setMapHtml(html);
   };
 
-  const handleMarkAsPickedUp = async (itemId: string) => {
+  const handleMarkAsPickedUp = (itemId: string) => {
+    if (!order) {
+      showSimpleAlert('خطأ', 'الطلب غير موجود', 'error');
+      return;
+    }
+
+    // فتح modal لإدخال المبلغ
+    setSelectedItemId(itemId);
+    const item = orderItems.find(i => i.id === itemId);
+    if (item?.item_fee) {
+      setItemFee(item.item_fee.toString());
+    } else {
+      setItemFee('');
+    }
+    setIsPrepaid(order.is_prepaid || false);
+    setPrepaidAmount(order.prepaid_amount ? order.prepaid_amount.toString() : '');
+    setShowFeeModal(true);
+  };
+
+  const handleConfirmPickup = async () => {
+    if (!order || !selectedItemId) {
+      showSimpleAlert('خطأ', 'الطلب غير موجود', 'error');
+      return;
+    }
+
+    // التحقق من إدخال المبلغ
+    const fee = parseFloat(itemFee);
+    if (isNaN(fee) || fee < 0) {
+      showSimpleAlert('خطأ', 'يرجى إدخال مبلغ صحيح للعنصر', 'error');
+      return;
+    }
+
+    // التحقق من المبلغ المدفوع مسبقاً إذا كان مفعلاً
+    let prepaidAmt: number | null = null;
+    if (isPrepaid) {
+      const pAmount = parseFloat(prepaidAmount);
+      if (isNaN(pAmount) || pAmount < 0) {
+        showSimpleAlert('خطأ', 'يرجى إدخال مبلغ مدفوع مسبقاً صحيح', 'error');
+        return;
+      }
+      prepaidAmt = pAmount;
+    }
+
     try {
-      const { error } = await supabase
-        .from('order_items')
-        .update({
+      // إغلاق modal
+      setShowFeeModal(false);
+      
+      // تحديث حالة الدفع المسبق في الطلب (إذا تم تغييرها)
+      if (order.is_prepaid !== isPrepaid || (isPrepaid && prepaidAmt !== order.prepaid_amount)) {
+        const { error: updateOrderError } = await supabase.functions.invoke('update-order', {
+          body: {
+            orderId: order.id,
+            isPrepaid: isPrepaid,
+            prepaidAmount: prepaidAmt,
+          },
+        });
+        if (updateOrderError) {
+          console.error('[handleConfirmPickup] Error updating order prepaid status:', updateOrderError);
+        }
+      }
+      
+      // تحديث حالة العنصر (استخدام Edge Function لتجاوز RLS)
+      console.log('[handleConfirmPickup] Updating order item via Edge Function...', {
+        itemId: selectedItemId,
+        orderId: order.id,
+        driverId: user?.id,
+        item_fee: fee,
+      });
+
+      const { data: updateItemData, error: itemError } = await supabase.functions.invoke('update-order-item', {
+        body: {
+          itemId: selectedItemId,
+          orderId: order.id,
+          driverId: user?.id || '',
           is_picked_up: true,
           picked_up_at: new Date().toISOString(),
-        })
-        .eq('id', itemId);
+          item_fee: fee,
+        },
+      });
 
-      if (error) throw error;
+      if (itemError) {
+        console.error('[handleMarkAsPickedUp] Error updating item via Edge Function:', itemError);
+        throw itemError;
+      }
 
-      showSimpleAlert('نجح', 'تم تحديث حالة الاستلام', 'success');
-      loadOrderItems();
+      if (!updateItemData || !updateItemData.success) {
+        console.error('[handleMarkAsPickedUp] Edge Function returned error:', updateItemData?.error);
+        throw new Error(updateItemData?.error || 'فشل تحديث العنصر');
+      }
+
+      console.log('[handleMarkAsPickedUp] Item updated successfully:', updateItemData.item);
+
+      // انتظار قصير للتأكد من تحديث قاعدة البيانات
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      // إعادة تحميل العناصر بعد التحديث (استخدام Edge Function لتجاوز RLS)
+      let allItems: any[] | null = null;
+      let itemsError: any = null;
+
+      // استخدام Edge Function دائماً لضمان الحصول على أحدث البيانات
+      console.log('[handleMarkAsPickedUp] Loading items via Edge Function...');
+      if (user?.id && user?.role) {
+        try {
+          const { data: edgeData, error: edgeError } = await supabase.functions.invoke('get-order-items', {
+            body: {
+              orderId: order.id,
+              userId: user.id,
+              userRole: user.role,
+            },
+          });
+
+          if (edgeError) {
+            console.error('[handleMarkAsPickedUp] Error from Edge Function:', edgeError);
+            itemsError = edgeError;
+          } else if (edgeData?.success && edgeData?.orderItems) {
+            allItems = edgeData.orderItems.map((item: any) => ({
+              id: item.id,
+              is_picked_up: item.is_picked_up,
+              item_fee: item.item_fee,
+            }));
+            itemsError = null;
+        console.log('[handleMarkAsPickedUp] Loaded items via Edge Function:', {
+          count: allItems.length,
+          items: allItems.map(i => ({ id: i.id, is_picked_up: i.is_picked_up })),
+        });
+        
+        // Log detailed item status
+        allItems.forEach((item, index) => {
+          console.log(`[handleMarkAsPickedUp] Item ${index + 1}:`, {
+            id: item.id,
+            is_picked_up: item.is_picked_up,
+          });
+        });
+          } else {
+            console.error('[handleMarkAsPickedUp] Edge Function returned error:', edgeData?.error);
+            itemsError = new Error(edgeData?.error || 'فشل جلب العناصر');
+          }
+        } catch (edgeErr: any) {
+          console.error('[handleMarkAsPickedUp] Exception calling Edge Function:', edgeErr);
+          itemsError = edgeErr;
+        }
+      } else {
+        itemsError = new Error('User ID or role not found');
+      }
+
+      if (itemsError) {
+        console.error('[handleMarkAsPickedUp] Error loading items:', itemsError);
+      } else if (allItems && allItems.length > 0) {
+        // التحقق من عدد العناصر المستلمة
+        const pickedUpCount = allItems.filter(item => item.is_picked_up).length;
+        const totalItems = allItems.length;
+        const firstPickedUp = pickedUpCount === 1; // أول عنصر يتم استلامه
+        const allPickedUp = pickedUpCount === totalItems;
+
+        // تحديث حالة الطلب إلى 'pickedUp' عند استلام أول عنصر
+        // نحدث الحالة إذا:
+        // 1. تم استلام أول عنصر (firstPickedUp) وكان الطلب في حالة 'accepted' أو 'pending'
+        // 2. أو تم استلام عناصر لكن الحالة لم تتحدث بعد
+        const condition1 = firstPickedUp && (order.status === 'accepted' || order.status === 'pending');
+        const condition2 = pickedUpCount > 0 && order.status !== 'pickedUp' && order.status !== 'inTransit' && order.status !== 'completed' && order.status !== 'cancelled';
+        const shouldUpdateStatus = condition1 || condition2;
+
+        console.log('[handleMarkAsPickedUp] Items status:', {
+          pickedUpCount,
+          totalItems,
+          firstPickedUp,
+          allPickedUp,
+          currentOrderStatus: order.status,
+          items: allItems.map(i => ({ id: i.id, is_picked_up: i.is_picked_up })),
+        });
+        
+        console.log('[handleMarkAsPickedUp] Status update conditions:', {
+          condition1,
+          condition2,
+          shouldUpdateStatus,
+          firstPickedUp,
+          pickedUpCount,
+          currentStatus: order.status,
+        });
+
+        if (shouldUpdateStatus) {
+          console.log('[handleMarkAsPickedUp] Updating order status to pickedUp...', {
+            firstPickedUp,
+            pickedUpCount,
+            currentStatus: order.status,
+          });
+          
+          const { data: updateData, error: updateError } = await supabase.functions.invoke('update-order', {
+            body: {
+              orderId: order.id,
+              status: 'pickedUp',
+            },
+          });
+
+          if (updateError) {
+            console.error('[handleMarkAsPickedUp] Error updating order status:', updateError);
+            throw updateError;
+          }
+
+          if (!updateData || !updateData.success) {
+            console.error('[handleMarkAsPickedUp] Edge Function returned error:', updateData?.error);
+            throw new Error(updateData?.error || 'فشل تحديث حالة الطلب');
+          }
+
+          console.log('[handleMarkAsPickedUp] Order status updated to pickedUp:', updateData.order);
+
+          // تحديث حالة الطلب محلياً
+          setOrder(prev => prev ? { ...prev, status: 'pickedUp' } : null);
+
+          // إرسال إشعار للعميل (فقط عند استلام أول عنصر)
+          if (firstPickedUp && order.customer_id) {
+            console.log('[handleMarkAsPickedUp] Sending notification to customer...', {
+              customerId: order.customer_id,
+              orderId: order.id,
+              driverId: user?.id,
+            });
+            
+            try {
+              const notificationResult = await createNotification({
+                user_id: order.customer_id,
+                title: 'تم استلام الطلب',
+                message: 'تم استلام طلبك من قبل السائق وهو في الطريق إليك.',
+                type: 'info',
+                order_id: order.id,
+              });
+              
+              if (notificationResult.success) {
+                console.log('[handleMarkAsPickedUp] ✅ Notification sent successfully');
+                
+                // التحقق من أن الإشعار تم إنشاؤه في قاعدة البيانات (باستخدام Edge Function)
+                setTimeout(async () => {
+                  try {
+                    const { data: checkData, error: checkError } = await supabase.functions.invoke('get-notifications', {
+                      body: { 
+                        user_id: order.customer_id, 
+                        limit: 10 
+                      },
+                    });
+
+                    if (!checkError && checkData?.notifications) {
+                      const notification = checkData.notifications.find(
+                        (n: any) => n.order_id === order.id && n.title === 'تم استلام الطلب'
+                      );
+                      
+                      if (notification) {
+                        console.log('[handleMarkAsPickedUp] ✅ Verified notification in database:', {
+                          id: notification.id,
+                          title: notification.title,
+                          is_read: notification.is_read,
+                        });
+                      } else {
+                        console.warn('[handleMarkAsPickedUp] ⚠️ Notification not found in recent notifications (may be delayed)');
+                      }
+                    } else {
+                      console.warn('[handleMarkAsPickedUp] ⚠️ Could not verify notification (check skipped)');
+                    }
+                  } catch (checkErr) {
+                    console.warn('[handleMarkAsPickedUp] ⚠️ Error verifying notification:', checkErr);
+                  }
+                }, 1500);
+              } else {
+                console.error('[handleMarkAsPickedUp] ❌ Failed to send notification:', {
+                  error: notificationResult.error,
+                  errorMessage: notificationResult.error?.message,
+                  customerId: order.customer_id,
+                  orderId: order.id,
+                });
+              }
+            } catch (notifError: any) {
+              console.error('[handleMarkAsPickedUp] ❌ Exception while sending notification:', {
+                error: notifError,
+                errorMessage: notifError?.message,
+                customerId: order.customer_id,
+                orderId: order.id,
+              });
+            }
+          }
+        }
+      }
+
+      // إعادة تحميل العناصر والطلب بعد التحديث
+      await loadOrderItems();
+      await loadOrder(); // إعادة تحميل الطلب لتحديث الحالة
+
+      showSimpleAlert('نجح', 'تم تحديث حالة الاستلام والمبلغ', 'success');
     } catch (error: any) {
+      console.error('[handleConfirmPickup] Error:', error);
       showSimpleAlert('خطأ', error.message || 'فشل تحديث الحالة', 'error');
+    } finally {
+      // تنظيف الحالة
+      setItemFee('');
+      setPrepaidAmount('');
+      setIsPrepaid(false);
+      setSelectedItemId(null);
     }
   };
 
@@ -967,31 +1264,231 @@ export default function TrackTripScreen() {
                     <Text style={styles.orderItemNumberText}>{index + 1}</Text>
                   </View>
                   <View style={styles.orderItemInfo}>
-                    <Text style={styles.orderItemAddress}>{item.address}</Text>
+                    <View style={styles.orderItemTopRow}>
+                      <View style={styles.orderItemAddressContainer}>
+                        <Ionicons name="location" size={16} color="#007AFF" style={styles.addressIcon} />
+                        <Text style={styles.orderItemAddress}>{item.address}</Text>
+                      </View>
+                      <View style={styles.orderItemRightSection}>
+                        {item.item_fee !== null && item.item_fee !== undefined ? (
+                          <View style={styles.itemFeeBadge}>
+                            <Ionicons name="cash" size={14} color="#34C759" />
+                            <Text style={styles.itemFeeText}>
+                              {item.item_fee.toFixed(2)} ج.م
+                            </Text>
+                          </View>
+                        ) : (
+                          <View style={[styles.itemFeeBadge, { backgroundColor: '#FF950015' }]}>
+                            <Ionicons name="cash-outline" size={14} color="#FF9500" />
+                            <Text style={[styles.itemFeeText, { color: '#FF9500' }]}>
+                              لم يُحدد
+                            </Text>
+                          </View>
+                        )}
+                        {item.is_picked_up ? (
+                          <View style={[styles.statusBadge, { backgroundColor: '#34C75920' }]}>
+                            <Ionicons name="checkmark-circle" size={18} color="#34C759" />
+                            <Text style={[styles.statusText, { color: '#34C759' }]}>
+                              {index === orderItems.length - 1 ? 'تم التسليم' : 'تم الاستلام'}
+                            </Text>
+                          </View>
+                        ) : (
+                          <TouchableOpacity
+                            style={styles.pickupButton}
+                            onPress={() => handleMarkAsPickedUp(item.id)}
+                          >
+                            <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
+                            <Text style={styles.pickupButtonText}>
+                              {index === orderItems.length - 1 ? 'تم التسليم' : 'تم الاستلام'}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
                     {item.description && (
                       <Text style={styles.orderItemDescription}>{item.description}</Text>
                     )}
-                  </View>
-                  {item.is_picked_up ? (
-                    <View style={[styles.statusBadge, { backgroundColor: '#34C75920' }]}>
-                      <Ionicons name="checkmark-circle" size={20} color="#34C759" />
-                      <Text style={[styles.statusText, { color: '#34C759' }]}>تم الاستلام</Text>
+                    <View style={styles.orderItemDetails}>
+                      {order?.customer?.phone && (
+                        <TouchableOpacity
+                          style={styles.detailRow}
+                          onPress={() => {
+                            if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                              window.open(`tel:${order.customer.phone}`, '_self');
+                            } else {
+                              // For native, you might want to use Linking
+                              // Linking.openURL(`tel:${order.customer.phone}`);
+                            }
+                          }}
+                        >
+                          <Ionicons name="call" size={16} color="#007AFF" />
+                          <Text style={[styles.detailText, styles.phoneText]}>
+                            {order.customer.phone}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
                     </View>
-                  ) : (
-                    <TouchableOpacity
-                      style={styles.pickupButton}
-                      onPress={() => handleMarkAsPickedUp(item.id)}
-                    >
-                      <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />
-                      <Text style={styles.pickupButtonText}>تم الاستلام</Text>
-                    </TouchableOpacity>
-                  )}
+                  </View>
                 </View>
               </View>
             ))
           )}
+          
+          {/* قسم المجموع الكلي */}
+          {order && orderItems.length > 0 && (
+            <View style={styles.totalSummaryCard}>
+              <View style={styles.totalSummaryHeader}>
+                <Ionicons name="receipt" size={20} color="#007AFF" />
+                <Text style={styles.totalSummaryTitle}>ملخص المبلغ</Text>
+              </View>
+              <View style={styles.totalSummaryContent}>
+                {(() => {
+                  const totalItemsFee = orderItems
+                    .filter(item => item.item_fee !== null && item.item_fee !== undefined)
+                    .reduce((sum, item) => sum + (item.item_fee || 0), 0);
+                  const itemsWithFee = orderItems.filter(item => item.item_fee !== null && item.item_fee !== undefined).length;
+                  
+                  return (
+                    <>
+                      <View style={styles.totalSummaryRow}>
+                        <Text style={styles.totalSummaryLabel}>مبلغ الطلبات ({itemsWithFee}/{orderItems.length}):</Text>
+                        <Text style={styles.totalSummaryValue}>
+                          {totalItemsFee.toFixed(2)} جنيه
+                        </Text>
+                      </View>
+                      {order.is_prepaid && order.prepaid_amount && (
+                        <View style={styles.totalSummaryRow}>
+                          <Text style={styles.totalSummaryLabel}>مدفوع مسبقاً:</Text>
+                          <Text style={[styles.totalSummaryValue, { color: '#34C759' }]}>
+                            -{order.prepaid_amount.toFixed(2)} جنيه
+                          </Text>
+                        </View>
+                      )}
+                      {/* يمكن إضافة مبلغ الرحلة هنا لاحقاً */}
+                      <View style={styles.totalSummaryDivider} />
+                      <View style={styles.totalSummaryRow}>
+                        <Text style={styles.totalSummaryTotalLabel}>المجموع الكلي:</Text>
+                        <Text style={styles.totalSummaryTotalValue}>
+                          {Math.max(0, totalItemsFee - (order.prepaid_amount || 0)).toFixed(2)} جنيه
+                        </Text>
+                      </View>
+                    </>
+                  );
+                })()}
+              </View>
+            </View>
+          )}
         </ScrollView>
       </Animated.View>
+
+      {/* Modal لإدخال المبلغ */}
+      <Modal
+        visible={showFeeModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowFeeModal(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+        >
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>إدخال المبلغ</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowFeeModal(false);
+                  setItemFee('');
+                  setPrepaidAmount('');
+                  setIsPrepaid(false);
+                  setSelectedItemId(null);
+                }}
+              >
+                <Ionicons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalBody}>
+              {selectedItemId && (
+                <View style={styles.modalItemInfo}>
+                  <Text style={styles.modalItemLabel}>عنوان التوصيل:</Text>
+                  <Text style={styles.modalItemAddress}>
+                    {orderItems.find(i => i.id === selectedItemId)?.address || ''}
+                  </Text>
+                </View>
+              )}
+
+              <View style={styles.modalInputContainer}>
+                <Text style={styles.modalInputLabel}>المبلغ (جنيه):</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={itemFee}
+                  onChangeText={setItemFee}
+                  placeholder="0.00"
+                  keyboardType="decimal-pad"
+                  autoFocus={true}
+                />
+              </View>
+
+              <TouchableOpacity
+                style={styles.modalCheckbox}
+                onPress={() => setIsPrepaid(!isPrepaid)}
+              >
+                <Ionicons
+                  name={isPrepaid ? 'checkbox' : 'checkbox-outline'}
+                  size={24}
+                  color={isPrepaid ? '#34C759' : '#666'}
+                />
+                <Text style={styles.modalCheckboxLabel}>
+                  العميل دفع المبلغ مسبقاً للمحل/المزود
+                </Text>
+              </TouchableOpacity>
+
+              {isPrepaid && (
+                <>
+                  <View style={styles.modalInputContainer}>
+                    <Text style={styles.modalInputLabel}>المبلغ المدفوع مسبقاً (جنيه):</Text>
+                    <TextInput
+                      style={styles.modalInput}
+                      value={prepaidAmount}
+                      onChangeText={setPrepaidAmount}
+                      placeholder="0.00"
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+                  <View style={styles.modalPrepaidNote}>
+                    <Ionicons name="information-circle" size={16} color="#007AFF" />
+                    <Text style={styles.modalPrepaidNoteText}>
+                      سيتم خصم المبلغ المدفوع مسبقاً من المجموع الكلي
+                    </Text>
+                  </View>
+                </>
+              )}
+            </View>
+
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonCancel]}
+                onPress={() => {
+                  setShowFeeModal(false);
+                  setItemFee('');
+                  setPrepaidAmount('');
+                  setIsPrepaid(false);
+                  setSelectedItemId(null);
+                }}
+              >
+                <Text style={styles.modalButtonCancelText}>إلغاء</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonConfirm]}
+                onPress={handleConfirmPickup}
+              >
+                <Text style={styles.modalButtonConfirmText}>تأكيد</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1108,15 +1605,239 @@ const styles = StyleSheet.create({
   orderItemInfo: {
     flex: 1,
   },
+  orderItemTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    gap: 8,
+  },
+  orderItemAddressContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  orderItemRightSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  itemFeeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#34C75915',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  itemFeeText: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    fontWeight: '600',
+    color: '#34C759',
+  },
+  addressIcon: {
+    marginTop: 2,
+  },
   orderItemAddress: {
+    flex: 1,
     fontSize: responsive.getResponsiveFontSize(14),
     fontWeight: '600',
     color: '#1a1a1a',
-    marginBottom: 4,
+    lineHeight: 20,
   },
   orderItemDescription: {
     fontSize: responsive.getResponsiveFontSize(12),
     color: '#666',
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  orderItemDetails: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    marginTop: 8,
+    flexWrap: 'wrap',
+  },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  detailText: {
+    fontSize: responsive.getResponsiveFontSize(13),
+    color: '#1a1a1a',
+    fontWeight: '500',
+  },
+  phoneText: {
+    color: '#007AFF',
+    textDecorationLine: 'underline',
+  },
+  totalSummaryCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 8,
+    marginBottom: 16,
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 4,
+      elevation: 3,
+    }),
+  },
+  totalSummaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  totalSummaryTitle: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+  },
+  totalSummaryContent: {
+    gap: 8,
+  },
+  totalSummaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  totalSummaryLabel: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#666',
+  },
+  totalSummaryValue: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    fontWeight: '600',
+    color: '#1a1a1a',
+  },
+  totalSummaryDivider: {
+    height: 1,
+    backgroundColor: '#e0e0e0',
+    marginVertical: 4,
+  },
+  totalSummaryTotalLabel: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+  },
+  totalSummaryTotalValue: {
+    fontSize: responsive.getResponsiveFontSize(18),
+    fontWeight: 'bold',
+    color: '#34C759',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontSize: responsive.getResponsiveFontSize(18),
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+  },
+  modalBody: {
+    gap: 16,
+  },
+  modalItemInfo: {
+    marginBottom: 8,
+  },
+  modalItemLabel: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    color: '#666',
+    marginBottom: 4,
+  },
+  modalItemAddress: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#1a1a1a',
+    fontWeight: '500',
+  },
+  modalInputContainer: {
+    marginBottom: 8,
+  },
+  modalInputLabel: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 8,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: responsive.getResponsiveFontSize(16),
+    backgroundColor: '#f9f9f9',
+  },
+  modalCheckbox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+  modalCheckboxLabel: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#1a1a1a',
+    flex: 1,
+  },
+  modalPrepaidNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#E3F2FD',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  modalPrepaidNoteText: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    color: '#007AFF',
+    flex: 1,
+  },
+  modalFooter: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 20,
+  },
+  modalButton: {
+    flex: 1,
+    padding: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  modalButtonCancel: {
+    backgroundColor: '#f0f0f0',
+  },
+  modalButtonCancelText: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    fontWeight: '600',
+    color: '#666',
+  },
+  modalButtonConfirm: {
+    backgroundColor: '#34C759',
+  },
+  modalButtonConfirmText: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    fontWeight: '600',
+    color: '#fff',
   },
   statusBadge: {
     flexDirection: 'row',

@@ -15,7 +15,6 @@ export interface CreateNotificationParams {
 async function sendPushNotification(userId: string, title: string, message: string, data?: any) {
   // على الويب، نستخدم In-App Notifications فقط (Supabase Realtime)
   // لا حاجة لإرسال Push Notifications
-  console.log('🔔 [sendPushNotification] Skipping push notification (Web-only mode)');
   return;
 }
 
@@ -27,6 +26,40 @@ export async function createNotification(params: CreateNotificationParams) {
   try {
     // الحصول على المستخدم الحالي
     const { data: { user: authUser } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    // إذا لم يكن هناك session، استخدم Edge Function
+    if (!session) {
+      console.log('[createNotification] No session found, using Edge Function to create notification');
+      try {
+        const { data: edgeData, error: edgeError } = await supabase.functions.invoke('create-notification', {
+          body: {
+            user_id: params.user_id,
+            title: params.title,
+            message: params.message,
+            type: params.type || 'info',
+            order_id: params.order_id || null,
+          },
+        });
+
+        if (edgeError) {
+          console.error('[createNotification] Error from Edge Function:', edgeError);
+          return { success: false, error: edgeError };
+        }
+
+        if (!edgeData?.success) {
+          console.error('[createNotification] Edge Function returned error:', edgeData?.error);
+          return { success: false, error: new Error(edgeData?.error || 'فشل إنشاء الإشعار') };
+        }
+
+        console.log('[createNotification] Notification created successfully via Edge Function:', edgeData.notification);
+        return { success: true };
+      } catch (edgeErr: any) {
+        console.error('[createNotification] Exception calling Edge Function:', edgeErr);
+        return { success: false, error: edgeErr };
+      }
+    }
+    
     if (!authUser) {
       console.error('[createNotification] No authenticated user');
       return { success: false, error: new Error('No authenticated user') };
@@ -40,7 +73,7 @@ export async function createNotification(params: CreateNotificationParams) {
       .maybeSingle();
 
     if (currentUserError) {
-      console.error('[createNotification] Error fetching current user:', currentUserError);
+      // Silently handle error - continue with default behavior
     }
 
     const { data: targetUser, error: targetUserError } = await supabase
@@ -50,7 +83,7 @@ export async function createNotification(params: CreateNotificationParams) {
       .maybeSingle();
 
     if (targetUserError) {
-      console.error('[createNotification] Error fetching target user:', targetUserError);
+      // Silently handle error - continue with default behavior
     }
 
     const isCustomer = currentUser?.role === 'customer';
@@ -69,13 +102,20 @@ export async function createNotification(params: CreateNotificationParams) {
       });
 
       if (error) {
-        console.error('Error creating notification:', error);
+        console.error('[createNotification] Error creating notification:', error);
         return { success: false, error };
       }
     } 
     // إذا كان المستخدم سائقاً والمستلم عميل، استخدم الدالة RPC
     else if (isDriver && targetIsCustomer) {
-      const { error } = await supabase.rpc('insert_notification_for_customer_by_driver', {
+      console.log('[createNotification] Driver sending notification to customer via RPC:', {
+        driverId: authUser.id,
+        customerId: params.user_id,
+        title: params.title,
+        orderId: params.order_id,
+      });
+      
+      const { data: rpcData, error } = await supabase.rpc('insert_notification_for_customer_by_driver', {
         p_user_id: params.user_id,
         p_title: params.title,
         p_message: params.message,
@@ -84,14 +124,30 @@ export async function createNotification(params: CreateNotificationParams) {
       });
 
       if (error) {
-        console.error('Error creating notification:', error);
+        console.error('[createNotification] Error creating notification via RPC:', {
+          error,
+          errorCode: error.code,
+          errorMessage: error.message,
+          errorDetails: error.details,
+          driverId: authUser.id,
+          customerId: params.user_id,
+        });
         return { success: false, error };
       }
+      
+      console.log('[createNotification] Notification created successfully via RPC:', rpcData);
     }
     // إذا كان المستخدم سائقاً ولكن لم نتمكن من التحقق من دور المستلم، جرب RPC function
     else if (isDriver && !targetUser) {
       // Fallback: إذا كان المستخدم سائقاً ولم نتمكن من التحقق من دور المستلم، استخدم RPC function
-      const { error } = await supabase.rpc('insert_notification_for_customer_by_driver', {
+      console.log('[createNotification] Driver sending notification (target role unknown) via RPC:', {
+        driverId: authUser.id,
+        targetUserId: params.user_id,
+        title: params.title,
+        orderId: params.order_id,
+      });
+      
+      const { data: rpcData, error } = await supabase.rpc('insert_notification_for_customer_by_driver', {
         p_user_id: params.user_id,
         p_title: params.title,
         p_message: params.message,
@@ -100,9 +156,18 @@ export async function createNotification(params: CreateNotificationParams) {
       });
 
       if (error) {
-        console.error('Error creating notification:', error);
+        console.error('[createNotification] Error creating notification via RPC (fallback):', {
+          error,
+          errorCode: error.code,
+          errorMessage: error.message,
+          errorDetails: error.details,
+          driverId: authUser.id,
+          targetUserId: params.user_id,
+        });
         return { success: false, error };
       }
+      
+      console.log('[createNotification] Notification created successfully via RPC (fallback):', rpcData);
     }
     // للمستخدمين الآخرين (مثل المديرين)، استخدم INSERT العادي
     else {
@@ -117,7 +182,7 @@ export async function createNotification(params: CreateNotificationParams) {
         });
       
       if (error) {
-        console.error('Error creating notification:', error);
+        console.error('[createNotification] Error creating notification:', error);
         return { success: false, error };
       }
     }
@@ -181,7 +246,7 @@ export async function createNotifications(notifications: CreateNotificationParam
             });
 
             if (error) {
-              console.error(`Error creating notification for driver ${notification.user_id}:`, error);
+              console.error(`[createNotifications] Error creating notification for driver ${notification.user_id}:`, error);
               errorCount++;
             } else {
               successCount++;
@@ -194,7 +259,7 @@ export async function createNotifications(notifications: CreateNotificationParam
               );
             }
           } catch (err) {
-            console.error(`Error creating notification for driver ${notification.user_id}:`, err);
+            console.error(`[createNotifications] Error creating notification for driver ${notification.user_id}:`, err);
             errorCount++;
           }
         }
@@ -210,7 +275,7 @@ export async function createNotifications(notifications: CreateNotificationParam
             });
 
             if (error) {
-              console.error(`Error creating notification for customer ${notification.user_id}:`, error);
+              console.error(`[createNotifications] Error creating notification for customer ${notification.user_id}:`, error);
               errorCount++;
             } else {
               successCount++;
@@ -223,7 +288,7 @@ export async function createNotifications(notifications: CreateNotificationParam
               );
             }
           } catch (err) {
-            console.error(`Error creating notification for customer ${notification.user_id}:`, err);
+            console.error(`[createNotifications] Error creating notification for customer ${notification.user_id}:`, err);
             errorCount++;
           }
         } else {
@@ -240,7 +305,7 @@ export async function createNotifications(notifications: CreateNotificationParam
               });
 
             if (error) {
-              console.error(`Error creating notification for ${notification.user_id}:`, error);
+              console.error(`[createNotifications] Error creating notification for ${notification.user_id}:`, error);
               errorCount++;
             } else {
               successCount++;
@@ -253,7 +318,7 @@ export async function createNotifications(notifications: CreateNotificationParam
               );
             }
           } catch (err) {
-            console.error(`Error creating notification for ${notification.user_id}:`, err);
+            console.error(`[createNotifications] Error creating notification for ${notification.user_id}:`, err);
             errorCount++;
           }
         }
@@ -276,7 +341,7 @@ export async function createNotifications(notifications: CreateNotificationParam
         })));
       
       if (error) {
-        console.error('Error creating notifications:', error);
+        console.error('[createNotifications] Error creating notifications:', error);
         return { success: false, error };
       }
       
@@ -293,7 +358,7 @@ export async function createNotifications(notifications: CreateNotificationParam
       return { success: true };
     }
   } catch (error) {
-    console.error('Error creating notifications:', error);
+    console.error('[createNotifications] Error creating notifications:', error);
     return { success: false, error };
   }
 }
@@ -321,7 +386,7 @@ export async function notifyAllAdmins(title: string, message: string, type: 'inf
     
     return await createNotifications(notifications);
   } catch (error) {
-    console.error('Error notifying all admins:', error);
+    console.error('[notifyAllAdmins] Error notifying all admins:', error);
     return { success: false, error };
   }
 }
@@ -351,7 +416,7 @@ export async function notifyAllActiveDrivers(title: string, message: string, typ
     
     return await createNotifications(notifications);
   } catch (error) {
-    console.error('Error notifying all active drivers:', error);
+    console.error('[notifyAllActiveDrivers] Error notifying all active drivers:', error);
     return { success: false, error };
   }
 }
@@ -379,7 +444,7 @@ export async function notifyAllDrivers(title: string, message: string, type: 'in
     
     return await createNotifications(notifications);
   } catch (error) {
-    console.error('Error notifying all drivers:', error);
+    console.error('[notifyAllDrivers] Error notifying all drivers:', error);
     return { success: false, error };
   }
 }
@@ -407,11 +472,8 @@ export async function notifyAllCustomers(title: string, message: string, type: '
     
     return await createNotifications(notifications);
   } catch (error) {
-    console.error('Error notifying all customers:', error);
+    console.error('[notifyAllCustomers] Error notifying all customers:', error);
     return { success: false, error };
   }
 }
-
-
-
 

@@ -40,6 +40,8 @@ interface UpdateOrderRequest {
   completedAt?: string | null;
   cancelledBy?: string | null;
   cancelledAt?: string | null;
+  is_prepaid?: boolean;
+  prepaid_amount?: number | null;
 }
 
 serve(async (req) => {
@@ -77,6 +79,8 @@ serve(async (req) => {
       completedAt,
       cancelledBy,
       cancelledAt,
+      is_prepaid,
+      prepaid_amount,
     } = body;
 
     // Validate input
@@ -141,6 +145,8 @@ serve(async (req) => {
     if (completedAt !== undefined) updateData.completed_at = completedAt;
     if (cancelledBy !== undefined) updateData.cancelled_by = cancelledBy;
     if (cancelledAt !== undefined) updateData.cancelled_at = cancelledAt;
+    if (is_prepaid !== undefined) updateData.is_prepaid = is_prepaid;
+    if (prepaid_amount !== undefined) updateData.prepaid_amount = prepaid_amount;
 
     // Update order
     const { data: updatedOrder, error: updateError } = await supabase

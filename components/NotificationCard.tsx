@@ -7,6 +7,7 @@ import {
   Modal,
   ScrollView,
   FlatList,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNotifications, Notification } from '@/hooks/useNotifications';
@@ -17,7 +18,7 @@ interface NotificationCardProps {
 }
 
 export default function NotificationCard({ compact = false }: NotificationCardProps) {
-  const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
+  const { notifications, unreadCount, markAsRead, markAllAsRead, hasMore, loadMore, loading } = useNotifications();
   const [showModal, setShowModal] = useState(false);
 
   const handleNotificationPress = (notification: Notification) => {
@@ -52,11 +53,7 @@ export default function NotificationCard({ compact = false }: NotificationCardPr
     }
   };
 
-  // إذا لم توجد إشعارات، لا نعرض الكارت
-  if (notifications.length === 0) {
-    return null;
-  }
-
+  // عرض الكارت دائماً حتى لو لم تكن هناك إشعارات
   return (
     <>
       <TouchableOpacity
@@ -79,7 +76,9 @@ export default function NotificationCard({ compact = false }: NotificationCardPr
             <Text style={styles.cardTitle}>الإشعارات</Text>
             {!compact && (
               <Text style={styles.cardSubtitle}>
-                {unreadCount > 0 
+                {loading 
+                  ? 'جاري التحميل...'
+                  : unreadCount > 0 
                   ? `${unreadCount} إشعار غير مقروء`
                   : notifications.length > 0
                   ? `${notifications.length} إشعار`
@@ -175,8 +174,28 @@ export default function NotificationCard({ compact = false }: NotificationCardPr
               ListEmptyComponent={
                 <View style={styles.emptyContainer}>
                   <Ionicons name="notifications-outline" size={64} color="#ccc" />
-                  <Text style={styles.emptyText}>لا توجد إشعارات</Text>
+                  <Text style={styles.emptyText}>
+                    {loading ? 'جاري تحميل الإشعارات...' : 'لا توجد إشعارات'}
+                  </Text>
                 </View>
+              }
+              ListFooterComponent={
+                hasMore ? (
+                  <TouchableOpacity
+                    style={styles.loadMoreButton}
+                    onPress={loadMore}
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <ActivityIndicator size="small" color="#007AFF" />
+                    ) : (
+                      <>
+                        <Ionicons name="chevron-down" size={20} color="#007AFF" />
+                        <Text style={styles.loadMoreText}>تحميل المزيد</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                ) : null
               }
             />
           </View>
@@ -371,5 +390,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#999',
     marginTop: 16,
+  },
+  loadMoreButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    marginTop: 8,
+    backgroundColor: '#F0F7FF',
+    borderRadius: 12,
+    gap: 8,
+  },
+  loadMoreText: {
+    fontSize: 14,
+    color: '#007AFF',
+    fontWeight: '600',
   },
 });
