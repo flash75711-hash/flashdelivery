@@ -7,10 +7,10 @@ import {
   StyleSheet,
   SafeAreaView,
   ScrollView,
-  Alert,
   ActivityIndicator,
   Platform,
 } from 'react-native';
+import { showToast } from '@/lib/alert';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { useTranslation } from 'react-i18next';
@@ -81,7 +81,7 @@ export default function VendorStoreScreen() {
     if (!user) return;
 
     if (!storeInfo.name || !storeInfo.address) {
-      Alert.alert('خطأ', 'الرجاء إدخال اسم المتجر والعنوان');
+      showToast('الرجاء إدخال اسم المتجر والعنوان', 'error');
       return;
     }
 
@@ -99,9 +99,9 @@ export default function VendorStoreScreen() {
       });
 
       if (error) throw error;
-      Alert.alert('نجح', 'تم حفظ معلومات المتجر');
+      showToast('تم حفظ معلومات المتجر', 'success');
     } catch (error: any) {
-      Alert.alert('خطأ', error.message || 'فشل حفظ المعلومات');
+      showToast(error.message || 'فشل حفظ المعلومات', 'error');
     } finally {
       setSaving(false);
     }

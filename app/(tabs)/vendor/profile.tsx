@@ -7,7 +7,6 @@ import {
   StyleSheet,
   SafeAreaView,
   ScrollView,
-  Alert,
   ActivityIndicator,
   Platform,
 } from 'react-native';
@@ -17,6 +16,7 @@ import { useTranslation } from 'react-i18next';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import responsive from '@/utils/responsive';
+import { showToast } from '@/lib/alert';
 
 export default function VendorProfileScreen() {
   const { user, signOut } = useAuth();
@@ -97,9 +97,9 @@ export default function VendorProfileScreen() {
         .eq('id', user.id);
 
       if (error) throw error;
-      Alert.alert('نجح', 'تم تحديث البيانات الشخصية');
+      showToast('تم تحديث البيانات الشخصية', 'success');
     } catch (error: any) {
-      Alert.alert('خطأ', error.message || 'فشل تحديث البيانات');
+      showToast(error.message || 'فشل تحديث البيانات', 'error');
     } finally {
       setSaving(false);
     }

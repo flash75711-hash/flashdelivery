@@ -93,7 +93,8 @@ export default function FloatingOrderNotification({
       }, 300);
     } catch (error: any) {
       console.error('Error accepting order:', error);
-      alert('فشل قبول الطلب. يرجى المحاولة مرة أخرى.');
+      const { showToast } = await import('@/lib/alert');
+      showToast('فشل قبول الطلب. يرجى المحاولة مرة أخرى.', 'error');
     } finally {
       setLoading(false);
     }
@@ -174,7 +175,6 @@ export default function FloatingOrderNotification({
                 try {
                   routePoints = JSON.parse(routePoints);
                 } catch (e) {
-                  console.warn('⚠️ فشل تحويل items من JSON:', e);
                   routePoints = null;
                 }
               }

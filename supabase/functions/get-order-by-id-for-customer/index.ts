@@ -76,7 +76,17 @@ Deno.serve(async (req) => {
         created_at,
         expires_at,
         created_by_role,
-        package_description
+        package_description,
+        negotiated_price,
+        negotiation_status,
+        driver_proposed_price,
+        customer_proposed_price,
+        search_status,
+        search_started_at,
+        search_expanded_at,
+        cancelled_by,
+        cancelled_at,
+        deadline
       `)
       .eq('id', orderId)
       .single();

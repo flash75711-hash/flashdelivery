@@ -6,7 +6,6 @@ import {
   SafeAreaView,
   FlatList,
   TouchableOpacity,
-  Alert,
   RefreshControl,
   Platform,
 } from 'react-native';
@@ -14,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import responsive, { createShadowStyle } from '@/utils/responsive';
+import { showToast, showConfirm } from '@/lib/alert';
 
 interface DriverPayment {
   driver_id: string;
@@ -93,30 +93,29 @@ export default function AdminAccountingScreen() {
   };
 
   const markAsCollected = async (driverId: string) => {
-    Alert.alert(
+    const confirmed = await showConfirm(
       'تم التحصيل',
       'هل تم تحصيل المستحقات من السائق؟',
-      [
-        { text: 'إلغاء', style: 'cancel' },
-        {
-          text: 'تأكيد',
-          onPress: async () => {
-            try {
-              const { error } = await supabase
-                .from('profiles')
-                .update({ is_debt_cleared: true })
-                .eq('id', driverId);
-
-              if (error) throw error;
-              Alert.alert('نجح', 'تم تحديث حالة الدفع');
-              loadPayments();
-            } catch (error: any) {
-              Alert.alert('خطأ', error.message || 'فشل تحديث الحالة');
-            }
-          },
-        },
-      ]
+      {
+        confirmText: 'تأكيد',
+        cancelText: 'إلغاء',
+      }
     );
+
+    if (!confirmed) return;
+
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ is_debt_cleared: true })
+        .eq('id', driverId);
+
+      if (error) throw error;
+      showToast('تم تحديث حالة الدفع', 'success');
+      loadPayments();
+    } catch (error: any) {
+      showToast(error.message || 'فشل تحديث الحالة', 'error');
+    }
   };
 
   return (

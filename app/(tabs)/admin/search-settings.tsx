@@ -89,27 +89,27 @@ export default function SearchSettingsScreen() {
     const expandedDuration = parseFloat(settings.expandedDuration);
 
     if (isNaN(initialRadius) || initialRadius <= 0) {
-      Alert.alert('خطأ', 'نطاق البحث الأولي يجب أن يكون رقماً موجباً');
+      showToast('نطاق البحث الأولي يجب أن يكون رقماً موجباً', 'error');
       return;
     }
 
     if (isNaN(expandedRadius) || expandedRadius <= 0) {
-      Alert.alert('خطأ', 'نطاق البحث الموسع يجب أن يكون رقماً موجباً');
+      showToast('نطاق البحث الموسع يجب أن يكون رقماً موجباً', 'error');
       return;
     }
 
     if (expandedRadius <= initialRadius) {
-      Alert.alert('خطأ', 'نطاق البحث الموسع يجب أن يكون أكبر من النطاق الأولي');
+      showToast('نطاق البحث الموسع يجب أن يكون أكبر من النطاق الأولي', 'error');
       return;
     }
 
     if (isNaN(initialDuration) || initialDuration <= 0) {
-      Alert.alert('خطأ', 'مدة البحث الأولي يجب أن تكون رقماً موجباً');
+      showToast('مدة البحث الأولي يجب أن تكون رقماً موجباً', 'error');
       return;
     }
 
     if (isNaN(expandedDuration) || expandedDuration <= 0) {
-      Alert.alert('خطأ', 'مدة البحث الموسع يجب أن تكون رقماً موجباً');
+      showToast('مدة البحث الموسع يجب أن تكون رقماً موجباً', 'error');
       return;
     }
 
@@ -138,11 +138,11 @@ export default function SearchSettingsScreen() {
         }
       }
 
-      Alert.alert('نجح', 'تم حفظ الإعدادات بنجاح');
+      showToast('تم حفظ الإعدادات بنجاح', 'success');
       router.back();
     } catch (error: any) {
       console.error('Error saving settings:', error);
-      Alert.alert('خطأ', error.message || 'فشل حفظ الإعدادات');
+      showToast(error.message || 'فشل حفظ الإعدادات', 'error');
     } finally {
       setSaving(false);
     }

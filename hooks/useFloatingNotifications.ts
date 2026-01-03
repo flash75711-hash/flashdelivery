@@ -38,35 +38,24 @@ export function useFloatingNotifications() {
   const addNotification = useCallback((notification: FloatingNotificationData) => {
     // تجنب عرض نفس الإشعار مرتين
     if (shownNotificationIds.current.has(notification.id)) {
-      console.log('🔔 [useFloatingNotifications] Notification already shown, skipping:', notification.id);
       return;
     }
-
-    console.log('🔔 [useFloatingNotifications] addNotification called:', {
-      notification,
-      isShowing: isShowing.current,
-      queueLength: notificationQueue.current.length,
-    });
+    
+    shownNotificationIds.current.add(notification.id);
     
     // إذا كان هناك إشعار معروض حالياً، نضيف الجديد إلى الطابور
     if (isShowing.current) {
-      console.log('🔔 [useFloatingNotifications] Adding to queue (notification already showing)');
       notificationQueue.current.push(notification);
-      shownNotificationIds.current.add(notification.id);
     } else {
       // إذا لم يكن هناك إشعار معروض، نعرضه مباشرة
-      console.log('🔔 [useFloatingNotifications] Showing notification immediately');
       setCurrentNotification(notification);
       setVisible(true);
       isShowing.current = true;
-      shownNotificationIds.current.add(notification.id);
     }
   }, []);
 
   useEffect(() => {
     if (!user) return;
-
-    console.log('🔔 [useFloatingNotifications] Setting up Realtime subscription for user:', user.id, 'role:', user.role);
 
     // الاشتراك في Realtime للإشعارات الجديدة
     const notificationsChannel = supabase
@@ -80,31 +69,14 @@ export function useFloatingNotifications() {
           filter: `user_id=eq.${user.id}`,
         },
         async (payload) => {
-          console.log('🔔 [useFloatingNotifications] Realtime event received:', payload);
           const newNotification = payload.new as any;
-          
-          console.log('🔔 [useFloatingNotifications] New notification:', {
-            id: newNotification.id,
-            title: newNotification.title,
-            is_read: newNotification.is_read,
-            order_id: newNotification.order_id,
-            user_role: user.role,
-          });
           
           // تخطي الإشعارات المقروءة
           if (newNotification.is_read) {
-            console.log('🔔 [useFloatingNotifications] Skipping read notification');
             return;
           }
 
-          // تخطي إشعارات الطلبات للسائقين (يتم التعامل معها في FloatingOrderNotification)
-          if (user.role === 'driver' && newNotification.order_id) {
-            console.log('🔔 [useFloatingNotifications] Skipping order notification for driver');
-            return;
-          }
-
-          console.log('🔔 [useFloatingNotifications] Adding notification to queue');
-          // إضافة الإشعار إلى الطابور
+          // إضافة الإشعار إلى الطابور (بما في ذلك إشعارات الطلبات)
           addNotification({
             id: newNotification.id,
             title: newNotification.title,
@@ -115,9 +87,7 @@ export function useFloatingNotifications() {
           });
         }
       )
-      .subscribe((status) => {
-        console.log('🔔 [useFloatingNotifications] Subscription status:', status);
-      });
+      .subscribe();
 
     // جلب الإشعارات غير المقروءة عند التحميل الأول
     const loadUnreadNotifications = async () => {
@@ -136,35 +106,29 @@ export function useFloatingNotifications() {
         }
 
         if (notifications && notifications.length > 0) {
-          // تخطي إشعارات الطلبات للسائقين
-          const filteredNotifications = user.role === 'driver'
-            ? notifications.filter(n => !n.order_id)
-            : notifications;
+          // عرض جميع الإشعارات (بما في ذلك إشعارات الطلبات)
+          // عرض أول إشعار
+          const firstNotification = notifications[0];
+          addNotification({
+            id: firstNotification.id,
+            title: firstNotification.title,
+            message: firstNotification.message,
+            type: firstNotification.type || 'info',
+            order_id: firstNotification.order_id,
+            created_at: firstNotification.created_at,
+          });
 
-          if (filteredNotifications.length > 0) {
-            // عرض أول إشعار
-            const firstNotification = filteredNotifications[0];
-            addNotification({
-              id: firstNotification.id,
-              title: firstNotification.title,
-              message: firstNotification.message,
-              type: firstNotification.type || 'info',
-              order_id: firstNotification.order_id,
-              created_at: firstNotification.created_at,
+          // إضافة الباقي إلى الطابور
+          notifications.slice(1).forEach(notification => {
+            notificationQueue.current.push({
+              id: notification.id,
+              title: notification.title,
+              message: notification.message,
+              type: notification.type || 'info',
+              order_id: notification.order_id,
+              created_at: notification.created_at,
             });
-
-            // إضافة الباقي إلى الطابور
-            filteredNotifications.slice(1).forEach(notification => {
-              notificationQueue.current.push({
-                id: notification.id,
-                title: notification.title,
-                message: notification.message,
-                type: notification.type || 'info',
-                order_id: notification.order_id,
-                created_at: notification.created_at,
-              });
-            });
-          }
+          });
         }
       } catch (error) {
         console.error('Error in loadUnreadNotifications:', error);
@@ -185,7 +149,7 @@ export function useFloatingNotifications() {
           .limit(1);
 
         if (error) {
-          console.error('🔔 [useFloatingNotifications] Polling error:', error);
+          console.error('Error polling notifications:', error);
           return;
         }
 
@@ -194,12 +158,6 @@ export function useFloatingNotifications() {
           
           // التحقق من أن الإشعار لم يتم عرضه من قبل
           if (!shownNotificationIds.current.has(latestNotification.id)) {
-            // تخطي إشعارات الطلبات للسائقين
-            if (user.role === 'driver' && latestNotification.order_id) {
-              return;
-            }
-
-            console.log('🔔 [useFloatingNotifications] Found new notification via polling:', latestNotification);
             addNotification({
               id: latestNotification.id,
               title: latestNotification.title,
@@ -211,7 +169,7 @@ export function useFloatingNotifications() {
           }
         }
       } catch (error) {
-        console.error('🔔 [useFloatingNotifications] Polling error:', error);
+        console.error('Error polling notifications:', error);
       }
     }, 3000); // كل 3 ثواني
 

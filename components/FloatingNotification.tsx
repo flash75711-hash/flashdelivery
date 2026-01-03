@@ -105,7 +105,7 @@ export default function FloatingNotification({
           }
       } catch (error) {
         console.error('Error marking notification as read:', error);
-        }
+      }
       }
     }
     onDismiss();
@@ -268,18 +268,3 @@ const getStyles = () => StyleSheet.create({
     marginLeft: 8,
   },
 });
-
-// Helper function for styles
-function getIconColor(type: string): string {
-  switch (type) {
-    case 'success':
-      return '#34C759';
-    case 'error':
-      return '#FF3B30';
-    case 'warning':
-      return '#FF9500';
-    default:
-      return '#007AFF';
-  }
-}
-

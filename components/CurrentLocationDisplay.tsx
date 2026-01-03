@@ -62,7 +62,6 @@ export default function CurrentLocationDisplay({ onLocationUpdate, onOpenPlacesD
           currentLocation.lat !== externalLocation.lat || 
           currentLocation.lon !== externalLocation.lon ||
           currentLocation.address !== externalLocation.address) {
-        console.log('Updating location from external source (manual selection):', externalLocation);
         // عند تحديث الموقع من مصدر خارجي (اختيار يدوي)، نضيف accuracy: 0
         // للإشارة إلى أن هذا موقع محدد يدوياً وليس GPS
         setLocation({ ...externalLocation, accuracy: 0 });
@@ -74,20 +73,11 @@ export default function CurrentLocationDisplay({ onLocationUpdate, onOpenPlacesD
 
   const reverseGeocodeAddress = useCallback(async (lat: number, lon: number): Promise<string | null> => {
     try {
-      console.log('Calling reverseGeocode for:', { lat, lon });
       const data = await reverseGeocode(lat, lon);
 
       if (!data || !data.address) {
-        console.log('No address data returned from reverseGeocode');
         return null;
       }
-
-      console.log('Reverse geocode response:', {
-        display_name: data.display_name,
-        address: data.address,
-        city: data.address.city || data.address.town || data.address.village,
-        state: data.address.state,
-      });
 
         const address = data.address;
       const locationParts: string[] = [];
@@ -193,28 +183,19 @@ export default function CurrentLocationDisplay({ onLocationUpdate, onOpenPlacesD
   }, []);
 
   const updateLocation = useCallback(async () => {
-    console.log('🔄 updateLocation called');
-    
     // حماية من الاستدعاءات المتعددة المتزامنة
     if (isUpdatingLocationRef.current) {
-      console.log('⏭️ Skipping updateLocation - already in progress');
       return;
     }
     
     // إذا كان هناك externalLocation نشط، لا نحدث الموقع تلقائياً
-    // لأن externalLocation يعني أن المستخدم اختار موقعاً محدداً
-    // نستخدم ref للتحقق من القيمة الحالية
     if (externalLocationRef.current) {
-      console.log('⏭️ Skipping auto-update because externalLocation is set:', externalLocationRef.current);
       return;
     }
     
     // إذا كان الموقع الحالي محدد يدوياً (accuracy === 0)، لا نستبدله
-    // لأن هذا يعني أن المستخدم اختار موقعاً محدداً من الدليل
-    // نستخدم ref للتحقق من القيمة الحالية
     const currentLocation = locationRef.current;
     if (currentLocation && currentLocation.accuracy === 0) {
-      console.log('⏭️ Skipping auto-update because location was manually selected (accuracy === 0)');
       return;
     }
     
@@ -222,93 +203,51 @@ export default function CurrentLocationDisplay({ onLocationUpdate, onOpenPlacesD
     isUpdatingLocationRef.current = true;
     
     try {
-      console.log('📍 Fetching location with high accuracy...');
-      // استخدام الدالة المشتركة لجلب الموقع مع WiFi
       const currentLocation = await getLocationWithHighAccuracy();
       
       const lat = currentLocation.latitude;
       const lon = currentLocation.longitude;
-      const accuracy = currentLocation.accuracy; // دقة الموقع بالمتر
-      
-      console.log('✅ Location fetched:', { lat, lon, accuracy });
-      
-      // تسجيل الإحداثيات الفعلية مع معلومات عن مصدر الموقع
-      const locationSource = accuracy && accuracy < 100 
-        ? 'GPS/WiFi' 
-        : accuracy && accuracy < 1000 
-        ? 'Network (WiFi/Cellular)' 
-        : 'IP-based';
-      
-      console.log('Location Coordinates (using Web Geolocation API):', { 
-        lat, 
-        lon, 
-        accuracy: `${accuracy?.toFixed(0)}m` || 'unknown',
-        source: locationSource,
-        altitude: currentLocation.altitude,
-        heading: currentLocation.heading,
-        speed: currentLocation.speed,
-      });
+      const accuracy = currentLocation.accuracy;
       
       // التحقق من دقة الموقع - إذا كانت الدقة سيئة جداً (أكثر من 5000 متر = 5 كم)
       if (accuracy && accuracy > 5000) {
-        console.warn('⚠️ GPS accuracy is very poor (IP-based geolocation):', accuracy, 'meters. Skipping auto-update to preserve manual selection.');
         if (location) {
-          console.log('Keeping existing location instead of updating with inaccurate GPS data');
           return;
         }
-        console.warn('No existing location, using inaccurate GPS data as fallback');
-      } else if (accuracy && accuracy > 1000) {
-        console.warn('⚠️ GPS accuracy is poor:', accuracy, 'meters. Location may be inaccurate.');
       }
       
-      console.log('🔍 Getting address from coordinates...');
-      // استخدام الدالة المشتركة للحصول على العنوان مع البحث في الدليل
-      // زيادة المسافة للبحث عن الأماكن اليدوية (مهمة في المدن)
-      // إضافة timeout إضافي كحماية (15 ثانية)
       const addressPromise = getAddressFromCoordinates(lat, lon, 1000);
       const addressTimeoutPromise = new Promise<string>((resolve) => 
         setTimeout(() => {
-          console.warn('⚠️ Address retrieval timeout after 15 seconds, using default');
           resolve('موقعي الحالي');
         }, 15000)
       );
       
       const address = await Promise.race([addressPromise, addressTimeoutPromise]);
-      console.log('✅ Address retrieved:', address);
       
       const locationData = {
         lat,
         lon,
         address: address || 'موقعي الحالي',
-        accuracy: accuracy ?? undefined, // حفظ دقة GPS (تحويل null إلى undefined)
+        accuracy: accuracy ?? undefined,
       };
       
-      console.log('💾 Setting location state:', locationData);
       setLocation(locationData);
       setLoading(false);
       setError(null);
-      console.log('✅ Location state updated successfully');
       
-      // لا نحدث onLocationUpdate إذا كان هناك externalLocation نشط
-      // لأن هذا سيستبدل الموقع المحدد يدوياً
       if (onLocationUpdateRef.current && !externalLocationRef.current) {
-        // إزالة accuracy قبل إرساله لأن الواجهة لا تتوقعها
         const { accuracy: _, ...locationWithoutAccuracy } = locationData;
-        console.log('📤 Calling onLocationUpdate:', locationWithoutAccuracy);
         onLocationUpdateRef.current(locationWithoutAccuracy);
-      } else {
-        console.log('⏭️ Skipping onLocationUpdate - externalLocationRef.current =', externalLocationRef.current);
       }
     } catch (err: any) {
-      console.error('❌ Error updating location:', err);
+      console.error('Error updating location:', err);
       if (!location) {
         setError('فشل تحديث الموقع');
         setLoading(false);
       }
     } finally {
-      // إعادة تعيين flag بعد انتهاء العملية
       isUpdatingLocationRef.current = false;
-      console.log('✅ updateLocation completed');
     }
   }, []); // إزالة جميع dependencies لتجنب إعادة إنشاء الدالة
 
@@ -336,16 +275,6 @@ export default function CurrentLocationDisplay({ onLocationUpdate, onOpenPlacesD
       const lon = currentLocation.longitude;
       const accuracy = currentLocation.accuracy;
       
-      console.log('Manual refresh GPS Coordinates:', { 
-        lat, 
-        lon, 
-        accuracy: `${accuracy?.toFixed(0)}m` || 'unknown',
-      });
-      
-      // التحقق من دقة الموقع
-      if (accuracy && accuracy > 1000) {
-        console.warn('GPS accuracy is poor during manual refresh:', accuracy, 'meters');
-      }
       
       // استخدام الدالة المشتركة للحصول على العنوان مع البحث في الدليل
       const address = await getAddressFromCoordinates(lat, lon, 500);
@@ -378,12 +307,9 @@ export default function CurrentLocationDisplay({ onLocationUpdate, onOpenPlacesD
     
     const startLocationTracking = async () => {
       try {
-        console.log('🔄 Starting location tracking...');
-        // طلب إذن الوصول للموقع (Web API) - محسّن للتحقق من الإذن أولاً
         const { requestLocationPermission } = await import('../lib/webUtils');
         const hasPermission = await requestLocationPermission();
         if (!hasPermission) {
-          console.error('❌ Location permission denied');
           if (mounted) {
             setError('لم يتم السماح بالوصول للموقع');
             setLoading(false);
@@ -391,20 +317,11 @@ export default function CurrentLocationDisplay({ onLocationUpdate, onOpenPlacesD
           return;
         }
 
-        console.log('✅ Location permission granted');
-
-        // جلب الموقع الأولي فقط إذا لم يكن هناك externalLocation
-        // إذا كان هناك externalLocation، نستخدمه مباشرة ولا نطلب GPS
-        // نستخدم ref للتحقق من القيمة الحالية
         if (!externalLocationRef.current) {
-          console.log('📍 No external location, fetching GPS location...');
-          // استخدام updateLocationRef بدلاً من updateLocation مباشرة
           if (mounted && updateLocationRef.current) {
             await updateLocationRef.current();
           }
         } else {
-          // إذا كان هناك externalLocation، نستخدمه مباشرة
-          console.log('📍 Using externalLocation on mount:', externalLocationRef.current);
           if (mounted) {
             setLocation({ ...externalLocationRef.current, accuracy: 0 });
             setLoading(false);
@@ -412,7 +329,7 @@ export default function CurrentLocationDisplay({ onLocationUpdate, onOpenPlacesD
           }
         }
       } catch (err: any) {
-        console.error('❌ Error starting location tracking:', err);
+        console.error('Error starting location tracking:', err);
         if (mounted) {
           setError('فشل جلب الموقع');
           setLoading(false);

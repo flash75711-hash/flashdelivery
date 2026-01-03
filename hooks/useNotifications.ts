@@ -127,7 +127,3 @@ export function useNotifications() {
     markAllAsRead,
   };
 }
-
-
-
-

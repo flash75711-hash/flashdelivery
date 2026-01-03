@@ -8,7 +8,6 @@ import {
   RefreshControl,
   TextInput,
   TouchableOpacity,
-  Alert,
   Platform,
   Modal,
   ActivityIndicator,
@@ -20,6 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/contexts/AuthContext';
 import responsive, { createShadowStyle } from '@/utils/responsive';
 import NotificationCard from '@/components/NotificationCard';
+import { showToast, showConfirm } from '@/lib/alert';
 
 interface DashboardStats {
   totalRevenue: number;
@@ -79,7 +79,7 @@ export default function AdminDashboardScreen() {
   const saveMaxDeliveryDistance = async () => {
     const distance = parseFloat(maxDeliveryDistance);
     if (isNaN(distance) || distance <= 0) {
-      Alert.alert('خطأ', 'الرجاء إدخال رقم صحيح أكبر من صفر');
+      showToast('الرجاء إدخال رقم صحيح أكبر من صفر', 'error');
       return;
     }
 
@@ -98,9 +98,9 @@ export default function AdminDashboardScreen() {
       if (error) throw error;
       
       setEditingDistance(false);
-      Alert.alert('نجح', 'تم حفظ المسافة القصوى للتوصيل بنجاح');
+      showToast('تم حفظ المسافة القصوى للتوصيل بنجاح', 'success');
     } catch (error: any) {
-      Alert.alert('خطأ', error.message || 'فشل حفظ الإعدادات');
+      showToast(error.message || 'فشل حفظ الإعدادات', 'error');
     } finally {
       setSavingDistance(false);
     }
@@ -152,21 +152,25 @@ export default function AdminDashboardScreen() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       const confirmed = window.confirm('هل أنت متأكد من تسجيل الخروج؟');
       if (confirmed) {
         performLogout();
       }
     } else {
-      Alert.alert('تسجيل الخروج', 'هل أنت متأكد من تسجيل الخروج؟', [
-        { text: 'إلغاء', style: 'cancel' },
+      const confirmed = await showConfirm(
+        'تسجيل الخروج',
+        'هل أنت متأكد من تسجيل الخروج؟',
         {
-          text: 'تسجيل الخروج',
-          style: 'destructive',
-          onPress: performLogout,
-        },
-      ]);
+          confirmText: 'تسجيل الخروج',
+          cancelText: 'إلغاء',
+          type: 'warning',
+        }
+      );
+      if (confirmed) {
+        performLogout();
+      }
     }
   };
 

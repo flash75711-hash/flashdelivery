@@ -6,7 +6,6 @@ import {
   SafeAreaView,
   FlatList,
   TouchableOpacity,
-  Alert,
   RefreshControl,
   Modal,
   Image,
@@ -19,6 +18,7 @@ import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import responsive, { createShadowStyle } from '@/utils/responsive';
 import { createNotification, notifyAllAdmins } from '@/lib/notifications';
+import { showToast, showSimpleAlert, showConfirm } from '@/lib/alert';
 
 interface Driver {
   id: string;
@@ -117,7 +117,7 @@ export default function AdminDriversScreen() {
       console.log('AdminDrivers: setDrivers called with', data?.length || 0, 'drivers');
     } catch (error: any) {
       console.error('AdminDrivers: Error loading drivers:', error);
-      Alert.alert('خطأ', `فشل تحميل السائقين: ${error.message || error.code || 'خطأ غير معروف'}`);
+      showToast(`فشل تحميل السائقين: ${error.message || error.code || 'خطأ غير معروف'}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -183,46 +183,30 @@ export default function AdminDriversScreen() {
           type: 'success'
         });
         
-        if (Platform.OS === 'web') {
-          window.alert('✅ نجح\nتم الموافقة على تسجيل السائق بنجاح!\nسيتم إشعار السائق بالموافقة.');
-        } else {
-          Alert.alert('✅ نجح', 'تم الموافقة على تسجيل السائق بنجاح!\nسيتم إشعار السائق بالموافقة.');
-        }
+        showToast('تم الموافقة على تسجيل السائق بنجاح! سيتم إشعار السائق بالموافقة.', 'success');
         
         await loadDrivers();
       } catch (error: any) {
         console.error('AdminDrivers: Error approving driver:', error);
         const errorMessage = error.message || error.code || 'فشل الموافقة على التسجيل';
-        
-        if (Platform.OS === 'web') {
-          window.alert(`خطأ\n${errorMessage}`);
-        } else {
-          Alert.alert('خطأ', errorMessage, [{ text: 'حسناً' }]);
-        }
+        showToast(errorMessage, 'error');
       } finally {
         setProcessingDriverId(null);
       }
     };
 
-    // استخدام window.confirm على الويب
-    if (Platform.OS === 'web') {
-      const confirmed = window.confirm('موافقة على التسجيل\n\nهل أنت متأكد من الموافقة على تسجيل هذا السائق؟');
-      if (confirmed) {
-        performApproval();
+    // استخدام SweetAlert2 للتأكيد
+    const confirmed = await showConfirm(
+      'موافقة على التسجيل',
+      'هل أنت متأكد من الموافقة على تسجيل هذا السائق؟',
+      {
+        confirmText: 'نعم',
+        cancelText: 'إلغاء',
       }
-    } else {
-      Alert.alert(
-        'موافقة على التسجيل',
-        'هل أنت متأكد من الموافقة على تسجيل هذا السائق؟',
-        [
-          { text: 'إلغاء', style: 'cancel' },
-          {
-            text: 'موافقة',
-            style: 'default',
-            onPress: performApproval,
-          },
-        ]
-      );
+    );
+    
+    if (confirmed) {
+      performApproval();
     }
   };
 
@@ -268,46 +252,30 @@ export default function AdminDriversScreen() {
 
         console.log('AdminDrivers: Driver rejected successfully via Edge Function');
         
-        if (Platform.OS === 'web') {
-          window.alert('تم الرفض\nتم رفض تسجيل السائق');
-        } else {
-          Alert.alert('تم الرفض', 'تم رفض تسجيل السائق');
-        }
+        showToast('تم رفض تسجيل السائق', 'success');
         
         await loadDrivers();
       } catch (error: any) {
         console.error('AdminDrivers: Error rejecting driver:', error);
         const errorMessage = error.message || error.code || 'فشل رفض التسجيل';
-        
-        if (Platform.OS === 'web') {
-          window.alert(`خطأ\n${errorMessage}`);
-        } else {
-          Alert.alert('خطأ', errorMessage, [{ text: 'حسناً' }]);
-        }
+        showToast(errorMessage, 'error');
       } finally {
         setProcessingDriverId(null);
       }
     };
 
-    // استخدام window.confirm على الويب
-    if (Platform.OS === 'web') {
-      const confirmed = window.confirm('رفض التسجيل\n\nهل أنت متأكد من رفض تسجيل هذا السائق؟');
-      if (confirmed) {
-        performRejection();
+    const confirmed = await showConfirm(
+      'رفض التسجيل',
+      'هل أنت متأكد من رفض تسجيل هذا السائق؟',
+      {
+        confirmText: 'رفض',
+        cancelText: 'إلغاء',
+        type: 'warning',
       }
-    } else {
-      Alert.alert(
-        'رفض التسجيل',
-        'هل أنت متأكد من رفض تسجيل هذا السائق؟',
-        [
-          { text: 'إلغاء', style: 'cancel' },
-          {
-            text: 'رفض',
-            style: 'destructive',
-            onPress: performRejection,
-          },
-        ]
-      );
+    );
+    
+    if (confirmed) {
+      performRejection();
     }
   };
 
@@ -388,66 +356,30 @@ export default function AdminDriversScreen() {
           }
         }
         
-        if (Platform.OS === 'web') {
-          window.alert('✅ نجح\nتم تعليق حساب السائق بنجاح\nتم إرسال إشعار للسائق');
-        } else {
-          Alert.alert('✅ نجح', 'تم تعليق حساب السائق بنجاح\nتم إرسال إشعار للسائق');
-        }
+        showToast('تم تعليق حساب السائق بنجاح. تم إرسال إشعار للسائق', 'success');
         
         await loadDrivers();
       } catch (error: any) {
         console.error('AdminDrivers: Error suspending driver:', error);
         const errorMessage = error.message || error.code || 'فشل تعليق الحساب';
-        
-        if (Platform.OS === 'web') {
-          window.alert(`خطأ\n${errorMessage}`);
-        } else {
-          Alert.alert('خطأ', errorMessage, [{ text: 'حسناً' }]);
-        }
+        showToast(errorMessage, 'error');
       } finally {
         setProcessingDriverId(null);
       }
     };
 
-    // استخدام window.confirm على الويب
-    if (Platform.OS === 'web') {
-      try {
-        const confirmed = window.confirm('تعليق الحساب\n\nهل أنت متأكد من تعليق حساب هذا السائق؟');
-        console.log('AdminDrivers: User confirmed suspension:', confirmed);
-        if (confirmed) {
-          performSuspension();
-        } else {
-          console.log('AdminDrivers: User cancelled suspension');
-        }
-      } catch (error) {
-        console.error('AdminDrivers: Error in window.confirm:', error);
-        // Fallback to Alert if window.confirm fails
-        Alert.alert(
-          'تعليق الحساب',
-          'هل أنت متأكد من تعليق حساب هذا السائق؟',
-          [
-            { text: 'إلغاء', style: 'cancel' },
-            {
-              text: 'تعليق',
-              style: 'destructive',
-              onPress: performSuspension,
-            },
-          ]
-        );
+    const confirmed = await showConfirm(
+      'تعليق الحساب',
+      'هل أنت متأكد من تعليق حساب هذا السائق؟',
+      {
+        confirmText: 'تعليق',
+        cancelText: 'إلغاء',
+        type: 'warning',
       }
-    } else {
-      Alert.alert(
-        'تعليق الحساب',
-        'هل أنت متأكد من تعليق حساب هذا السائق؟',
-        [
-          { text: 'إلغاء', style: 'cancel' },
-          {
-            text: 'تعليق',
-            style: 'destructive',
-            onPress: performSuspension,
-          },
-        ]
-      );
+    );
+    
+    if (confirmed) {
+      performSuspension();
     }
   };
 
@@ -528,67 +460,29 @@ export default function AdminDriversScreen() {
           }
         }
         
-        if (Platform.OS === 'web') {
-          window.alert('✅ نجح\nتم إعادة تنشيط حساب السائق بنجاح\nتم إرسال إشعار للسائق');
-        } else {
-          Alert.alert('✅ نجح', 'تم إعادة تنشيط حساب السائق بنجاح\nتم إرسال إشعار للسائق');
-        }
+        showToast('تم إعادة تنشيط حساب السائق بنجاح. تم إرسال إشعار للسائق', 'success');
         
         await loadDrivers();
       } catch (error: any) {
         console.error('AdminDrivers: Error reactivating driver:', error);
         const errorMessage = error.message || error.code || 'فشل إعادة تنشيط الحساب';
-        
-        if (Platform.OS === 'web') {
-          window.alert(`خطأ\n${errorMessage}`);
-        } else {
-          Alert.alert('خطأ', errorMessage, [{ text: 'حسناً' }]);
-        }
+        showToast(errorMessage, 'error');
       } finally {
         setProcessingDriverId(null);
       }
     };
 
-    // استخدام window.confirm على الويب
-    if (Platform.OS === 'web') {
-      try {
-        const confirmed = window.confirm('إعادة تنشيط الحساب\n\nهل أنت متأكد من إعادة تنشيط حساب هذا السائق؟');
-        console.log('AdminDrivers: User confirmed reactivation:', confirmed);
-        if (confirmed) {
-          performReactivation();
-        } else {
-          console.log('AdminDrivers: User cancelled reactivation');
-        }
-      } catch (error) {
-        console.error('AdminDrivers: Error in window.confirm:', error);
-        // Fallback to Alert if window.confirm fails
-        Alert.alert(
-          'إعادة تنشيط الحساب',
-          'هل أنت متأكد من إعادة تنشيط حساب هذا السائق؟',
-          [
-            { text: 'إلغاء', style: 'cancel' },
-            {
-              text: 'إعادة التنشيط',
-              style: 'destructive',
-              onPress: performReactivation,
-            },
-          ]
-        );
+    const confirmed = await showConfirm(
+      'إعادة تنشيط الحساب',
+      'هل أنت متأكد من إعادة تنشيط حساب هذا السائق؟',
+      {
+        confirmText: 'إعادة التنشيط',
+        cancelText: 'إلغاء',
       }
-    } else {
-      // استخدام Alert.alert على Native
-      Alert.alert(
-        'إعادة تنشيط الحساب',
-        'هل أنت متأكد من إعادة تنشيط حساب هذا السائق؟',
-        [
-          { text: 'إلغاء', style: 'cancel' },
-          {
-            text: 'إعادة التنشيط',
-            style: 'default',
-            onPress: performReactivation,
-          },
-        ]
-      );
+    );
+    
+    if (confirmed) {
+      performReactivation();
     }
   };
 
@@ -716,7 +610,7 @@ export default function AdminDriversScreen() {
                       console.log('AdminDrivers: Approve button pressed for:', item.id, 'item:', item);
                       if (!item.id) {
                         console.error('AdminDrivers: No driver ID!');
-                        Alert.alert('خطأ', 'معرف السائق غير موجود');
+                        showToast('معرف السائق غير موجود', 'error');
                         return;
                       }
                       approveDriver(item.id);
@@ -742,7 +636,7 @@ export default function AdminDriversScreen() {
                       console.log('AdminDrivers: Reject button pressed for:', item.id, 'item:', item);
                       if (!item.id) {
                         console.error('AdminDrivers: No driver ID!');
-                        Alert.alert('خطأ', 'معرف السائق غير موجود');
+                        showToast('معرف السائق غير موجود', 'error');
                         return;
                       }
                       rejectDriver(item.id);
@@ -783,11 +677,7 @@ export default function AdminDriversScreen() {
                     console.log('AdminDrivers: Suspend button pressed for:', item.id, 'item:', item);
                     if (!item.id) {
                       console.error('AdminDrivers: No driver ID!');
-                      if (Platform.OS === 'web') {
-                        window.alert('خطأ\nمعرف السائق غير موجود');
-                      } else {
-                        Alert.alert('خطأ', 'معرف السائق غير موجود');
-                      }
+                      showToast('معرف السائق غير موجود', 'error');
                       return;
                     }
                     console.log('AdminDrivers: Calling suspendDriver with ID:', item.id);
@@ -818,11 +708,7 @@ export default function AdminDriversScreen() {
                     console.log('AdminDrivers: Reactivate button pressed for:', item.id, 'item:', item);
                     if (!item.id) {
                       console.error('AdminDrivers: No driver ID!');
-                      if (Platform.OS === 'web') {
-                        window.alert('خطأ\nمعرف السائق غير موجود');
-                      } else {
-                        Alert.alert('خطأ', 'معرف السائق غير موجود');
-                      }
+                      showToast('معرف السائق غير موجود', 'error');
                       return;
                     }
                     console.log('AdminDrivers: Calling reactivateDriver with ID:', item.id);

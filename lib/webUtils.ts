@@ -121,29 +121,29 @@ export async function requestLocationPermission(): Promise<boolean> {
       // إذا كان prompt، نحاول جلب الموقع (سيطلب الإذن تلقائياً)
       // استخدام maximumAge كبير و timeout أطول لتقليل الطلبات
       return new Promise<boolean>((resolve) => {
-        navigator.geolocation.getCurrentPosition(
+    navigator.geolocation.getCurrentPosition(
           () => {
             permissionStatus = 'granted';
             resolve(true);
           },
-          (error) => {
-            if (error.code === error.PERMISSION_DENIED) {
+      (error) => {
+        if (error.code === error.PERMISSION_DENIED) {
               permissionStatus = 'denied';
-              resolve(false);
-            } else {
+          resolve(false);
+        } else {
               // أخطاء أخرى (timeout, unavailable) لا تعني رفض الإذن
               // نرجع true لأن الإذن قد يكون موجوداً لكن الموقع غير متاح حالياً
               permissionStatus = 'granted'; // نفترض أن الإذن موجود
               resolve(true);
-            }
-          },
+        }
+      },
           { 
             enableHighAccuracy: false, // تقليل الدقة لتسريع الطلب
             timeout: 3000, // timeout قصير للتحقق السريع
             maximumAge: 60000 // استخدام موقع قديم حتى 60 ثانية لتسريع الطلب
           }
-        );
-      });
+    );
+  });
     } catch (error) {
       console.error('Error checking permission:', error);
       return false;

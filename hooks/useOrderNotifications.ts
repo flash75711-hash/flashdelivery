@@ -44,25 +44,16 @@ export function useOrderNotifications() {
     // تجنب عرض نفس الإشعار مرتين
     const notificationId = notification.order_id || notification.id;
     if (shownOrderIds.current.has(notificationId)) {
-      console.log('🔔 [useOrderNotifications] Notification already shown, skipping:', notificationId);
       return;
     }
-
-    console.log('🔔 [useOrderNotifications] Adding notification:', {
-      notification,
-      isShowing: isShowing.current,
-      queueLength: notificationQueue.current.length,
-    });
     
     shownOrderIds.current.add(notificationId);
     
     // إذا كان هناك إشعار معروض حالياً، نضيف الجديد إلى الطابور
     if (isShowing.current) {
-      console.log('🔔 [useOrderNotifications] Adding to queue');
       notificationQueue.current.push(notification);
     } else {
       // إذا لم يكن هناك إشعار معروض، نعرضه مباشرة
-      console.log('🔔 [useOrderNotifications] Showing notification immediately');
       setCurrentNotification(notification);
       setVisible(true);
       isShowing.current = true;
@@ -71,17 +62,9 @@ export function useOrderNotifications() {
 
   useEffect(() => {
     // يعمل على الويب فقط
-    if (Platform.OS !== 'web') {
-      console.log('🔔 [useOrderNotifications] Skipping - not on web platform');
+    if (Platform.OS !== 'web' || !user) {
       return;
     }
-
-    if (!user) {
-      console.log('🔔 [useOrderNotifications] No user, skipping');
-      return;
-    }
-
-    console.log('🔔 [useOrderNotifications] Setting up Realtime subscription for user:', user.id, 'role:', user.role);
 
     // إنشاء channel للاستماع إلى تغييرات الطلبات
     const ordersChannel = supabase
@@ -94,7 +77,6 @@ export function useOrderNotifications() {
           table: 'orders',
         },
         async (payload) => {
-          console.log('🔔 [useOrderNotifications] New order created:', payload);
           const newOrder = payload.new as any;
 
           // للعملاء: عرض إشعار عند إنشاء طلب جديد خاص بهم
@@ -132,7 +114,6 @@ export function useOrderNotifications() {
           table: 'orders',
         },
         async (payload) => {
-          console.log('🔔 [useOrderNotifications] Order status updated:', payload);
           const updatedOrder = payload.new as any;
           const oldOrder = payload.old as any;
 
@@ -146,7 +127,7 @@ export function useOrderNotifications() {
             const statusMessages: Record<string, { title: string; message: string; type: 'success' | 'info' | 'warning' }> = {
               'accepted': {
                 title: 'تم قبول طلبك',
-                message: 'تم قبول طلبك من قبل سائق. سيتم التواصل معك قريباً.',
+                message: 'تم قبول طلبك وسيتم البدء في التوصيل قريباً.',
                 type: 'success',
               },
               'pickedUp': {
@@ -201,14 +182,11 @@ export function useOrderNotifications() {
           }
         }
       )
-      .subscribe((status) => {
-        console.log('🔔 [useOrderNotifications] Subscription status:', status);
-      });
+      .subscribe();
 
     channelRef.current = ordersChannel;
 
     return () => {
-      console.log('🔔 [useOrderNotifications] Cleaning up subscription');
       if (channelRef.current) {
         channelRef.current.unsubscribe();
         channelRef.current = null;

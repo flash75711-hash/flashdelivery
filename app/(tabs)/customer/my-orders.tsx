@@ -34,23 +34,12 @@ export default function CustomerMyOrdersScreen() {
     const active: Order[] = [];
     const completed: Order[] = [];
 
-    console.log('📊 [CustomerMyOrders] Processing orders:', {
-      total: orders.length,
-      statuses: orders.map(o => o.status),
-    });
-
     orders.forEach((order) => {
       if (order.status === 'completed' || order.status === 'cancelled') {
         completed.push(order);
       } else {
         active.push(order);
       }
-    });
-
-    console.log('📊 [CustomerMyOrders] Orders categorized:', {
-      active: active.length,
-      completed: completed.length,
-      activeStatuses: active.map(o => o.status),
     });
 
     return {
@@ -123,17 +112,34 @@ export default function CustomerMyOrdersScreen() {
         return;
       }
 
-      // تحديث حالة الطلب إلى cancelled
-      const { error } = await supabase
-        .from('orders')
-        .update({
+      // استخدام Edge Function لتحديث الطلب (لتجاوز RLS)
+      const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-order', {
+        body: {
+          orderId: order.id,
           status: 'cancelled',
-          cancelled_by: order.customer_id, // العميل يلغي طلبه
-          cancelled_at: new Date().toISOString(),
-        })
-        .eq('id', order.id);
+          cancelledBy: order.customer_id,
+          cancelledAt: new Date().toISOString(),
+        },
+      });
 
-      if (error) throw error;
+      if (edgeFunctionError) {
+        throw edgeFunctionError;
+      }
+
+      if (!edgeFunctionData || !edgeFunctionData.success) {
+        throw new Error(edgeFunctionData?.error || 'فشل إلغاء الطلب');
+      }
+
+      // إشعار السائق إذا كان الطلب مقبولاً
+      if (order.driver_id) {
+        await createNotification({
+          user_id: order.driver_id,
+          title: 'تم إلغاء الطلب',
+          message: `تم إلغاء الطلب رقم ${order.id.slice(0, 8)}`,
+          type: 'warning',
+          order_id: order.id,
+        });
+      }
 
       showSimpleAlert('نجح', 'تم إلغاء الطلب بنجاح', 'success');
       reload();

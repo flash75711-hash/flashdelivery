@@ -38,6 +38,8 @@ interface UpdateOrderRequest {
   searchStartedAt?: string | null;
   searchExpandedAt?: string | null;
   completedAt?: string | null;
+  cancelledBy?: string | null;
+  cancelledAt?: string | null;
 }
 
 serve(async (req) => {
@@ -73,6 +75,8 @@ serve(async (req) => {
       searchStartedAt,
       searchExpandedAt,
       completedAt,
+      cancelledBy,
+      cancelledAt,
     } = body;
 
     // Validate input
@@ -135,6 +139,8 @@ serve(async (req) => {
     if (searchStartedAt !== undefined) updateData.search_started_at = searchStartedAt;
     if (searchExpandedAt !== undefined) updateData.search_expanded_at = searchExpandedAt;
     if (completedAt !== undefined) updateData.completed_at = completedAt;
+    if (cancelledBy !== undefined) updateData.cancelled_by = cancelledBy;
+    if (cancelledAt !== undefined) updateData.cancelled_at = cancelledAt;
 
     // Update order
     const { data: updatedOrder, error: updateError } = await supabase

@@ -7,7 +7,6 @@ import {
   StyleSheet,
   SafeAreaView,
   ActivityIndicator,
-  Alert,
   ScrollView,
   Image,
   Platform,
@@ -21,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import CurrentLocationDisplay from '@/components/CurrentLocationDisplay';
 import { pickImage } from '@/lib/webUtils';
 import { uploadImageToImgBB } from '@/lib/imgbb';
+import { showToast, showSimpleAlert } from '@/lib/alert';
 import {
   calculateDeliveryPrice,
   calculateTotalDistance,
@@ -190,7 +190,7 @@ export default function OutsideOrderScreen() {
       ));
     } catch (error: any) {
       console.error('Error processing image:', error);
-      Alert.alert('خطأ', 'فشل معالجة الصورة');
+      showToast('فشل معالجة الصورة', 'error');
     }
   };
 
@@ -211,7 +211,7 @@ export default function OutsideOrderScreen() {
       }
     } catch (error: any) {
       console.error('Error opening camera:', error);
-      Alert.alert('خطأ', `فشل فتح الكاميرا: ${error.message || 'خطأ غير معروف'}`);
+      showToast(`فشل فتح الكاميرا: ${error.message || 'خطأ غير معروف'}`, 'error');
     }
   };
 
@@ -231,7 +231,7 @@ export default function OutsideOrderScreen() {
       }
     } catch (error: any) {
       console.error('Error opening image library:', error);
-      Alert.alert('خطأ', `فشل فتح المعرض: ${error.message || 'خطأ غير معروف'}`);
+      showToast(`فشل فتح المعرض: ${error.message || 'خطأ غير معروف'}`, 'error');
     }
   };
 
@@ -303,7 +303,7 @@ export default function OutsideOrderScreen() {
       return imageUrl;
     } catch (error: any) {
       console.error('Error uploading image:', error);
-      Alert.alert('خطأ', error.message || 'فشل رفع الصورة');
+      showToast(error.message || 'فشل رفع الصورة', 'error');
       return null;
     } finally {
       setUploadingImageForItem(null);
@@ -339,7 +339,7 @@ export default function OutsideOrderScreen() {
 
   const handleSmartSelection = async (placeId: string) => {
     if (!userLocation) {
-      Alert.alert('تنبيه', 'يجب السماح بالوصول للموقع لاستخدام التحديد الذكي');
+      showToast('يجب السماح بالوصول للموقع لاستخدام التحديد الذكي', 'warning');
       return;
     }
 
@@ -393,7 +393,7 @@ export default function OutsideOrderScreen() {
       }
 
       if (placesWithLocation.length === 0) {
-        Alert.alert('تنبيه', 'لا توجد مولات أو أسواق متاحة مع مواقع محددة');
+        showToast('لا توجد مولات أو أسواق متاحة مع مواقع محددة', 'warning');
         return;
       }
 
@@ -426,13 +426,13 @@ export default function OutsideOrderScreen() {
         setPlacesWithItems(placesWithItems.map(p => 
           p.id === placeId ? { ...p, place: placeToSet } : p
         ));
-        Alert.alert('نجح', `تم اختيار ${placeToSet.name} (${minDistance.toFixed(1)} كم)`);
+        showToast(`تم اختيار ${placeToSet.name} (${minDistance.toFixed(1)} كم)`, 'success');
       } else {
-        Alert.alert('تنبيه', 'لم يتم العثور على مكان قريب');
+        showToast('لم يتم العثور على مكان قريب', 'warning');
       }
     } catch (error: any) {
       console.error('Error finding nearest place:', error);
-      Alert.alert('خطأ', 'فشل البحث عن أقرب مكان');
+      showToast('فشل البحث عن أقرب مكان', 'error');
     } finally {
       setFindingPlace(null);
     }
@@ -540,7 +540,7 @@ export default function OutsideOrderScreen() {
     );
     
     if (placesWithValidData.length === 0) {
-      Alert.alert('خطأ', 'الرجاء تحديد مكان واحد على الأقل وإدخال عنصر واحد على الأقل');
+      showToast('الرجاء تحديد مكان واحد على الأقل وإدخال عنصر واحد على الأقل', 'error');
       return;
     }
 
@@ -549,7 +549,7 @@ export default function OutsideOrderScreen() {
       p.place && (!p.items.length || !p.items.some(item => item.name.trim()))
     );
     if (placesWithoutItems.length > 0) {
-      Alert.alert('تنبيه', 'الرجاء إدخال عناصر للأماكن المحددة');
+      showToast('الرجاء إدخال عناصر للأماكن المحددة', 'warning');
       return;
     }
 
@@ -679,7 +679,7 @@ export default function OutsideOrderScreen() {
     } catch (error: any) {
       console.error('❌ Error in handleSubmit:', error);
       setLoading(false);
-      Alert.alert('خطأ', error.message || 'فشل إرسال الطلب');
+      showToast(error.message || 'فشل إرسال الطلب', 'error');
     }
   };
 
@@ -688,7 +688,7 @@ export default function OutsideOrderScreen() {
     const finalPrice = price || selectedPrice;
     
     if (!finalPrice) {
-      Alert.alert('خطأ', 'الرجاء اختيار سعر');
+      showToast('الرجاء اختيار سعر', 'error');
       setLoading(false);
       return;
     }
@@ -851,16 +851,16 @@ export default function OutsideOrderScreen() {
       
         // عرض رسالة النجاح بعد التوجيه
       setTimeout(() => {
-        Alert.alert('✅ نجح', message);
+        showToast(message, 'success');
       }, 300);
       } catch (navError) {
         console.error('❌ Navigation error:', navError);
-        Alert.alert('✅ نجح', message);
+        showToast(message, 'success');
       }
     } catch (error: any) {
       console.error('❌ Error in handleConfirmPriceAndSubmit:', error);
       setLoading(false);
-      Alert.alert('خطأ', error.message || 'فشل إرسال الطلب');
+      showToast(error.message || 'فشل إرسال الطلب', 'error');
     }
   };
 

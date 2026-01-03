@@ -52,45 +52,43 @@ export default function OrderDetailScreen() {
     loadOrder();
   }, [id]);
 
-  // Debug: تسجيل حالة الطلب عند التحديث
-  useEffect(() => {
-    if (order) {
-      console.log('🔍 OrderDetail - Order state updated:', {
-        orderId: order.id,
-        status: order.status,
-        search_status: order.search_status,
-        customer_id: order.customer_id,
-        user_id: user?.id,
-        isCustomer: user?.id === order.customer_id,
-        willShowButtons: user?.id === order.customer_id && order.search_status === 'stopped' && order.status === 'pending',
-      });
-    }
-  }, [order, user]);
 
       const loadOrder = async () => {
-    if (!id) return;
+    if (!id || !user) return;
 
     try {
+      // محاولة جلب الطلب مباشرة أولاً
       const { data, error } = await supabase
         .from('orders')
         .select('*')
         .eq('id', id)
         .single();
 
-      if (error) throw error;
-      
-      // Debug: تسجيل حالة الطلب للتحقق
-      console.log('🔍 OrderDetail - Loaded order:', {
-        orderId: data?.id,
-        status: data?.status,
-        search_status: data?.search_status,
-        customer_id: data?.customer_id,
-      });
-      
-      setOrder(data);
-    } catch (error) {
+      if (error || !data) {
+        // إذا فشل، استخدم Edge Function (لتجاوز RLS)
+        if (user.role === 'customer') {
+          const { data: edgeData, error: edgeError } = await supabase.functions.invoke('get-order-by-id-for-customer', {
+            body: {
+              orderId: id,
+              customerId: user.id,
+            },
+          });
+
+          if (edgeError || !edgeData?.success || !edgeData?.order) {
+            throw new Error(edgeData?.error || edgeError?.message || 'فشل تحميل تفاصيل الطلب');
+          }
+
+          setOrder(edgeData.order);
+        } else {
+          throw error || new Error('فشل تحميل تفاصيل الطلب');
+        }
+      } else {
+        setOrder(data);
+      }
+    } catch (error: any) {
       console.error('Error loading order:', error);
-      showSimpleAlert('خطأ', 'فشل تحميل تفاصيل الطلب', 'error');
+      showSimpleAlert('خطأ', error.message || 'فشل تحميل تفاصيل الطلب', 'error');
+      setOrder(null);
     } finally {
       setLoading(false);
     }
@@ -133,9 +131,7 @@ export default function OrderDetailScreen() {
 
   // دالة إعادة البحث عن سائق
   const handleRestartSearch = async () => {
-    console.log('🔄 handleRestartSearch called');
     if (!order) {
-      console.log('❌ No order found');
       return;
     }
 
@@ -180,9 +176,7 @@ export default function OrderDetailScreen() {
 
   // دالة إلغاء الطلب
   const handleCancelOrder = async () => {
-    console.log('🗑️ handleCancelOrder called');
     if (!order) {
-      console.log('❌ No order found');
       return;
     }
 
@@ -375,26 +369,11 @@ export default function OrderDetailScreen() {
           )}
 
           {/* أزرار إعادة البحث وإلغاء الطلب للعميل عندما البحث متوقف */}
-          {(() => {
-            const shouldShow = isCustomer && order.search_status === 'stopped' && order.status === 'pending';
-            if (isCustomer && order.status === 'pending') {
-              console.log('🔍 OrderDetail - Button visibility check:', {
-                shouldShow,
-                isCustomer,
-                search_status: order.search_status,
-                status: order.status,
-                orderId: order.id,
-              });
-            }
-            return shouldShow;
-          })() && (
+          {isCustomer && order.search_status === 'stopped' && order.status === 'pending' && (
             <View style={styles.actionsContainer}>
               <TouchableOpacity
                 style={[styles.actionButton, styles.restartSearchButton]}
-                onPress={() => {
-                  console.log('🔄 Restart button pressed in order details');
-                  handleRestartSearch();
-                }}
+                onPress={handleRestartSearch}
                 disabled={isRestarting}
               >
                 {isRestarting ? (
@@ -411,10 +390,7 @@ export default function OrderDetailScreen() {
 
               <TouchableOpacity
                 style={[styles.actionButton, styles.cancelOrderButton]}
-                onPress={() => {
-                  console.log('🗑️ Cancel button pressed');
-                  handleCancelOrder();
-                }}
+                onPress={handleCancelOrder}
                 disabled={isCancelling}
               >
                 {isCancelling ? (

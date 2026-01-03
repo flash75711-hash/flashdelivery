@@ -143,7 +143,6 @@ export default function OrderCard({
       );
       if (confirmed) {
         // سيتم التعامل مع الإلغاء في الصفحة الأم
-        console.log('Cancel order:', order.id);
       }
     }
   };

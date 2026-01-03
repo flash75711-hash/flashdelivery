@@ -56,7 +56,6 @@ export function useOrderSearch({
         .select('setting_key, setting_value');
 
       if (error) {
-        console.error('Error loading search settings:', error);
         return;
       }
 
@@ -87,7 +86,7 @@ export function useOrderSearch({
 
       setSettings(newSettings);
     } catch (error) {
-      console.error('Error loading search settings:', error);
+      // استخدام القيم الافتراضية في حالة الخطأ
     }
   }, []);
 
@@ -107,7 +106,6 @@ export function useOrderSearch({
   // البحث عن السائقين في نطاق معين
   const findDriversInRadius = useCallback(async (radius: number): Promise<DriverLocation[]> => {
     try {
-      // جلب جميع السائقين النشطين
       const { data: allDrivers, error: driversError } = await supabase
         .from('profiles')
         .select('id')
@@ -115,13 +113,11 @@ export function useOrderSearch({
         .eq('status', 'active')
         .eq('approval_status', 'approved');
 
-      if (driversError || !allDrivers || allDrivers.length === 0) {
+      if (driversError || !allDrivers?.length) {
         return [];
       }
 
       const driverIds = allDrivers.map(d => d.id);
-
-      // جلب مواقع السائقين
       const { data: locationsData, error: locationsError } = await supabase
         .from('driver_locations')
         .select('driver_id, latitude, longitude')
@@ -134,7 +130,7 @@ export function useOrderSearch({
 
       // فلترة السائقين حسب المسافة
       const latestLocations = new Map<string, DriverLocation>();
-      locationsData.forEach(loc => {
+      for (const loc of locationsData) {
         if (loc.latitude && loc.longitude && !latestLocations.has(loc.driver_id)) {
           latestLocations.set(loc.driver_id, {
             driver_id: loc.driver_id,
@@ -142,10 +138,10 @@ export function useOrderSearch({
             longitude: loc.longitude,
           });
         }
-      });
+      }
 
       const driversInRadius: DriverLocation[] = [];
-      latestLocations.forEach((driver) => {
+      for (const driver of latestLocations.values()) {
         const distance = calculateDistance(
           searchPoint.lat,
           searchPoint.lon,
@@ -155,11 +151,10 @@ export function useOrderSearch({
         if (distance <= radius) {
           driversInRadius.push(driver);
         }
-      });
+      }
 
       return driversInRadius;
     } catch (error) {
-      console.error('Error finding drivers in radius:', error);
       return [];
     }
   }, [searchPoint]);
@@ -173,49 +168,36 @@ export function useOrderSearch({
         .eq('id', orderId)
         .single();
 
-      if (error || !data) {
+      if (error || !data || data.status !== 'accepted' || !data.driver_id) {
         return false;
       }
 
-      // إذا تم قبول الطلب
-      if (data.status === 'accepted' && data.driver_id) {
-        stopSearch();
-        if (onDriverFound) {
-          onDriverFound(data.driver_id);
-        }
-        return true;
-      }
-
-      return false;
+      stopSearch();
+      onDriverFound?.(data.driver_id);
+      return true;
     } catch (error) {
-      console.error('Error checking order acceptance:', error);
       return false;
     }
-  }, [orderId, onDriverFound]);
+  }, [orderId, onDriverFound, stopSearch]);
 
   // إرسال إشعارات للسائقين
   const notifyDrivers = useCallback(async (drivers: DriverLocation[], radius: number) => {
-    if (drivers.length === 0) return;
+    if (!drivers.length) return;
 
-    try {
-      const title = 'طلب جديد متاح';
-      const message = `يوجد طلب جديد متاح في نطاق ${radius} كم. تحقق من قائمة الطلبات.`;
-      const type = 'info';
+    const title = 'طلب جديد متاح';
+    const message = `يوجد طلب جديد متاح في نطاق ${radius} كم. تحقق من قائمة الطلبات.`;
 
-      for (const driver of drivers) {
-        try {
-          await supabase.rpc('insert_notification_for_driver', {
-            p_user_id: driver.driver_id,
-            p_title: title,
-            p_message: message,
-            p_type: type,
-          });
-        } catch (error) {
-          console.error(`Error notifying driver ${driver.driver_id}:`, error);
-        }
+    for (const driver of drivers) {
+      try {
+        await supabase.rpc('insert_notification_for_driver', {
+          p_user_id: driver.driver_id,
+          p_title: title,
+          p_message: message,
+          p_type: 'info',
+        });
+      } catch (error) {
+        // تجاهل الأخطاء في إشعار سائق واحد
       }
-    } catch (error) {
-      console.error('Error notifying drivers:', error);
     }
   }, []);
 
@@ -294,7 +276,7 @@ export function useOrderSearch({
       driver => !foundDrivers.some(fd => fd.driver_id === driver.driver_id)
     );
 
-    if (newDrivers.length > 0) {
+    if (newDrivers.length) {
       await notifyDrivers(newDrivers, settings.expandedRadius);
     }
 
@@ -376,6 +358,3 @@ export function useOrderSearch({
     settings,
   };
 }
-
-
-
