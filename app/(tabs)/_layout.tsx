@@ -410,6 +410,15 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="customer/history"
+        options={{
+          title: 'السجل',
+          tabBarLabel: 'السجل',
+          tabBarIcon: ({ color }) => <Ionicons name="time-outline" size={tabBarIconSize} color={color} />,
+          tabBarButton: shouldHideTab(['customer']) ? () => null : undefined,
+        }}
+      />
+      <Tabs.Screen
         name="customer/profile"
         options={{
           title: t('customer.profile'),
@@ -471,6 +480,15 @@ export default function TabsLayout() {
           title: t('vendor.store'),
           tabBarLabel: t('vendor.store'),
           tabBarIcon: ({ color }) => <Ionicons name="storefront" size={tabBarIconSize} color={color} />,
+          tabBarButton: shouldHideTab(['vendor']) ? () => null : undefined,
+        }}
+      />
+      <Tabs.Screen
+        name="vendor/history"
+        options={{
+          title: 'السجل',
+          tabBarLabel: 'السجل',
+          tabBarIcon: ({ color }) => <Ionicons name="time-outline" size={tabBarIconSize} color={color} />,
           tabBarButton: shouldHideTab(['vendor']) ? () => null : undefined,
         }}
       />

@@ -99,6 +99,7 @@ export default function DriverDashboardScreen() {
       previousApprovalStatusRef.current = undefined;
       loadDriverStatus();
       loadDriverProfile();
+      loadWalletBalance();
       
       // الاشتراك في Realtime لتحديث بيانات السائق تلقائياً
       const profileChannel = supabase
@@ -119,14 +120,60 @@ export default function DriverDashboardScreen() {
           }
         )
         .subscribe();
+
+      // الاشتراك في Realtime لتحديث رصيد المحفظة تلقائياً
+      const walletChannel = supabase
+        .channel(`driver_wallet_${user.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'wallets',
+            filter: `driver_id=eq.${user.id}`,
+          },
+          (payload) => {
+            console.log('DriverDashboard: New wallet entry via Realtime (INSERT):', payload);
+            // إعادة تحميل رصيد المحفظة عند إضافة مبلغ جديد
+            setTimeout(() => {
+              loadWalletBalance();
+            }, 500); // تأخير بسيط للتأكد من حفظ البيانات
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'wallets',
+            filter: `driver_id=eq.${user.id}`,
+          },
+          (payload) => {
+            console.log('DriverDashboard: Wallet entry updated via Realtime (UPDATE):', payload);
+            // إعادة تحميل رصيد المحفظة عند تحديث مبلغ
+            setTimeout(() => {
+              loadWalletBalance();
+            }, 500);
+          }
+        )
+        .subscribe((status) => {
+          console.log('DriverDashboard: Wallet channel subscription status:', status);
+        });
       
+      // إضافة interval للتحقق من رصيد المحفظة كل 5 ثوان (كحل احتياطي)
+      const walletCheckInterval = setInterval(() => {
+        loadWalletBalance();
+      }, 5000);
+
       return () => {
         // تنظيف عند unmount
         if (locationIntervalRef.current) {
           clearInterval(locationIntervalRef.current);
           locationIntervalRef.current = null;
         }
+        clearInterval(walletCheckInterval);
         profileChannel.unsubscribe();
+        walletChannel.unsubscribe();
       };
     }
   }, [user]);
@@ -139,6 +186,7 @@ export default function DriverDashboardScreen() {
         // إعادة تحميل فقط إذا لم يكن هناك تحميل جاري
         const timer = setTimeout(() => {
           loadDriverProfile();
+          loadWalletBalance(); // تحديث رصيد المحفظة عند العودة للصفحة
         }, 100); // تأخير بسيط لتجنب الاستدعاءات المتكررة
         
         return () => clearTimeout(timer);
@@ -309,6 +357,62 @@ export default function DriverDashboardScreen() {
     }
   };
 
+  const loadWalletBalance = async () => {
+    if (!user) {
+      console.log('DriverDashboard: loadWalletBalance - no user');
+      return;
+    }
+
+    try {
+      console.log('DriverDashboard: Loading wallet balance for driver:', user.id);
+      
+      // استخدام Edge Function لتجاوز RLS (لأن المستخدم قد لا يكون لديه session نشط)
+      const { data: walletResponse, error: walletError } = await supabase.functions.invoke('get-driver-wallet', {
+        body: { driverId: user.id },
+      });
+
+      if (walletError) {
+        console.error('DriverDashboard: Error calling get-driver-wallet function:', walletError);
+        // Fallback: محاولة الاستعلام المباشر (قد لا يعمل بسبب RLS)
+        const { data: walletData, error: directError } = await supabase
+          .from('wallets')
+          .select('amount')
+          .eq('driver_id', user.id)
+          .eq('type', 'earning');
+
+        if (!directError && walletData && walletData.length > 0) {
+          const balance = walletData.reduce((sum, item) => {
+            const amount = typeof item.amount === 'string' ? parseFloat(item.amount) : (item.amount || 0);
+            return sum + amount;
+          }, 0);
+          console.log('DriverDashboard: Using direct query fallback:', {
+            entries: walletData.length,
+            balance,
+          });
+          setWalletBalance(balance);
+        }
+        return;
+      }
+
+      if (walletResponse?.success) {
+        const balance = walletResponse.balance || 0;
+        console.log('DriverDashboard: Wallet balance loaded from Edge Function:', {
+          balance,
+          totalEarnings: walletResponse.totalEarnings,
+          totalCommission: walletResponse.totalCommission,
+          totalDeductions: walletResponse.totalDeductions,
+          transactionsCount: walletResponse.transactions?.length || 0,
+          previousBalance: walletBalance,
+        });
+        setWalletBalance(balance);
+      } else {
+        console.error('DriverDashboard: Edge Function returned error:', walletResponse?.error);
+      }
+    } catch (walletErr) {
+      console.error('DriverDashboard: Exception loading wallet balance:', walletErr);
+    }
+  };
+
   const loadDriverProfile = async () => {
     if (!user) {
       console.log('DriverDashboard: loadDriverProfile - no user');
@@ -431,21 +535,8 @@ export default function DriverDashboardScreen() {
         setInstapayNumber(profile.instapay_number || '');
         setCashNumber(profile.cash_number || '');
 
-        // جلب رصيد المحفظة من wallets
-        try {
-          const { data: walletData, error: walletError } = await supabase
-            .from('wallets')
-            .select('amount')
-            .eq('driver_id', user.id)
-            .eq('type', 'earning');
-
-          if (!walletError && walletData) {
-            const balance = walletData.reduce((sum, item) => sum + (item.amount || 0), 0);
-            setWalletBalance(balance);
-          }
-        } catch (walletErr) {
-          console.error('Error loading wallet balance:', walletErr);
-        }
+        // جلب رصيد المحفظة
+        await loadWalletBalance();
         // تحديث is_online فقط إذا كان موجوداً وليس null
         // هذا يمنع إعادة تعيين الحالة إلى false/null عند تحميل الصفحة
         console.log('DriverDashboard: is_online from profile:', profile.is_online, 'current isOnline state:', isOnline, 'lastKnownOnlineStatusRef:', lastKnownOnlineStatusRef.current);

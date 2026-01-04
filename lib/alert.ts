@@ -27,10 +27,14 @@ export function showToast(
     title: message,
     showConfirmButton: false,
     timer: duration,
-    timerProgressBar: true,
+    timerProgressBar: false, // إزالة شريط التقدم لتقليل الحجم
     width: 'auto',
-    padding: '0.75rem 1rem',
+    maxWidth: '350px', // تحديد أقصى عرض
+    padding: '0.5rem 0.75rem', // تقليل padding
     background: '#fff',
+    backdrop: false, // إزالة الخلفية المعتمة
+    allowOutsideClick: true,
+    allowEscapeKey: true,
     didOpen: (toast) => {
       toast.addEventListener('mouseenter', Swal.stopTimer);
       toast.addEventListener('mouseleave', Swal.resumeTimer);

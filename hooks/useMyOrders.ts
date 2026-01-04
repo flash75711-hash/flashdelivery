@@ -2,6 +2,19 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 
+export interface OrderItem {
+  id: string;
+  order_id: string;
+  item_index: number;
+  address: string;
+  description?: string;
+  latitude?: number;
+  longitude?: number;
+  is_picked_up?: boolean;
+  picked_up_at?: string;
+  item_fee?: number;
+}
+
 export interface Order {
   id: string;
   status: string;
@@ -11,6 +24,7 @@ export interface Order {
   total_fee: number;
   created_at: string;
   items?: any;
+  order_items?: OrderItem[]; // العناصر من جدول order_items
   negotiated_price?: number;
   negotiation_status?: string;
   driver_proposed_price?: number;

@@ -61,6 +61,16 @@ Deno.serve(async (req) => {
 
     // إضافة المبلغ لمحفظة العميل
     // استخدام customer_id في جدول wallets
+    console.log('Attempting to insert wallet entry:', {
+      customer_id: customerId,
+      driver_id: null,
+      order_id: orderId || null,
+      amount: amount,
+      commission: 0,
+      type: 'earning',
+      description: description || `باقي من طلب ${orderId ? `#${orderId.substring(0, 8)}` : ''}`,
+    });
+
     const { data: walletEntry, error: walletError } = await supabase
       .from('wallets')
       .insert({
@@ -77,11 +87,25 @@ Deno.serve(async (req) => {
 
     if (walletError) {
       console.error('Error adding to customer wallet:', walletError);
+      console.error('Error details:', {
+        message: walletError.message,
+        details: walletError.details,
+        hint: walletError.hint,
+        code: walletError.code,
+      });
       return new Response(
-        JSON.stringify({ success: false, error: walletError.message || 'Failed to add to wallet' }),
+        JSON.stringify({ 
+          success: false, 
+          error: walletError.message || 'Failed to add to wallet',
+          details: walletError.details,
+          hint: walletError.hint,
+          code: walletError.code,
+        }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
       );
     }
+
+    console.log('Successfully added to customer wallet:', walletEntry);
 
     return new Response(
       JSON.stringify({ 

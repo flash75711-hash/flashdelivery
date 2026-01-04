@@ -80,10 +80,38 @@ Deno.serve(async (req) => {
       );
     }
 
+    // جلب order_items لكل طلب
+    const orderIds = (orders || []).map(order => order.id);
+    let orderItemsMap: Record<string, any[]> = {};
+
+    if (orderIds.length > 0) {
+      const { data: orderItems, error: itemsError } = await supabase
+        .from('order_items')
+        .select('*')
+        .in('order_id', orderIds)
+        .order('item_index', { ascending: true });
+
+      if (!itemsError && orderItems) {
+        // تجميع العناصر حسب order_id
+        orderItems.forEach(item => {
+          if (!orderItemsMap[item.order_id]) {
+            orderItemsMap[item.order_id] = [];
+          }
+          orderItemsMap[item.order_id].push(item);
+        });
+      }
+    }
+
+    // إضافة order_items لكل طلب
+    const ordersWithItems = (orders || []).map(order => ({
+      ...order,
+      order_items: orderItemsMap[order.id] || [],
+    }));
+
     return new Response(
       JSON.stringify({
         success: true,
-        orders: orders || [],
+        orders: ordersWithItems || [],
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

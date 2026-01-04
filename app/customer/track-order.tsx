@@ -68,69 +68,90 @@ export default function TrackOrderScreen() {
   const [isBottomSheetExpanded, setIsBottomSheetExpanded] = useState(false);
   
   useEffect(() => {
-    if (orderId && user?.id) {
-      loadOrder();
-      loadOrderItems();
-      
-      // الاشتراك في تحديثات الطلب
-      const subscription = supabase
-        .channel(`order_${orderId}`)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'orders',
-            filter: `id=eq.${orderId}`,
-          },
-          () => {
-            loadOrder();
-            loadOrderItems();
-          }
-        )
-        .subscribe();
-      
-      // الاشتراك في تحديثات order_items
-      const itemsSubscription = supabase
-        .channel(`order_items_${orderId}`)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'order_items',
-            filter: `order_id=eq.${orderId}`,
-          },
-          () => {
-            loadOrderItems();
-          }
-        )
-        .subscribe();
-      
-      // الاشتراك في تحديثات موقع السائق
-      const locationSubscription = supabase
-        .channel(`driver_location_${orderId}`)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'driver_locations',
-            filter: `order_id=eq.${orderId}`,
-          },
-          () => {
-            loadDriverLocation();
-          }
-        )
-        .subscribe();
-      
-      return () => {
-        subscription.unsubscribe();
-        itemsSubscription.unsubscribe();
-        locationSubscription.unsubscribe();
-      };
+    if (!orderId) {
+      setLoading(false);
+      return;
     }
-  }, [orderId]);
+
+    // إذا لم يكن user محملاً بعد، ننتظر قليلاً ثم نحاول مرة أخرى
+    if (!user?.id) {
+      console.log('⏳ [TrackOrderScreen] Waiting for user to load...');
+      const retryTimer = setTimeout(() => {
+        if (user?.id) {
+          loadOrder();
+          loadOrderItems();
+        }
+      }, 500);
+      return () => clearTimeout(retryTimer);
+    }
+
+    console.log('✅ [TrackOrderScreen] User loaded, loading order data...', {
+      orderId,
+      userId: user.id,
+    });
+
+    setLoading(true);
+    loadOrder();
+    loadOrderItems();
+    
+    // الاشتراك في تحديثات الطلب
+    const subscription = supabase
+      .channel(`order_${orderId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'orders',
+          filter: `id=eq.${orderId}`,
+        },
+        () => {
+          loadOrder();
+          loadOrderItems();
+        }
+      )
+      .subscribe();
+    
+    // الاشتراك في تحديثات order_items
+    const itemsSubscription = supabase
+      .channel(`order_items_${orderId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'order_items',
+          filter: `order_id=eq.${orderId}`,
+        },
+        () => {
+          loadOrderItems();
+        }
+      )
+      .subscribe();
+    
+    // الاشتراك في تحديثات موقع السائق
+    const locationSubscription = supabase
+      .channel(`driver_location_${orderId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'driver_locations',
+          filter: `order_id=eq.${orderId}`,
+        },
+        () => {
+          loadDriverLocation();
+        }
+      )
+      .subscribe();
+    
+    return () => {
+      subscription.unsubscribe();
+      itemsSubscription.unsubscribe();
+      locationSubscription.unsubscribe();
+    };
+  }, [orderId, user?.id]);
 
   useEffect(() => {
     // تحديث الخريطة عند تغيير موقع السائق أو orderItems
@@ -159,8 +180,58 @@ export default function TrackOrderScreen() {
   }, [order?.id, orderId]);
 
   const loadOrder = async (retryCount = 0) => {
-    if (!orderId || !user?.id) {
-      showSimpleAlert('خطأ', 'معرف الطلب غير موجود', 'error');
+    if (!orderId) {
+      console.error('❌ [loadOrder] No orderId provided');
+      setLoading(false);
+      return;
+    }
+
+    // إذا لم يكن user محملاً بعد، نحاول استخدام Edge Function مباشرة
+    if (!user?.id) {
+      console.log('⚠️ [loadOrder] User not loaded yet, trying Edge Function directly...');
+      try {
+        // محاولة الحصول على user ID من localStorage
+        let customerId: string | null = null;
+        
+        if (typeof window !== 'undefined' && window.localStorage) {
+          try {
+            const localUserStr = localStorage.getItem('flash_user');
+            if (localUserStr) {
+              const parsed = JSON.parse(localUserStr);
+              customerId = parsed.id;
+            }
+          } catch (e) {
+            console.error('Error parsing localUser:', e);
+          }
+        }
+
+        if (customerId) {
+          const { data: edgeData, error: edgeError } = await supabase.functions.invoke('get-order-by-id-for-customer', {
+            body: {
+              orderId: orderId,
+              customerId: customerId,
+            },
+          });
+
+          if (!edgeError && edgeData?.success && edgeData?.order) {
+            console.log('✅ [loadOrder] Order loaded via Edge Function (no user)');
+            setOrder(edgeData.order);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch (edgeErr) {
+        console.error('❌ [loadOrder] Edge Function exception (no user):', edgeErr);
+      }
+
+      // إذا فشل، ننتظر قليلاً ثم نحاول مرة أخرى
+      if (retryCount < 3) {
+        setTimeout(() => {
+          loadOrder(retryCount + 1);
+        }, 1000);
+        return;
+      }
+
       setLoading(false);
       return;
     }
@@ -331,6 +402,53 @@ export default function TrackOrderScreen() {
 
     try {
       console.log(`🔍 [loadOrderItems] Loading order items for order (attempt ${retryCount + 1}/${MAX_RETRIES + 1}):`, orderId);
+      
+      // إذا لم يكن user محملاً، نستخدم Edge Function مباشرة
+      if (!user?.id) {
+        console.log('⚠️ [loadOrderItems] User not loaded, trying Edge Function...');
+        let customerId: string | null = null;
+        
+        if (typeof window !== 'undefined' && window.localStorage) {
+          try {
+            const localUserStr = localStorage.getItem('flash_user');
+            if (localUserStr) {
+              const parsed = JSON.parse(localUserStr);
+              customerId = parsed.id;
+            }
+          } catch (e) {
+            console.error('Error parsing localUser:', e);
+          }
+        }
+
+        if (customerId) {
+          try {
+            const { data: edgeData, error: edgeError } = await supabase.functions.invoke('get-order-items', {
+              body: {
+                orderId: orderId,
+                userId: customerId,
+                userRole: 'customer',
+              },
+            });
+
+            if (!edgeError && edgeData?.success && edgeData?.orderItems) {
+              console.log('✅ [loadOrderItems] Items loaded via Edge Function (no user)');
+              setOrderItems(edgeData.orderItems);
+              return;
+            }
+          } catch (edgeErr) {
+            console.error('❌ [loadOrderItems] Edge Function exception (no user):', edgeErr);
+          }
+        }
+
+        // إذا فشل، ننتظر قليلاً ثم نحاول مرة أخرى
+        if (retryCount < 3) {
+          setTimeout(() => {
+            loadOrderItems(retryCount + 1);
+          }, 1000);
+          return;
+        }
+        return;
+      }
       
       const { data, error } = await supabase
         .from('order_items')

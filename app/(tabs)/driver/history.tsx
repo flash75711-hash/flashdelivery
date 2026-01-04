@@ -8,6 +8,7 @@ import {
   RefreshControl,
   Platform,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { useTranslation } from 'react-i18next';
@@ -64,15 +65,37 @@ export default function DriverHistoryScreen() {
     if (!user) return;
 
     try {
-      const { data, error } = await supabase
-        .from('orders')
-        .select('*')
-        .eq('driver_id', user.id)
-        .in('status', ['completed', 'cancelled'])
-        .order('created_at', { ascending: false });
+      // استخدام Edge Function لتجاوز RLS (لأن المستخدم قد لا يكون لديه session نشط)
+      const { data: historyResponse, error: historyError } = await supabase.functions.invoke('get-driver-history', {
+        body: { driverId: user.id },
+      });
 
-      if (error) throw error;
-      setTrips(data || []);
+      if (historyError) {
+        console.error('Error calling get-driver-history function:', historyError);
+        // Fallback: محاولة الاستعلام المباشر (قد لا يعمل بسبب RLS)
+        const { data, error } = await supabase
+          .from('orders')
+          .select('*')
+          .eq('driver_id', user.id)
+          .in('status', ['completed', 'cancelled'])
+          .order('created_at', { ascending: false });
+
+        if (!error && data) {
+          setTrips(data);
+        } else {
+          console.error('Error loading trips (fallback):', error);
+        }
+        return;
+      }
+
+      if (historyResponse?.success) {
+        console.log('Driver history loaded from Edge Function:', {
+          count: historyResponse.trips?.length || 0,
+        });
+        setTrips(historyResponse.trips || []);
+      } else {
+        console.error('Edge Function returned error:', historyResponse?.error);
+      }
     } catch (error) {
       console.error('Error loading trips:', error);
     } finally {
@@ -115,6 +138,45 @@ export default function DriverHistoryScreen() {
             <Text style={styles.tripDate}>
               {new Date(item.created_at).toLocaleDateString('ar-SA')}
             </Text>
+
+            {/* عرض العناصر إذا كانت موجودة */}
+            {item.order_items && Array.isArray(item.order_items) && item.order_items.length > 0 && (
+              <View style={styles.itemsContainer}>
+                <View style={styles.itemsHeader}>
+                  <Ionicons name="cube-outline" size={14} color="#007AFF" />
+                  <Text style={styles.itemsTitle}>
+                    العناصر ({item.order_items.length})
+                  </Text>
+                </View>
+                {item.order_items.slice(0, 3).map((orderItem: any, index: number) => (
+                  <View key={orderItem.id || index} style={styles.itemRow}>
+                    <View style={styles.itemNumber}>
+                      <Text style={styles.itemNumberText}>{index + 1}</Text>
+                    </View>
+                    <View style={styles.itemInfo}>
+                      <Text style={styles.itemAddress} numberOfLines={1}>
+                        {orderItem.address}
+                      </Text>
+                      {orderItem.description && (
+                        <Text style={styles.itemDescription} numberOfLines={1}>
+                          {orderItem.description}
+                        </Text>
+                      )}
+                      {orderItem.item_fee && (
+                        <Text style={styles.itemFee}>
+                          المبلغ: {parseFloat(orderItem.item_fee).toFixed(2)} ج.م
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                ))}
+                {item.order_items.length > 3 && (
+                  <Text style={styles.itemsMore}>
+                    و {item.order_items.length - 3} عنصر آخر...
+                  </Text>
+                )}
+              </View>
+            )}
           </View>
         )}
         ListEmptyComponent={
@@ -205,5 +267,72 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   emptyText: {
     fontSize: 16,
     color: '#999',
+  },
+  itemsContainer: {
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  itemsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  itemsTitle: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#E0E0E0',
+  },
+  itemNumber: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#007AFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  itemNumberText: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    fontWeight: '600',
+    color: '#fff',
+  },
+  itemInfo: {
+    flex: 1,
+  },
+  itemAddress: {
+    fontSize: responsive.getResponsiveFontSize(13),
+    fontWeight: '500',
+    color: '#1a1a1a',
+    marginBottom: 2,
+  },
+  itemDescription: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    color: '#666',
+    marginBottom: 4,
+  },
+  itemFee: {
+    fontSize: responsive.getResponsiveFontSize(11),
+    color: '#34C759',
+    fontWeight: '600',
+  },
+  itemsMore: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    color: '#999',
+    marginTop: 8,
+    textAlign: 'right',
+    fontStyle: 'italic',
   },
 });

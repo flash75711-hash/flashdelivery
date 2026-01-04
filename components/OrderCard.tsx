@@ -536,6 +536,48 @@ export default function OrderCard({
               </Text>
             </View>
           )}
+          
+          {/* عرض العناصر (order_items) إذا كانت موجودة */}
+          {order.order_items && Array.isArray(order.order_items) && order.order_items.length > 0 && (
+            <View style={styles.itemsContainer}>
+              <View style={styles.itemsHeader}>
+                <Ionicons name="cube-outline" size={16} color="#007AFF" />
+                <Text style={styles.itemsTitle}>
+                  العناصر ({order.order_items.length})
+                </Text>
+              </View>
+              {order.order_items.slice(0, 3).map((item: any, index: number) => (
+                <View key={item.id || index} style={styles.itemRow}>
+                  <View style={styles.itemNumber}>
+                    <Text style={styles.itemNumberText}>{index + 1}</Text>
+                  </View>
+                  <View style={styles.itemInfo}>
+                    <Text style={styles.itemAddress} numberOfLines={1}>
+                      {item.address}
+                    </Text>
+                    {item.description && (
+                      <Text style={styles.itemDescription} numberOfLines={1}>
+                        {item.description}
+                      </Text>
+                    )}
+                    {item.item_fee && (
+                      <Text style={styles.itemFee}>
+                        المبلغ: {parseFloat(item.item_fee).toFixed(2)} ج.م
+                      </Text>
+                    )}
+                  </View>
+                  {item.is_picked_up && (
+                    <Ionicons name="checkmark-circle" size={18} color="#34C759" />
+                  )}
+                </View>
+              ))}
+              {order.order_items.length > 3 && (
+                <Text style={styles.itemsMore}>
+                  و {order.order_items.length - 3} عنصر آخر...
+                </Text>
+              )}
+            </View>
+          )}
         </>
       )}
 
@@ -1232,6 +1274,73 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#FF9500',
+  },
+  itemsContainer: {
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  itemsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  itemsTitle: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#E0E0E0',
+  },
+  itemNumber: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#007AFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  itemNumberText: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    fontWeight: '600',
+    color: '#fff',
+  },
+  itemInfo: {
+    flex: 1,
+  },
+  itemAddress: {
+    fontSize: responsive.getResponsiveFontSize(13),
+    fontWeight: '500',
+    color: '#1a1a1a',
+    marginBottom: 2,
+  },
+  itemDescription: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    color: '#666',
+    marginBottom: 4,
+  },
+  itemFee: {
+    fontSize: responsive.getResponsiveFontSize(11),
+    color: '#34C759',
+    fontWeight: '600',
+  },
+  itemsMore: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    color: '#999',
+    marginTop: 8,
+    textAlign: 'right',
+    fontStyle: 'italic',
   },
 });
 

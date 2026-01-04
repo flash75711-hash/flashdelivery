@@ -73,8 +73,27 @@ export default function CustomerProfileScreen() {
         )
         .subscribe();
       
+      // الاشتراك في Realtime لتحديث المحفظة تلقائياً
+      const walletChannel = supabase
+        .channel(`customer_wallet_${user.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'wallets',
+            filter: `customer_id=eq.${user.id}`,
+          },
+          () => {
+            // إعادة تحميل رصيد المحفظة عند تغيير البيانات
+            loadProfileData();
+          }
+        )
+        .subscribe();
+      
       return () => {
         profileChannel.unsubscribe();
+        walletChannel.unsubscribe();
       };
     }
   }, [user]);
@@ -101,16 +120,33 @@ export default function CustomerProfileScreen() {
       setInstapayNumber(profile?.instapay_number || '');
       setCashNumber(profile?.cash_number || '');
 
-      // جلب رصيد المحفظة من wallets
+      // جلب رصيد المحفظة من wallets باستخدام Edge Function
       try {
-        const { data: walletData, error: walletError } = await supabase
-          .from('wallets')
-          .select('amount')
-          .eq('customer_id', user.id)
-          .eq('type', 'earning');
+        const { data: walletResponse, error: walletError } = await supabase.functions.invoke('get-customer-wallet', {
+          body: { customerId: user.id },
+        });
 
-        if (!walletError && walletData) {
-          const balance = walletData.reduce((sum, item) => sum + (item.amount || 0), 0);
+        if (walletError) {
+          console.error('Error calling get-customer-wallet function:', walletError);
+          // Fallback: محاولة الاستعلام المباشر (قد لا يعمل بسبب RLS)
+          const { data: walletData, error: directError } = await supabase
+            .from('wallets')
+            .select('amount')
+            .eq('customer_id', user.id)
+            .eq('type', 'earning');
+
+          if (!directError && walletData) {
+            const balance = walletData.reduce((sum, item) => sum + parseFloat(item.amount || 0), 0);
+            setWalletBalance(balance);
+          }
+        } else if (walletResponse?.success) {
+          const balance = walletResponse.balance || 0;
+          console.log('Customer wallet balance loaded from Edge Function:', {
+            balance,
+            totalEarnings: walletResponse.totalEarnings,
+            totalDeductions: walletResponse.totalDeductions,
+            transactionsCount: walletResponse.transactions?.length || 0,
+          });
           setWalletBalance(balance);
         }
       } catch (walletErr) {
@@ -241,6 +277,15 @@ export default function CustomerProfileScreen() {
   };
 
   // التحقق من اختيار مكان عند العودة من الدليل
+  // تحديث المحفظة عند العودة للصفحة
+  useFocusEffect(
+    useCallback(() => {
+      if (user) {
+        loadProfileData();
+      }
+    }, [user])
+  );
+
   useFocusEffect(
     useCallback(() => {
       const checkSelectedPlace = async () => {
