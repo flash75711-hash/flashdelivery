@@ -46,6 +46,10 @@ export default function CustomerProfileScreen() {
   const [gettingLocation, setGettingLocation] = useState<number | null>(null);
   const [editingName, setEditingName] = useState(false);
   const [selectedAddressIndex, setSelectedAddressIndex] = useState<number | null>(null);
+  const [walletBalance, setWalletBalance] = useState<number>(0);
+  const [instapayNumber, setInstapayNumber] = useState<string>('');
+  const [cashNumber, setCashNumber] = useState<string>('');
+  const [editingPaymentLinks, setEditingPaymentLinks] = useState(false);
 
   // جلب بيانات المستخدم والعناوين
   useEffect(() => {
@@ -80,10 +84,10 @@ export default function CustomerProfileScreen() {
     
     setLoadingData(true);
     try {
-      // جلب الاسم من profile
+      // جلب البيانات من profile
       const { data: profile } = await supabase
         .from('profiles')
-        .select('full_name')
+        .select('full_name, instapay_number, cash_number')
         .eq('id', user.id)
         .single();
       
@@ -91,6 +95,26 @@ export default function CustomerProfileScreen() {
         setFullName(profile.full_name);
       } else if (user.full_name) {
         setFullName(user.full_name);
+      }
+
+      // جلب معلومات الدفع
+      setInstapayNumber(profile?.instapay_number || '');
+      setCashNumber(profile?.cash_number || '');
+
+      // جلب رصيد المحفظة من wallets
+      try {
+        const { data: walletData, error: walletError } = await supabase
+          .from('wallets')
+          .select('amount')
+          .eq('customer_id', user.id)
+          .eq('type', 'earning');
+
+        if (!walletError && walletData) {
+          const balance = walletData.reduce((sum, item) => sum + (item.amount || 0), 0);
+          setWalletBalance(balance);
+        }
+      } catch (walletErr) {
+        console.error('Error loading wallet balance:', walletErr);
       }
 
       // جلب العناوين
@@ -284,11 +308,20 @@ export default function CustomerProfileScreen() {
 
     setSaving(true);
     try {
-      // تحديث الاسم في profile
+      // تحديث البيانات في profile
+      const updateData: any = {};
       if (fullName) {
+        updateData.full_name = fullName;
+      }
+      if (editingPaymentLinks) {
+        updateData.instapay_number = instapayNumber || null;
+        updateData.cash_number = cashNumber || null;
+      }
+
+      if (Object.keys(updateData).length > 0) {
         const { error: profileError } = await supabase
           .from('profiles')
-          .update({ full_name: fullName })
+          .update(updateData)
           .eq('id', user.id);
 
         if (profileError) {
@@ -343,6 +376,7 @@ export default function CustomerProfileScreen() {
       await loadProfileData();
       
       setEditingName(false);
+      setEditingPaymentLinks(false);
       showSimpleAlert('نجح', 'تم حفظ البيانات بنجاح', 'success');
     } catch (error: any) {
       console.error('Error saving profile:', error);
@@ -467,6 +501,114 @@ export default function CustomerProfileScreen() {
             
             <Text style={styles.email}>{user?.phone || user?.email}</Text>
             <Text style={styles.role}>{t(`roles.${user?.role}`)}</Text>
+          </View>
+
+          {/* قسم المحفظة وطرق الدفع */}
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>المحفظة وطرق الدفع</Text>
+              <TouchableOpacity
+                onPress={() => setEditingPaymentLinks(!editingPaymentLinks)}
+                style={styles.editButton}
+              >
+                <Ionicons 
+                  name={editingPaymentLinks ? "checkmark" : "pencil"} 
+                  size={20} 
+                  color="#007AFF" 
+                />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.walletCard}>
+              <View style={styles.walletHeader}>
+                <Ionicons name="wallet" size={24} color="#34C759" />
+                <Text style={styles.walletTitle}>رصيد المحفظة</Text>
+              </View>
+              <Text style={styles.walletBalance}>
+                {walletBalance.toFixed(2)} جنيه
+              </Text>
+              <Text style={styles.walletSubtext}>
+                يمكنك استخدام الرصيد لدفع الطلبات
+              </Text>
+            </View>
+
+            <View style={styles.socialLinksCard}>
+              <View style={styles.socialLinkRow}>
+                <View style={styles.socialLinkHeader}>
+                  <Ionicons name="card" size={20} color="#007AFF" />
+                  <Text style={styles.socialLinkLabel}>انستاباي</Text>
+                </View>
+                {editingPaymentLinks ? (
+                  <TextInput
+                    style={styles.socialLinkInput}
+                    value={instapayNumber}
+                    onChangeText={setInstapayNumber}
+                    placeholder="رقم انستاباي"
+                    placeholderTextColor="#999"
+                    textAlign="right"
+                    keyboardType="numeric"
+                  />
+                ) : (
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (instapayNumber && Platform.OS === 'web' && typeof window !== 'undefined') {
+                        navigator.clipboard?.writeText(instapayNumber);
+                        showSimpleAlert('نجح', 'تم نسخ رقم انستاباي', 'success');
+                      }
+                    }}
+                    disabled={!instapayNumber}
+                  >
+                    <Text style={[
+                      styles.socialLinkValue,
+                      !instapayNumber && styles.socialLinkValueEmpty
+                    ]}>
+                      {instapayNumber || 'غير محدد'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              <View style={styles.socialLinkRow}>
+                <View style={styles.socialLinkHeader}>
+                  <Ionicons name="cash" size={20} color="#FF9500" />
+                  <Text style={styles.socialLinkLabel}>كاش</Text>
+                </View>
+                {editingPaymentLinks ? (
+                  <TextInput
+                    style={styles.socialLinkInput}
+                    value={cashNumber}
+                    onChangeText={setCashNumber}
+                    placeholder="رقم كاش أو رابط"
+                    placeholderTextColor="#999"
+                    textAlign="right"
+                  />
+                ) : (
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (cashNumber) {
+                        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                          if (cashNumber.startsWith('http')) {
+                            window.open(cashNumber, '_blank');
+                          } else {
+                            // نسخ الرقم
+                            navigator.clipboard?.writeText(cashNumber);
+                            showSimpleAlert('نجح', 'تم نسخ الرقم', 'success');
+                          }
+                        }
+                      }
+                    }}
+                    disabled={!cashNumber}
+                  >
+                    <Text style={[
+                      styles.socialLinkValue,
+                      !cashNumber && styles.socialLinkValueEmpty
+                    ]}>
+                      {cashNumber || 'غير محدد'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
           </View>
 
           <View style={styles.section}>
@@ -858,5 +1000,80 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   },
   logoutText: {
     color: '#FF3B30',
+  },
+  editButton: {
+    padding: 4,
+  },
+  walletCard: {
+    backgroundColor: '#E8F5E9',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#34C759',
+  },
+  walletHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  walletTitle: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+    color: '#1a1a1a',
+  },
+  walletBalance: {
+    fontSize: responsive.getResponsiveFontSize(28),
+    fontWeight: 'bold',
+    color: '#34C759',
+    marginBottom: 4,
+  },
+  walletSubtext: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    color: '#666',
+  },
+  socialLinksCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  socialLinkRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  socialLinkHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  socialLinkLabel: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+    color: '#1a1a1a',
+  },
+  socialLinkValue: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  socialLinkValueEmpty: {
+    color: '#999',
+    fontStyle: 'italic',
+  },
+  socialLinkInput: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    padding: 10,
+    fontSize: responsive.getResponsiveFontSize(14),
+    textAlign: 'right',
+    marginLeft: 12,
   },
 });

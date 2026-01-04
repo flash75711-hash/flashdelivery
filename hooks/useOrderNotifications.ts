@@ -66,7 +66,16 @@ export function useOrderNotifications() {
       return;
     }
 
-    // إنشاء channel للاستماع إلى تغييرات الطلبات
+    // للعملاء: لا نستخدم useOrderNotifications لأن الإشعارات تأتي من قاعدة البيانات
+    // عبر useFloatingNotifications الذي يستمع لجدول notifications
+    if (user.role === 'customer') {
+      return;
+    }
+
+    // تنظيف shownOrderIds عند إعادة التحميل لتجنب إعادة عرض الإشعارات القديمة
+    shownOrderIds.current.clear();
+
+    // إنشاء channel للاستماع إلى تغييرات الطلبات (للسائقين فقط)
     const ordersChannel = supabase
       .channel(`order_notifications_${user.id}`)
       .on(
@@ -78,19 +87,6 @@ export function useOrderNotifications() {
         },
         async (payload) => {
           const newOrder = payload.new as any;
-
-          // للعملاء: عرض إشعار عند إنشاء طلب جديد خاص بهم
-          if (user.role === 'customer' && newOrder.customer_id === user.id) {
-            const notification: FloatingNotificationData = {
-              id: `order_created_${newOrder.id}`,
-              title: 'تم إنشاء الطلب بنجاح',
-              message: `تم إنشاء طلبك بنجاح. سيتم البحث عن سائق قريب.`,
-              type: 'success',
-              order_id: newOrder.id,
-              created_at: newOrder.created_at,
-            };
-            addNotification(notification);
-          }
 
           // للسائقين: عرض إشعار عند إنشاء أي طلب جديد (pending)
           if (user.role === 'driver' && newOrder.status === 'pending') {
@@ -122,50 +118,6 @@ export function useOrderNotifications() {
             return;
           }
 
-          // للعملاء: عرض إشعار عند تغيير حالة طلبهم
-          if (user.role === 'customer' && updatedOrder.customer_id === user.id) {
-            const statusMessages: Record<string, { title: string; message: string; type: 'success' | 'info' | 'warning' }> = {
-              'accepted': {
-                title: 'تم قبول طلبك',
-                message: 'تم قبول طلبك وسيتم البدء في التوصيل قريباً.',
-                type: 'success',
-              },
-              'pickedUp': {
-                title: 'تم استلام الطلب',
-                message: 'تم استلام طلبك من قبل السائق وهو في الطريق إليك.',
-                type: 'info',
-              },
-              'inTransit': {
-                title: 'الطلب قيد التوصيل',
-                message: 'طلبك في الطريق إليك الآن.',
-                type: 'info',
-              },
-              'completed': {
-                title: 'تم إكمال الطلب',
-                message: 'تم إكمال طلبك بنجاح. شكراً لاستخدامك Flash Delivery!',
-                type: 'success',
-              },
-              'cancelled': {
-                title: 'تم إلغاء الطلب',
-                message: 'تم إلغاء طلبك.',
-                type: 'warning',
-              },
-            };
-
-            const statusInfo = statusMessages[updatedOrder.status];
-            if (statusInfo) {
-              const notification: FloatingNotificationData = {
-                id: `order_status_${updatedOrder.id}_${updatedOrder.status}`,
-                title: statusInfo.title,
-                message: statusInfo.message,
-                type: statusInfo.type,
-                order_id: updatedOrder.id,
-                created_at: updatedOrder.updated_at || new Date().toISOString(),
-              };
-              addNotification(notification);
-            }
-          }
-
           // للسائقين: عرض إشعار عند تحديث طلباتهم المقبولة
           if (user.role === 'driver' && updatedOrder.driver_id === user.id) {
             if (updatedOrder.status === 'completed') {
@@ -191,6 +143,8 @@ export function useOrderNotifications() {
         channelRef.current.unsubscribe();
         channelRef.current = null;
       }
+      // تنظيف shownOrderIds عند إلغاء الاشتراك
+      shownOrderIds.current.clear();
     };
   }, [user, addNotification]);
 

@@ -83,7 +83,7 @@ export default function OrderDetailScreen() {
           throw error || new Error('فشل تحميل تفاصيل الطلب');
         }
       } else {
-        setOrder(data);
+      setOrder(data);
       }
     } catch (error: any) {
       console.error('Error loading order:', error);

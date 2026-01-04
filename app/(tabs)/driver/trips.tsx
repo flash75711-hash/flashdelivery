@@ -512,8 +512,12 @@ export default function DriverTripsScreen() {
       // إرسال إشعار للعميل
       if (order.customer_id) {
         try {
-          console.log('📧 [handleAcceptOrder] إرسال إشعار للعميل...');
-          const { error: notifError } = await supabase.rpc('insert_notification_for_customer_by_driver', {
+          console.log('📧 [handleAcceptOrder] إرسال إشعار للعميل...', {
+            customer_id: order.customer_id,
+            order_id: order.id,
+          });
+          
+          const { data: notifData, error: notifError } = await supabase.rpc('insert_notification_for_customer_by_driver', {
             p_user_id: order.customer_id,
             p_title: 'تم قبول طلبك',
             p_message: 'تم قبول طلبك وسيتم البدء في التوصيل قريباً.',
@@ -522,14 +526,44 @@ export default function DriverTripsScreen() {
           });
           
           if (notifError) {
-            console.error('⚠️ [handleAcceptOrder] خطأ في إرسال الإشعار:', notifError);
+            console.error('⚠️ [handleAcceptOrder] خطأ في إرسال الإشعار:', {
+              error: notifError,
+              message: notifError.message,
+              code: notifError.code,
+              details: notifError.details,
+            });
+            
+            // محاولة استخدام createNotification كـ fallback
+            console.log('🔄 [handleAcceptOrder] محاولة استخدام createNotification كـ fallback...');
+            const { createNotification } = await import('@/lib/notifications');
+            const fallbackResult = await createNotification({
+              user_id: order.customer_id,
+              title: 'تم قبول طلبك',
+              message: 'تم قبول طلبك وسيتم البدء في التوصيل قريباً.',
+              type: 'success',
+              order_id: order.id,
+            });
+            
+            if (fallbackResult.success) {
+              console.log('✅ [handleAcceptOrder] تم إرسال الإشعار باستخدام createNotification');
           } else {
-            console.log('✅ [handleAcceptOrder] تم إرسال إشعار للعميل');
+              console.error('❌ [handleAcceptOrder] فشل إرسال الإشعار حتى مع createNotification:', fallbackResult.error);
+            }
+          } else {
+            console.log('✅ [handleAcceptOrder] تم إرسال إشعار للعميل بنجاح:', {
+              notification_id: notifData,
+              customer_id: order.customer_id,
+              order_id: order.id,
+            });
+            // ملاحظة: لا نتحقق من الإشعار لأن RLS يمنع السائق من قراءة إشعارات العميل
+            // الإشعار موجود في قاعدة البيانات ويمكن للعميل قراءته
           }
         } catch (notifError) {
-          console.error('⚠️ [handleAcceptOrder] خطأ في إرسال الإشعار:', notifError);
+          console.error('⚠️ [handleAcceptOrder] خطأ في إرسال الإشعار (catch):', notifError);
           // لا نوقف العملية إذا فشل الإشعار
         }
+      } else {
+        console.warn('⚠️ [handleAcceptOrder] لا يوجد customer_id للطلب:', order.id);
       }
 
       // إعادة تحميل الطلبات بعد تأخير للتأكد من تحديث قاعدة البيانات

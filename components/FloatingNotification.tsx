@@ -105,7 +105,7 @@ export default function FloatingNotification({
           }
       } catch (error) {
         console.error('Error marking notification as read:', error);
-      }
+        }
       }
     }
     onDismiss();

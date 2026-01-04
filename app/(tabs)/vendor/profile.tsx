@@ -32,6 +32,10 @@ export default function VendorProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [walletBalance, setWalletBalance] = useState<number>(0);
+  const [instapayNumber, setInstapayNumber] = useState<string>('');
+  const [cashNumber, setCashNumber] = useState<string>('');
+  const [editingPaymentLinks, setEditingPaymentLinks] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -75,7 +79,12 @@ export default function VendorProfileScreen() {
       if (data) {
         setFullName(data.full_name || '');
         setPhone(data.phone || '');
+        setInstapayNumber(data.instapay_number || '');
+        setCashNumber(data.cash_number || '');
       }
+
+      // جلب رصيد المحفظة (للإدارة قد يكون مختلف)
+      // يمكن إضافة منطق خاص بالإدارة هنا
     } catch (error) {
       console.error('Error loading profile:', error);
     } finally {
@@ -88,20 +97,44 @@ export default function VendorProfileScreen() {
 
     setSaving(true);
     try {
+      const updateData: any = {
+        full_name: fullName,
+        phone: phone,
+      };
+
+      if (editingPaymentLinks) {
+        updateData.instapay_number = instapayNumber || null;
+        updateData.cash_number = cashNumber || null;
+      }
+
       const { error } = await supabase
         .from('profiles')
-        .update({
-          full_name: fullName,
-          phone: phone,
-        })
+        .update(updateData)
         .eq('id', user.id);
 
       if (error) throw error;
+      setEditingPaymentLinks(false);
       showToast('تم تحديث البيانات الشخصية', 'success');
     } catch (error: any) {
       showToast(error.message || 'فشل تحديث البيانات', 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    try {
+      await signOut();
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.location.href = '/login';
+      } else {
+        router.replace('/(auth)/login');
+      }
+    } catch (error) {
+      console.error('Error logging out:', error);
+    } finally {
+      setLoggingOut(false);
     }
   };
 
@@ -156,6 +189,114 @@ export default function VendorProfileScreen() {
             placeholderTextColor="#999"
             textAlign="right"
           />
+        </View>
+
+        {/* قسم المحفظة وطرق الدفع */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>المحفظة وطرق الدفع</Text>
+            <TouchableOpacity
+              onPress={() => setEditingPaymentLinks(!editingPaymentLinks)}
+              style={styles.editButton}
+            >
+              <Ionicons 
+                name={editingPaymentLinks ? "checkmark" : "pencil"} 
+                size={20} 
+                color="#007AFF" 
+              />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.walletCard}>
+            <View style={styles.walletHeader}>
+              <Ionicons name="wallet" size={24} color="#34C759" />
+              <Text style={styles.walletTitle}>رصيد المحفظة</Text>
+            </View>
+            <Text style={styles.walletBalance}>
+              {walletBalance.toFixed(2)} جنيه
+            </Text>
+            <Text style={styles.walletSubtext}>
+              رصيد الإدارة
+            </Text>
+          </View>
+
+          <View style={styles.socialLinksCard}>
+            <View style={styles.socialLinkRow}>
+              <View style={styles.socialLinkHeader}>
+                <Ionicons name="card" size={20} color="#007AFF" />
+                <Text style={styles.socialLinkLabel}>انستاباي</Text>
+              </View>
+              {editingPaymentLinks ? (
+                <TextInput
+                  style={styles.socialLinkInput}
+                  value={instapayNumber}
+                  onChangeText={setInstapayNumber}
+                  placeholder="رقم انستاباي"
+                  placeholderTextColor="#999"
+                  textAlign="right"
+                  keyboardType="numeric"
+                />
+              ) : (
+                <TouchableOpacity
+                  onPress={() => {
+                    if (instapayNumber && Platform.OS === 'web' && typeof window !== 'undefined') {
+                      navigator.clipboard?.writeText(instapayNumber);
+                      showToast('تم نسخ رقم انستاباي', 'success');
+                    }
+                  }}
+                  disabled={!instapayNumber}
+                >
+                  <Text style={[
+                    styles.socialLinkValue,
+                    !instapayNumber && styles.socialLinkValueEmpty
+                  ]}>
+                    {instapayNumber || 'غير محدد'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <View style={styles.socialLinkRow}>
+              <View style={styles.socialLinkHeader}>
+                <Ionicons name="cash" size={20} color="#FF9500" />
+                <Text style={styles.socialLinkLabel}>كاش</Text>
+              </View>
+              {editingPaymentLinks ? (
+                <TextInput
+                  style={styles.socialLinkInput}
+                  value={cashNumber}
+                  onChangeText={setCashNumber}
+                  placeholder="رقم كاش أو رابط"
+                  placeholderTextColor="#999"
+                  textAlign="right"
+                />
+              ) : (
+                <TouchableOpacity
+                  onPress={() => {
+                    if (cashNumber) {
+                      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                        if (cashNumber.startsWith('http')) {
+                          window.open(cashNumber, '_blank');
+                        } else {
+                          // نسخ الرقم
+                          navigator.clipboard?.writeText(cashNumber);
+                          showToast('تم نسخ الرقم', 'success');
+                        }
+                      }
+                    }
+                  }}
+                  disabled={!cashNumber}
+                >
+                  <Text style={[
+                    styles.socialLinkValue,
+                    !cashNumber && styles.socialLinkValueEmpty
+                  ]}>
+                    {cashNumber || 'غير محدد'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
         </View>
 
         <TouchableOpacity
@@ -277,6 +418,92 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     color: '#FF3B30',
     fontSize: responsive.getResponsiveFontSize(18),
     fontWeight: '600',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: responsive.getResponsiveFontSize(18),
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+  },
+  editButton: {
+    padding: 4,
+  },
+  walletCard: {
+    backgroundColor: '#E8F5E9',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#34C759',
+  },
+  walletHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  walletTitle: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+    color: '#1a1a1a',
+  },
+  walletBalance: {
+    fontSize: responsive.getResponsiveFontSize(28),
+    fontWeight: 'bold',
+    color: '#34C759',
+    marginBottom: 4,
+  },
+  walletSubtext: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    color: '#666',
+  },
+  socialLinksCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  socialLinkRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  socialLinkHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  socialLinkLabel: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+    color: '#1a1a1a',
+  },
+  socialLinkValue: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  socialLinkValueEmpty: {
+    color: '#999',
+    fontStyle: 'italic',
+  },
+  socialLinkInput: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    padding: 10,
+    fontSize: responsive.getResponsiveFontSize(14),
+    textAlign: 'right',
+    marginLeft: 12,
   },
 });
 

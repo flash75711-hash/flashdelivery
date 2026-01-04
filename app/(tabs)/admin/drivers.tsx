@@ -197,8 +197,8 @@ export default function AdminDriversScreen() {
 
     // استخدام SweetAlert2 للتأكيد
     const confirmed = await showConfirm(
-      'موافقة على التسجيل',
-      'هل أنت متأكد من الموافقة على تسجيل هذا السائق؟',
+        'موافقة على التسجيل',
+        'هل أنت متأكد من الموافقة على تسجيل هذا السائق؟',
       {
         confirmText: 'نعم',
         cancelText: 'إلغاء',
@@ -265,8 +265,8 @@ export default function AdminDriversScreen() {
     };
 
     const confirmed = await showConfirm(
-      'رفض التسجيل',
-      'هل أنت متأكد من رفض تسجيل هذا السائق؟',
+        'رفض التسجيل',
+        'هل أنت متأكد من رفض تسجيل هذا السائق؟',
       {
         confirmText: 'رفض',
         cancelText: 'إلغاء',
@@ -369,8 +369,8 @@ export default function AdminDriversScreen() {
     };
 
     const confirmed = await showConfirm(
-      'تعليق الحساب',
-      'هل أنت متأكد من تعليق حساب هذا السائق؟',
+          'تعليق الحساب',
+          'هل أنت متأكد من تعليق حساب هذا السائق؟',
       {
         confirmText: 'تعليق',
         cancelText: 'إلغاء',
@@ -473,8 +473,8 @@ export default function AdminDriversScreen() {
     };
 
     const confirmed = await showConfirm(
-      'إعادة تنشيط الحساب',
-      'هل أنت متأكد من إعادة تنشيط حساب هذا السائق؟',
+          'إعادة تنشيط الحساب',
+          'هل أنت متأكد من إعادة تنشيط حساب هذا السائق؟',
       {
         confirmText: 'إعادة التنشيط',
         cancelText: 'إلغاء',

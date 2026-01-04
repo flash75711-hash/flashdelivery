@@ -104,18 +104,18 @@ export default function AdminAccountingScreen() {
 
     if (!confirmed) return;
 
-    try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ is_debt_cleared: true })
-        .eq('id', driverId);
+            try {
+              const { error } = await supabase
+                .from('profiles')
+                .update({ is_debt_cleared: true })
+                .eq('id', driverId);
 
-      if (error) throw error;
+              if (error) throw error;
       showToast('تم تحديث حالة الدفع', 'success');
-      loadPayments();
-    } catch (error: any) {
+              loadPayments();
+            } catch (error: any) {
       showToast(error.message || 'فشل تحديث الحالة', 'error');
-    }
+            }
   };
 
   return (

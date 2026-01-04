@@ -172,9 +172,9 @@ export function useOrderSearch({
         return false;
       }
 
-      stopSearch();
+        stopSearch();
       onDriverFound?.(data.driver_id);
-      return true;
+        return true;
     } catch (error) {
       return false;
     }
@@ -184,18 +184,18 @@ export function useOrderSearch({
   const notifyDrivers = useCallback(async (drivers: DriverLocation[], radius: number) => {
     if (!drivers.length) return;
 
-    const title = 'طلب جديد متاح';
-    const message = `يوجد طلب جديد متاح في نطاق ${radius} كم. تحقق من قائمة الطلبات.`;
+      const title = 'طلب جديد متاح';
+      const message = `يوجد طلب جديد متاح في نطاق ${radius} كم. تحقق من قائمة الطلبات.`;
 
-    for (const driver of drivers) {
-      try {
-        await supabase.rpc('insert_notification_for_driver', {
-          p_user_id: driver.driver_id,
-          p_title: title,
-          p_message: message,
+      for (const driver of drivers) {
+        try {
+          await supabase.rpc('insert_notification_for_driver', {
+            p_user_id: driver.driver_id,
+            p_title: title,
+            p_message: message,
           p_type: 'info',
-        });
-      } catch (error) {
+          });
+        } catch (error) {
         // تجاهل الأخطاء في إشعار سائق واحد
       }
     }

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
+  TextInput,
   StyleSheet,
   SafeAreaView,
   ScrollView,
@@ -68,6 +69,10 @@ export default function DriverDashboardScreen() {
   }>>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showOrderTypeModal, setShowOrderTypeModal] = useState(false);
+  const [walletBalance, setWalletBalance] = useState<number>(0);
+  const [instapayNumber, setInstapayNumber] = useState<string>('');
+  const [cashNumber, setCashNumber] = useState<string>('');
+  const [editingPaymentLinks, setEditingPaymentLinks] = useState(false);
 
   // قراءة الحالة الأولية من localStorage عند تحميل المكون
   useEffect(() => {
@@ -330,7 +335,7 @@ export default function DriverDashboardScreen() {
         // تحديد الأعمدة المطلوبة فقط لتحسين الأداء
         const result = await supabase
           .from('profiles')
-          .select('full_name, phone, id_card_image_url, selfie_image_url, approval_status, registration_complete, status, is_online')
+          .select('full_name, phone, id_card_image_url, selfie_image_url, approval_status, registration_complete, status, is_online, instapay_number, cash_number')
           .eq('id', user.id)
           .single();
         profile = result.data;
@@ -421,6 +426,26 @@ export default function DriverDashboardScreen() {
           previousApprovalStatusRef.current = currentStatus;
         }
         setDriverProfile(profile);
+
+        // جلب معلومات الدفع
+        setInstapayNumber(profile.instapay_number || '');
+        setCashNumber(profile.cash_number || '');
+
+        // جلب رصيد المحفظة من wallets
+        try {
+          const { data: walletData, error: walletError } = await supabase
+            .from('wallets')
+            .select('amount')
+            .eq('driver_id', user.id)
+            .eq('type', 'earning');
+
+          if (!walletError && walletData) {
+            const balance = walletData.reduce((sum, item) => sum + (item.amount || 0), 0);
+            setWalletBalance(balance);
+          }
+        } catch (walletErr) {
+          console.error('Error loading wallet balance:', walletErr);
+        }
         // تحديث is_online فقط إذا كان موجوداً وليس null
         // هذا يمنع إعادة تعيين الحالة إلى false/null عند تحميل الصفحة
         console.log('DriverDashboard: is_online from profile:', profile.is_online, 'current isOnline state:', isOnline, 'lastKnownOnlineStatusRef:', lastKnownOnlineStatusRef.current);
@@ -1002,6 +1027,142 @@ export default function DriverDashboardScreen() {
           </View>
         )}
 
+        {/* قسم المحفظة وطرق الدفع */}
+        {driverProfile && (
+          <View style={styles.profileCard}>
+            <View style={styles.profileHeader}>
+              <Ionicons name="wallet" size={24} color="#007AFF" />
+              <Text style={styles.profileTitle}>المحفظة وطرق الدفع</Text>
+              <TouchableOpacity
+                onPress={() => setEditingPaymentLinks(!editingPaymentLinks)}
+                style={styles.editButton}
+              >
+                <Ionicons 
+                  name={editingPaymentLinks ? "checkmark" : "pencil"} 
+                  size={20} 
+                  color="#007AFF" 
+                />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.walletCard}>
+              <View style={styles.walletHeader}>
+                <Ionicons name="wallet" size={24} color="#34C759" />
+                <Text style={styles.walletTitle}>رصيد المحفظة</Text>
+              </View>
+              <Text style={styles.walletBalance}>
+                {walletBalance.toFixed(2)} جنيه
+              </Text>
+              <Text style={styles.walletSubtext}>
+                الرصيد المستحق من الرحلات المكتملة
+              </Text>
+            </View>
+
+            <View style={styles.socialLinksCard}>
+              <View style={styles.socialLinkRow}>
+                <View style={styles.socialLinkHeader}>
+                  <Ionicons name="card" size={20} color="#007AFF" />
+                  <Text style={styles.socialLinkLabel}>انستاباي</Text>
+                </View>
+                {editingPaymentLinks ? (
+                  <TextInput
+                    style={styles.socialLinkInput}
+                    value={instapayNumber}
+                    onChangeText={setInstapayNumber}
+                    placeholder="رقم انستاباي"
+                    placeholderTextColor="#999"
+                    textAlign="right"
+                    keyboardType="numeric"
+                  />
+                ) : (
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (instapayNumber && Platform.OS === 'web' && typeof window !== 'undefined') {
+                        navigator.clipboard?.writeText(instapayNumber);
+                        showSimpleAlert('نجح', 'تم نسخ رقم انستاباي', 'success');
+                      }
+                    }}
+                    disabled={!instapayNumber}
+                  >
+                    <Text style={[
+                      styles.socialLinkValue,
+                      !instapayNumber && styles.socialLinkValueEmpty
+                    ]}>
+                      {instapayNumber || 'غير محدد'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              <View style={styles.socialLinkRow}>
+                <View style={styles.socialLinkHeader}>
+                  <Ionicons name="cash" size={20} color="#FF9500" />
+                  <Text style={styles.socialLinkLabel}>كاش</Text>
+                </View>
+                {editingPaymentLinks ? (
+                  <TextInput
+                    style={styles.socialLinkInput}
+                    value={cashNumber}
+                    onChangeText={setCashNumber}
+                    placeholder="رقم كاش أو رابط"
+                    placeholderTextColor="#999"
+                    textAlign="right"
+                  />
+                ) : (
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (cashNumber) {
+                        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                          if (cashNumber.startsWith('http')) {
+                            window.open(cashNumber, '_blank');
+                          } else {
+                            // نسخ الرقم
+                            navigator.clipboard?.writeText(cashNumber);
+                            showSimpleAlert('نجح', 'تم نسخ الرقم', 'success');
+                          }
+                        }
+                      }
+                    }}
+                    disabled={!cashNumber}
+                  >
+                    <Text style={[
+                      styles.socialLinkValue,
+                      !cashNumber && styles.socialLinkValueEmpty
+                    ]}>
+                      {cashNumber || 'غير محدد'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+
+            {editingPaymentLinks && (
+              <TouchableOpacity
+                style={styles.saveSocialButton}
+                onPress={async () => {
+                  try {
+                    const { error } = await supabase
+                      .from('profiles')
+                      .update({
+                        instapay_number: instapayNumber || null,
+                        cash_number: cashNumber || null,
+                      })
+                      .eq('id', user?.id);
+
+                    if (error) throw error;
+                    setEditingPaymentLinks(false);
+                    showSimpleAlert('نجح', 'تم حفظ البيانات بنجاح', 'success');
+                  } catch (error: any) {
+                    showSimpleAlert('خطأ', error.message || 'فشل حفظ البيانات', 'error');
+                  }
+                }}
+              >
+                <Text style={styles.saveSocialButtonText}>حفظ</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
         <View style={styles.statsContainer}>
           <View style={styles.statCard}>
             <Ionicons name="checkmark-circle" size={32} color="#34C759" />
@@ -1483,6 +1644,92 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   orderTypeOptionDescription: {
     fontSize: responsive.getResponsiveFontSize(14),
     color: '#666',
+  },
+  walletCard: {
+    backgroundColor: '#E8F5E9',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#34C759',
+  },
+  walletHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  walletTitle: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+    color: '#1a1a1a',
+  },
+  walletBalance: {
+    fontSize: responsive.getResponsiveFontSize(28),
+    fontWeight: 'bold',
+    color: '#34C759',
+    marginBottom: 4,
+  },
+  walletSubtext: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    color: '#666',
+  },
+  socialLinksCard: {
+    backgroundColor: '#f9f9f9',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  socialLinkRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  socialLinkHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  socialLinkLabel: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+    color: '#1a1a1a',
+  },
+  socialLinkValue: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  socialLinkValueEmpty: {
+    color: '#999',
+    fontStyle: 'italic',
+  },
+  socialLinkInput: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 10,
+    fontSize: responsive.getResponsiveFontSize(14),
+    textAlign: 'right',
+    marginLeft: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  saveSocialButton: {
+    backgroundColor: '#007AFF',
+    borderRadius: 12,
+    padding: 14,
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  saveSocialButtonText: {
+    color: '#fff',
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
   },
 });
 

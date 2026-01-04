@@ -62,44 +62,44 @@ export default function DriverMyOrdersScreen() {
 
     if (!confirmed) return;
 
-    try {
-      // استخدام Edge Function لتحديث الطلب (لتجاوز RLS)
-      const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-order', {
-        body: {
-          orderId: order.id,
-          status: 'accepted',
-          driverId: user?.id,
-          negotiatedPrice: order.negotiated_price || order.total_fee,
-        },
-      });
+            try {
+              // استخدام Edge Function لتحديث الطلب (لتجاوز RLS)
+              const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-order', {
+                body: {
+                  orderId: order.id,
+                  status: 'accepted',
+                  driverId: user?.id,
+                  negotiatedPrice: order.negotiated_price || order.total_fee,
+                },
+              });
 
-      if (edgeFunctionError) {
-        console.error('Error updating order via Edge Function:', edgeFunctionError);
-        throw edgeFunctionError;
-      }
+              if (edgeFunctionError) {
+                console.error('Error updating order via Edge Function:', edgeFunctionError);
+                throw edgeFunctionError;
+              }
 
-      if (!edgeFunctionData || !edgeFunctionData.success) {
-        console.error('Edge Function returned error:', edgeFunctionData?.error);
-        throw new Error(edgeFunctionData?.error || 'فشل قبول الطلب');
-      }
+              if (!edgeFunctionData || !edgeFunctionData.success) {
+                console.error('Edge Function returned error:', edgeFunctionData?.error);
+                throw new Error(edgeFunctionData?.error || 'فشل قبول الطلب');
+              }
 
-      // إشعار العميل
-      if (order.customer_id) {
-        await createNotification({
-          user_id: order.customer_id,
-          title: 'تم قبول طلبك',
-          message: `تم قبول طلبك وسيتم البدء في التوصيل قريباً.`,
-          type: 'success',
-          order_id: order.id,
-        });
-      }
+              // إشعار العميل
+              if (order.customer_id) {
+                await createNotification({
+                  user_id: order.customer_id,
+                  title: 'تم قبول طلبك',
+                  message: `تم قبول طلبك وسيتم البدء في التوصيل قريباً.`,
+                  type: 'success',
+                  order_id: order.id,
+                });
+              }
 
       showToast('تم قبول الطلب بنجاح', 'success');
-      reload();
-    } catch (error: any) {
-      console.error('Error accepting order:', error);
+              reload();
+            } catch (error: any) {
+              console.error('Error accepting order:', error);
       showToast(error.message || 'فشل قبول الطلب', 'error');
-    }
+            }
   };
 
   // دالة التفاوض
@@ -124,64 +124,64 @@ export default function DriverMyOrdersScreen() {
 
     if (!confirmed) return;
 
-    try {
-      // استخدام Edge Function لتحديث الطلب (لتجاوز RLS)
-      if (order.status === 'accepted') {
-        // إذا كان الطلب مقبولاً، نعيده إلى pending ونزيل driver_id
-        const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-order', {
-          body: {
-            orderId: order.id,
-            status: 'pending',
-            driverId: null,
-          },
-        });
+            try {
+              // استخدام Edge Function لتحديث الطلب (لتجاوز RLS)
+              if (order.status === 'accepted') {
+                // إذا كان الطلب مقبولاً، نعيده إلى pending ونزيل driver_id
+                const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-order', {
+                  body: {
+                    orderId: order.id,
+                    status: 'pending',
+                    driverId: null,
+                  },
+                });
 
-        if (edgeFunctionError) {
-          console.error('Error updating order via Edge Function:', edgeFunctionError);
-          throw edgeFunctionError;
-        }
+                if (edgeFunctionError) {
+                  console.error('Error updating order via Edge Function:', edgeFunctionError);
+                  throw edgeFunctionError;
+                }
 
-        if (!edgeFunctionData || !edgeFunctionData.success) {
-          console.error('Edge Function returned error:', edgeFunctionData?.error);
-          throw new Error(edgeFunctionData?.error || 'فشل رفض الطلب');
-        }
+                if (!edgeFunctionData || !edgeFunctionData.success) {
+                  console.error('Edge Function returned error:', edgeFunctionData?.error);
+                  throw new Error(edgeFunctionData?.error || 'فشل رفض الطلب');
+                }
 
-        // إشعار العميل
-        if (order.customer_id) {
-          await createNotification({
-            user_id: order.customer_id,
-            title: 'تم رفض الطلب',
-            message: `تم رفض الطلب من قبل السائق. سيتم البحث عن سائق آخر.`,
-            type: 'warning',
-            order_id: order.id,
-          });
-        }
-      } else {
-        // للطلبات pending، نزيل driver_id فقط
-        const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-order', {
-          body: {
-            orderId: order.id,
-            driverId: null,
-          },
-        });
+                // إشعار العميل
+                if (order.customer_id) {
+                  await createNotification({
+                    user_id: order.customer_id,
+                    title: 'تم رفض الطلب',
+                    message: `تم رفض الطلب من قبل السائق. سيتم البحث عن سائق آخر.`,
+                    type: 'warning',
+                    order_id: order.id,
+                  });
+                }
+              } else {
+                // للطلبات pending، نزيل driver_id فقط
+                const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-order', {
+                  body: {
+                    orderId: order.id,
+                    driverId: null,
+                  },
+                });
 
-        if (edgeFunctionError) {
-          console.error('Error updating order via Edge Function:', edgeFunctionError);
-          throw edgeFunctionError;
-        }
+                if (edgeFunctionError) {
+                  console.error('Error updating order via Edge Function:', edgeFunctionError);
+                  throw edgeFunctionError;
+                }
 
-        if (!edgeFunctionData || !edgeFunctionData.success) {
-          console.error('Edge Function returned error:', edgeFunctionData?.error);
-          throw new Error(edgeFunctionData?.error || 'فشل رفض الطلب');
-        }
-      }
+                if (!edgeFunctionData || !edgeFunctionData.success) {
+                  console.error('Edge Function returned error:', edgeFunctionData?.error);
+                  throw new Error(edgeFunctionData?.error || 'فشل رفض الطلب');
+                }
+              }
 
       showToast('تم رفض الطلب', 'success');
-      reload();
-    } catch (error: any) {
-      console.error('Error cancelling order:', error);
+              reload();
+            } catch (error: any) {
+              console.error('Error cancelling order:', error);
       showToast(error.message || 'فشل رفض الطلب', 'error');
-    }
+            }
   };
 
   if (loading) {

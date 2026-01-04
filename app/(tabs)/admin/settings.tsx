@@ -107,6 +107,40 @@ export default function AdminSettingsScreen() {
     showSimpleAlert('تم', 'تم إعادة تعيين القيم', 'success');
   };
 
+  const handleSettleCommissions = async () => {
+    if (!user) return;
+
+    try {
+      setSaving(true);
+
+      // استدعاء Edge Function لتوريد العمولات
+      const { data, error } = await supabase.functions.invoke('settle-commissions', {
+        body: {
+          force: true, // فرض التوريد حتى لو لم يكن يوم التوريد
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data || !data.success) {
+        throw new Error(data?.error || 'فشل توريد العمولات');
+      }
+
+      showSimpleAlert(
+        'نجح',
+        `✅ تم توريد العمولات بنجاح\nعدد السجلات: ${data.settledCount}\nإجمالي العمولة: ${data.totalCommission?.toFixed(2) || 0} جنيه`,
+        'success'
+      );
+    } catch (error: any) {
+      console.error('Error settling commissions:', error);
+      showSimpleAlert('خطأ', error.message || 'فشل توريد العمولات', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const renderSetting = (setting: Setting) => {
     const value = editedValues[setting.setting_key] || '';
     const hasChanged = value !== setting.setting_value;
@@ -156,6 +190,16 @@ export default function AdminSettingsScreen() {
             ⏱️ المدة التي ينتظرها النظام للحصول على رد من السائق قبل إعادة المحاولة
           </Text>
         )}
+        {setting.setting_key === 'commission_rate' && (
+          <Text style={styles.helperText}>
+            💰 نسبة العمولة المئوية التي تأخذها الإدارة من كل تحصيل (10 = 10%)
+          </Text>
+        )}
+        {setting.setting_key === 'settlement_day' && (
+          <Text style={styles.helperText}>
+            📅 يوم التوريد من كل شهر (1-28) - اليوم الذي يتم فيه خصم العمولات من محافظ السائقين
+          </Text>
+        )}
       </View>
     );
   };
@@ -200,9 +244,19 @@ export default function AdminSettingsScreen() {
         {Object.entries(groupedSettings).map(([category, categorySettings]) => (
           <View key={category} style={styles.categoryContainer}>
             <Text style={styles.categoryTitle}>
-              {category === 'orders' ? '📋 إعدادات الطلبات' : category}
+              {category === 'orders' ? '📋 إعدادات الطلبات' : category === 'commission' ? '💰 إعدادات العمولة والتوريد' : category}
             </Text>
             {categorySettings.map(renderSetting)}
+            {category === 'commission' && (
+              <TouchableOpacity
+                style={styles.settleButton}
+                onPress={handleSettleCommissions}
+                disabled={saving}
+              >
+                <Ionicons name="cash" size={20} color="#fff" />
+                <Text style={styles.settleButtonText}>توريد العمولات الآن</Text>
+              </TouchableOpacity>
+            )}
           </View>
         ))}
 
@@ -377,6 +431,22 @@ const styles = StyleSheet.create({
     borderColor: '#FF9500',
   },
   buttonText: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+    color: '#fff',
+  },
+  settleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#34C759',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    marginTop: 12,
+  },
+  settleButtonText: {
     fontSize: responsive.getResponsiveFontSize(16),
     fontWeight: '600',
     color: '#fff',
