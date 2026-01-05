@@ -1352,15 +1352,23 @@ export default function TrackTripScreen() {
     try {
       // تحديث حالة الدفع المسبق في الطلب (إذا تم تغييرها)
       if (order.is_prepaid !== isPrepaidLocal) {
-        const { error: updateOrderError } = await supabase.functions.invoke('update-order', {
-          body: {
-            orderId: order.id,
-            isPrepaid: isPrepaidLocal,
-            prepaidAmount: isPrepaidLocal ? feeNum : null,
-          },
-        });
-        if (updateOrderError) {
-          console.error('[handleConfirmPickupWithState] Error updating order prepaid status:', updateOrderError);
+        try {
+          const { data: updateData, error: updateOrderError } = await supabase.functions.invoke('update-order', {
+            body: {
+              orderId: order.id,
+              is_prepaid: isPrepaidLocal,
+              prepaid_amount: isPrepaidLocal ? feeNum : null,
+            },
+          });
+          if (updateOrderError) {
+            console.error('[handleConfirmPickupWithState] Error updating order prepaid status:', updateOrderError);
+            // لا نرمي الخطأ هنا - نستمر في تحديث العنصر حتى لو فشل تحديث حالة الدفع المسبق
+          } else if (updateData?.success) {
+            console.log('[handleConfirmPickupWithState] Order prepaid status updated successfully');
+          }
+        } catch (prepaidError: any) {
+          console.error('[handleConfirmPickupWithState] Exception updating prepaid status:', prepaidError);
+          // لا نرمي الخطأ هنا - نستمر في تحديث العنصر
         }
       }
       

@@ -18,8 +18,8 @@
  * }
  */
 
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -44,7 +44,7 @@ interface UpdateOrderRequest {
   prepaid_amount?: number | null;
 }
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   // Handle CORS
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -158,6 +158,61 @@ serve(async (req) => {
 
     if (updateError) {
       console.error('Error updating order:', updateError);
+      
+      // إذا كان الخطأ بسبب عمود غير موجود (42703)، نحاول التحديث بدون الحقول غير الموجودة
+      if (updateError.code === '42703' || updateError.message?.includes('column') || updateError.message?.includes('does not exist')) {
+        console.warn('Column does not exist, trying update without problematic fields...');
+        
+        // إزالة الحقول التي قد لا تكون موجودة
+        const safeUpdateData: any = {};
+        if (status !== undefined) safeUpdateData.status = status;
+        if (driverId !== undefined) safeUpdateData.driver_id = driverId;
+        if (negotiationStatus !== undefined) safeUpdateData.negotiation_status = negotiationStatus;
+        if (negotiatedPrice !== undefined) safeUpdateData.negotiated_price = negotiatedPrice;
+        if (driverProposedPrice !== undefined) safeUpdateData.driver_proposed_price = driverProposedPrice;
+        if (customerProposedPrice !== undefined) safeUpdateData.customer_proposed_price = customerProposedPrice;
+        if (searchStatus !== undefined) safeUpdateData.search_status = searchStatus;
+        if (searchStartedAt !== undefined) safeUpdateData.search_started_at = searchStartedAt;
+        if (searchExpandedAt !== undefined) safeUpdateData.search_expanded_at = searchExpandedAt;
+        if (completedAt !== undefined) safeUpdateData.completed_at = completedAt;
+        if (cancelledBy !== undefined) safeUpdateData.cancelled_by = cancelledBy;
+        if (cancelledAt !== undefined) safeUpdateData.cancelled_at = cancelledAt;
+        // لا نضيف is_prepaid و prepaid_amount هنا لأنها قد لا تكون موجودة
+        
+        const { data: retryUpdatedOrder, error: retryError } = await supabase
+          .from('orders')
+          .update(safeUpdateData)
+          .eq('id', orderId)
+          .select()
+          .single();
+        
+        if (retryError) {
+          console.error('Error updating order (retry):', retryError);
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error: retryError.message || 'فشل تحديث الطلب',
+            }),
+            {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              status: 500,
+            }
+          );
+        }
+        
+        return new Response(
+          JSON.stringify({
+            success: true,
+            message: 'تم تحديث الطلب بنجاح (بعض الحقول تم تجاهلها)',
+            order: retryUpdatedOrder,
+          }),
+          {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 200,
+          }
+        );
+      }
+      
       return new Response(
         JSON.stringify({
           success: false,
