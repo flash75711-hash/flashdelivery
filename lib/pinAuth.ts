@@ -91,10 +91,12 @@ export async function loginWithPin(
   pin: string
 ): Promise<PinAuthResult> {
   try {
+    console.log('🔐 [loginWithPin] Starting login process...');
     const formattedPhone = formatPhone(phone);
     
     // التحقق من صحة المدخلات
     if (!isValidPhone(formattedPhone)) {
+      console.log('❌ [loginWithPin] Invalid phone number');
       return {
         success: false,
         error: 'رقم الموبايل غير صحيح',
@@ -102,20 +104,109 @@ export async function loginWithPin(
     }
     
     if (!isValidPin(pin)) {
+      console.log('❌ [loginWithPin] Invalid PIN format');
       return {
         success: false,
         error: 'رمز PIN يجب أن يكون 6 أرقام',
       };
     }
     
-    // البحث عن المستخدم في profiles
-    const { data: profile, error: profileError } = await supabase
+    console.log('✅ [loginWithPin] Input validation passed');
+    
+    // استخدام Edge Function لتسجيل الدخول (لتجنب مشاكل RLS و 406)
+    try {
+      console.log('🌐 [loginWithPin] Attempting to use Edge Function...');
+      
+      // إضافة timeout للـ Edge Function call (5 ثوان - أسرع للاستجابة)
+      const edgeFunctionPromise = supabase.functions.invoke('login-with-pin', {
+        body: {
+          phone: formattedPhone,
+          pin: pin,
+        },
+      });
+      
+      const timeoutPromise = new Promise<{ data: null; error: { message: string } }>((resolve) =>
+        setTimeout(() => resolve({ data: null, error: { message: 'Edge Function timeout after 5 seconds' } }), 5000)
+      );
+      
+      const result = await Promise.race([edgeFunctionPromise, timeoutPromise]);
+      const { data, error: functionError } = result;
+
+      console.log('📊 [loginWithPin] Edge Function response:', {
+        hasData: !!data,
+        success: data?.success,
+        hasUser: !!data?.user,
+        error: data?.error || functionError?.message,
+        isTimeout: functionError?.message?.includes('timeout'),
+      });
+
+      // إذا كان timeout، نتابع بالطريقة القديمة
+      if (functionError?.message?.includes('timeout')) {
+        console.warn('⚠️ [loginWithPin] Edge Function timeout, falling back to direct query');
+        // نتابع للكود التالي (fallback)
+      } else if (!functionError && data && data.success) {
+        console.log('✅ [loginWithPin] Edge Function login successful');
+        return {
+          success: true,
+          user: {
+            id: data.user.id,
+            phone: data.user.phone,
+            role: data.user.role as UserRole,
+            full_name: data.user.full_name,
+            email: data.user.email,
+          },
+        };
+      } else if (data && !data.success) {
+        // إذا كان هناك خطأ، نرجع الخطأ
+        console.log('❌ [loginWithPin] Edge Function returned error:', data.error);
+        return {
+          success: false,
+          error: data.error,
+          lockedUntil: data.lockedUntil ? new Date(data.lockedUntil) : undefined,
+          remainingAttempts: data.remainingAttempts,
+        };
+      } else if (functionError) {
+        // إذا كان هناك خطأ في الاتصال، نتابع بالطريقة القديمة
+        console.warn('⚠️ [loginWithPin] Edge Function failed, falling back to direct query:', functionError.message);
+        // نتابع للكود التالي (fallback)
+      }
+    } catch (functionError: any) {
+      // Edge Function غير متاح أو فشل، نتابع بالطريقة القديمة
+      console.warn('⚠️ [loginWithPin] Edge Function not available, using direct query:', functionError?.message || functionError);
+    }
+    
+    // Fallback: البحث عن المستخدم في profiles مباشرة (إذا فشل Edge Function)
+    try {
+      const profilePromise = supabase
       .from('profiles')
       .select('id, phone, pin_hash, role, full_name, email, failed_attempts, locked_until')
       .eq('phone', formattedPhone)
       .single();
     
+      const profileTimeoutPromise = new Promise<{ data: null; error: { code: string; message: string } }>((resolve) =>
+        setTimeout(() => resolve({ data: null, error: { code: 'TIMEOUT', message: 'Profile query timeout after 5 seconds' } }), 5000)
+      );
+      
+      const profileResult = await Promise.race([profilePromise, profileTimeoutPromise]);
+      const { data: profile, error: profileError } = profileResult;
+
+      if (profileError?.code === 'TIMEOUT') {
+        console.error('⚠️ [loginWithPin] Profile query timeout');
+        return {
+          success: false,
+          error: 'انتهت مهلة الاتصال. يرجى المحاولة مرة أخرى',
+        };
+      }
+      
     if (profileError || !profile) {
+        console.error('⚠️ [loginWithPin] Profile query error:', profileError);
+        // إذا كان الخطأ 406 أو مشكلة RLS، نعطي رسالة واضحة
+        if (profileError?.code === 'PGRST301' || profileError?.message?.includes('406')) {
+          return {
+            success: false,
+            error: 'خطأ في الاتصال. يرجى المحاولة مرة أخرى',
+          };
+        }
       return {
         success: false,
         error: 'رقم الموبايل غير مسجل',
@@ -193,6 +284,7 @@ export async function loginWithPin(
     // ملاحظة: في نظام PIN، قد لا يكون هناك session في auth.users
     // لذلك نرجع user مباشرة من profiles
     
+      console.log('✅ [loginWithPin] Login successful via fallback');
     return {
       success: true,
       user: {
@@ -203,8 +295,15 @@ export async function loginWithPin(
         email: profile.email || undefined,
       },
     };
+    } catch (fallbackError: any) {
+      console.error('⚠️ [loginWithPin] Fallback error:', fallbackError);
+      return {
+        success: false,
+        error: fallbackError?.message || 'حدث خطأ أثناء تسجيل الدخول. يرجى المحاولة مرة أخرى',
+      };
+    }
   } catch (error: any) {
-    console.error('Login error:', error);
+    console.error('❌ [loginWithPin] Unexpected error:', error);
     return {
       success: false,
       error: error.message || 'حدث خطأ أثناء تسجيل الدخول',

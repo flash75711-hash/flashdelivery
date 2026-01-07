@@ -1,9 +1,18 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { Session, User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase, getUserWithRole, getUserWithRoleFromSession, isRegistrationComplete, User, UserRole, getUserFromLocalStorage } from '@/lib/supabase';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
+
+// TypeScript interface لـ AndroidBridge
+declare global {
+  interface Window {
+    AndroidBridge?: {
+      getFCMToken: () => string | null | Promise<string | null>;
+    };
+  }
+}
 
 interface AuthContextType {
   session: Session | null;
@@ -55,6 +64,562 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log('✅ loadUser completed');
     }
   }, []);
+
+  // دالة لجلب FCM token من AndroidBridge وحفظه في Supabase
+  const updateFCMToken = useCallback(async (userId: string, testToken?: string) => {
+    console.log('📱 [updateFCMToken] ========== Starting FCM Token Update ==========');
+    console.log('📱 [updateFCMToken] User ID:', userId);
+    console.log('📱 [updateFCMToken] Test mode:', !!testToken);
+    
+    // التحقق من أننا في WebView Android
+    if (typeof window === 'undefined') {
+      console.log('❌ [updateFCMToken] window is undefined, skipping');
+      return;
+    }
+
+    let fcmToken: string | null = null;
+
+    // إذا كان هناك testToken، نستخدمه مباشرة (للتجربة)
+    if (testToken) {
+      console.log('🧪 [updateFCMToken] Using test token for debugging');
+      fcmToken = testToken;
+    } else {
+      // التحقق من وجود AndroidBridge مع logging مفصل
+      console.log('📱 [updateFCMToken] Checking AndroidBridge...');
+      console.log('📱 [updateFCMToken] window type:', typeof window);
+      console.log('📱 [updateFCMToken] window.AndroidBridge type:', typeof window.AndroidBridge);
+      console.log('📱 [updateFCMToken] window.AndroidBridge value:', window.AndroidBridge);
+      
+      if (!window.AndroidBridge) {
+        console.warn('❌ [updateFCMToken] AndroidBridge not available');
+        console.warn('⚠️ [updateFCMToken] This might be because:');
+        console.warn('   - Not running in Android WebView');
+        console.warn('   - AndroidBridge not injected yet');
+        console.warn('   - Running in browser instead of WebView');
+        console.warn('📱 [updateFCMToken] ========== Aborting ==========');
+        return;
+      }
+
+    console.log('✅ [updateFCMToken] AndroidBridge object found!');
+    console.log('📱 [updateFCMToken] AndroidBridge keys:', Object.keys(window.AndroidBridge));
+    console.log('📱 [updateFCMToken] getFCMToken type:', typeof window.AndroidBridge.getFCMToken);
+
+    if (!window.AndroidBridge.getFCMToken) {
+      console.warn('❌ [updateFCMToken] getFCMToken method not available');
+      console.warn('⚠️ [updateFCMToken] Available methods:', Object.keys(window.AndroidBridge));
+      console.warn('📱 [updateFCMToken] ========== Aborting ==========');
+      return;
+    }
+
+      console.log('✅ [updateFCMToken] AndroidBridge is available and ready');
+
+      try {
+        console.log('📱 [updateFCMToken] Attempting to get FCM token from AndroidBridge...');
+        
+        // محاولة جلب التوكن مع معالجة التأخير المحتمل
+        try {
+          // إذا كانت getFCMToken دالة async، نستخدم await
+          const tokenResult = window.AndroidBridge.getFCMToken();
+          console.log('📱 [updateFCMToken] getFCMToken called, result type:', typeof tokenResult, tokenResult instanceof Promise ? 'Promise' : 'direct');
+          
+          if (tokenResult instanceof Promise) {
+            // إضافة timeout لمدة 5 ثوانٍ
+            const timeoutPromise = new Promise<string | null>((_, reject) =>
+              setTimeout(() => reject(new Error('FCM token timeout after 5 seconds')), 5000)
+            );
+            fcmToken = await Promise.race([tokenResult, timeoutPromise]);
+          } else {
+            fcmToken = tokenResult;
+          }
+        } catch (error) {
+          console.error('❌ [updateFCMToken] Error getting FCM token:', error);
+          // إذا فشل، نجرب مرة أخرى بعد ثانية واحدة
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          try {
+            console.log('📱 [updateFCMToken] Retrying to get FCM token...');
+            const retryResult = window.AndroidBridge.getFCMToken();
+            if (retryResult instanceof Promise) {
+              const timeoutPromise = new Promise<string | null>((_, reject) =>
+                setTimeout(() => reject(new Error('FCM token retry timeout')), 3000)
+              );
+              fcmToken = await Promise.race([retryResult, timeoutPromise]);
+            } else {
+              fcmToken = retryResult;
+            }
+          } catch (retryError) {
+            console.error('❌ [updateFCMToken] Error getting FCM token on retry:', retryError);
+            return;
+          }
+        }
+
+        if (!fcmToken || fcmToken.trim() === '') {
+          console.warn('⚠️ [updateFCMToken] FCM token is empty or null');
+          return;
+        }
+
+        console.log('✅ [updateFCMToken] FCM token received:', fcmToken.substring(0, 20) + '...');
+      } catch (error) {
+        console.error('❌ [updateFCMToken] Error in token retrieval:', error);
+        return;
+      }
+    }
+
+    // حفظ التوكن في Supabase - جدول profiles
+    try {
+      // استخدام Edge Function مباشرة لتحديث FCM token في جدول profiles
+      // هذا يتجاوز RLS ويعمل حتى بدون session (مثل تسجيل الدخول بـ PIN)
+      console.log('📱 [updateFCMToken] ========== Saving to profiles table ==========');
+      console.log('📱 [updateFCMToken] User ID:', userId);
+      console.log('📱 [updateFCMToken] FCM Token (first 30 chars):', fcmToken.substring(0, 30) + '...');
+      console.log('📱 [updateFCMToken] FCM Token length:', fcmToken.length);
+      console.log('📱 [updateFCMToken] Calling Edge Function: update-fcm-token');
+      console.log('📱 [updateFCMToken] Request payload:', {
+        user_id: userId,
+        fcm_token: fcmToken.substring(0, 30) + '...',
+        fcm_token_length: fcmToken.length,
+      });
+      
+      const edgeFunctionStartTime = Date.now();
+      let edgeData: any = null;
+      let edgeError: any = null;
+      
+      try {
+        // الحصول على Supabase URL من client
+        const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+        const edgeFunctionUrl = `${supabaseUrl}/functions/v1/update-fcm-token`;
+        
+        console.log('📱 [updateFCMToken] About to invoke Edge Function...');
+        console.log('📱 [updateFCMToken] Edge Function URL:', edgeFunctionUrl);
+        console.log('📱 [updateFCMToken] Supabase URL configured:', !!supabaseUrl);
+        console.log('📱 [updateFCMToken] Request payload:', {
+          user_id: userId,
+          fcm_token: fcmToken.substring(0, 30) + '...',
+          fcm_token_length: fcmToken.length,
+        });
+        
+        const result = await supabase.functions.invoke('update-fcm-token', {
+          body: { user_id: userId, fcm_token: fcmToken },
+        });
+        
+        console.log('📱 [updateFCMToken] Edge Function invoke completed');
+        console.log('📱 [updateFCMToken] Full result object:', {
+          hasData: !!result.data,
+          hasError: !!result.error,
+          dataKeys: result.data ? Object.keys(result.data) : [],
+          errorKeys: result.error ? Object.keys(result.error) : [],
+        });
+        
+        edgeData = result.data;
+        edgeError = result.error;
+      } catch (invokeError: any) {
+        console.error('❌ [updateFCMToken] Exception during Edge Function invoke:', invokeError);
+        console.error('❌ [updateFCMToken] Error type:', invokeError?.constructor?.name);
+        console.error('❌ [updateFCMToken] Error message:', invokeError?.message);
+        console.error('❌ [updateFCMToken] Error stack:', invokeError?.stack);
+        edgeError = invokeError;
+      }
+      
+      const edgeFunctionDuration = Date.now() - edgeFunctionStartTime;
+      console.log('📱 [updateFCMToken] Edge Function call completed in', edgeFunctionDuration, 'ms');
+      
+      console.log('📱 [updateFCMToken] Edge Function response received');
+      console.log('📱 [updateFCMToken] Response has error:', !!edgeError);
+      console.log('📱 [updateFCMToken] Response has data:', !!edgeData);
+      
+      if (edgeError) {
+        console.error('❌ [updateFCMToken] Edge Function error:', edgeError);
+        console.error('❌ [updateFCMToken] Error details:', {
+          message: edgeError.message,
+          context: edgeError.context,
+          name: edgeError.name,
+          code: edgeError.code,
+          status: edgeError.status,
+        });
+        throw edgeError;
+      } else {
+        console.log('📱 [updateFCMToken] Edge Function response data:', edgeData);
+        // التحقق من أن البيانات تم حفظها بنجاح
+        if (edgeData && edgeData.success) {
+          console.log('✅ [updateFCMToken] ========== SUCCESS ==========');
+          console.log('✅ [updateFCMToken] FCM Token saved successfully in profiles table!');
+          console.log('✅ [updateFCMToken] Saved data:', {
+            user_id: edgeData.data?.user_id,
+            fcm_token: edgeData.data?.fcm_token ? edgeData.data.fcm_token.substring(0, 30) + '...' : 'N/A',
+          });
+          console.log('✅ [updateFCMToken] You can verify in Supabase Dashboard:');
+          console.log('   - Table: profiles');
+          console.log('   - Column: fcm_token');
+          console.log('   - Filter: id =', userId);
+        } else {
+          console.warn('⚠️ [updateFCMToken] Edge Function returned but success flag is false');
+          console.warn('⚠️ [updateFCMToken] Response:', edgeData);
+        }
+      }
+    } catch (error) {
+      console.error('❌ [updateFCMToken] Error saving FCM token to profiles:', error);
+      console.error('❌ [updateFCMToken] Error type:', (error as any)?.constructor?.name);
+      console.error('❌ [updateFCMToken] Error message:', (error as any)?.message);
+      console.error('❌ [updateFCMToken] Error stack:', (error as any)?.stack);
+      throw error;
+    } finally {
+      console.log('📱 [updateFCMToken] ========== Process Complete ==========');
+    }
+  }, []);
+
+  // دالة لاختبار Edge Function يدوياً (للتطوير والتصحيح)
+  const testFCMTokenUpdate = useCallback(async (testToken: string) => {
+    console.log('🧪 [testFCMTokenUpdate] ========== CALLED ==========');
+    console.log('🧪 [testFCMTokenUpdate] Stack trace:', new Error().stack);
+    
+    if (!user?.id) {
+      console.error('❌ [testFCMTokenUpdate] No user logged in');
+      return;
+    }
+    console.log('🧪 [testFCMTokenUpdate] Testing FCM token update with test token...');
+    try {
+      await updateFCMToken(user.id, testToken);
+      console.log('✅ [testFCMTokenUpdate] Test completed successfully');
+    } catch (error) {
+      console.error('❌ [testFCMTokenUpdate] Test failed:', error);
+    }
+    console.log('🧪 [testFCMTokenUpdate] ========== END ==========');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]); // updateFCMToken مستقرة (dependency array فارغ)
+
+  // دالة لاختبار AndroidBridge.getFCMToken() مباشرة
+  const testAndroidBridge = useCallback(async () => {
+    console.log('🧪 [testAndroidBridge] ========== CALLED ==========');
+    console.log('🧪 [testAndroidBridge] Stack trace:', new Error().stack);
+    console.log('🧪 [testAndroidBridge] Testing AndroidBridge.getFCMToken()...');
+    
+    if (typeof window === 'undefined') {
+      console.error('❌ [testAndroidBridge] window is undefined');
+      return null;
+    }
+
+    if (!window.AndroidBridge) {
+      console.error('❌ [testAndroidBridge] AndroidBridge is not available');
+      console.error('❌ [testAndroidBridge] Make sure you are running in Android WebView');
+      return null;
+    }
+
+    if (typeof window.AndroidBridge.getFCMToken !== 'function') {
+      console.error('❌ [testAndroidBridge] AndroidBridge.getFCMToken is not a function');
+      console.error('❌ [testAndroidBridge] Available methods:', Object.keys(window.AndroidBridge));
+      return null;
+    }
+
+    try {
+      const tokenResult = window.AndroidBridge.getFCMToken();
+      // التعامل مع Promise إذا كان getFCMToken async
+      const token = tokenResult instanceof Promise ? await tokenResult : tokenResult;
+      console.log('✅ [testAndroidBridge] FCM Token retrieved:', token);
+      
+      // إذا كان هناك مستخدم مسجل دخول، احفظ التوكن تلقائياً
+      if (user?.id && token && typeof token === 'string') {
+        console.log('📱 [testAndroidBridge] User is logged in, saving token automatically...');
+        updateFCMToken(user.id, token);
+      }
+      
+      console.log('🧪 [testAndroidBridge] ========== END ==========');
+      return token;
+    } catch (error) {
+      console.error('❌ [testAndroidBridge] Error calling getFCMToken:', error);
+      return null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]); // updateFCMToken مستقرة (dependency array فارغ)
+
+  // جعل دوال الاختبار متاحة في window للاختبار من console
+  // استخدام useRef لتخزين الدوال وتحديثها فقط عند الحاجة
+  const testFCMTokenUpdateRef = useRef(testFCMTokenUpdate);
+  const testAndroidBridgeRef = useRef(testAndroidBridge);
+  const userRef = useRef(user);
+  const isExecutingRef = useRef({ testFCMTokenUpdate: false, testAndroidBridge: false });
+  const windowFunctionsSetupRef = useRef(false);
+  const callCountRef = useRef({ testFCMTokenUpdate: 0, testAndroidBridge: 0 });
+  
+  // تحديث refs عند تغير الدوال
+  testFCMTokenUpdateRef.current = testFCMTokenUpdate;
+  testAndroidBridgeRef.current = testAndroidBridge;
+  userRef.current = user; // تحديث user ref في كل render
+
+  // تحديث window مرة واحدة فقط
+  useEffect(() => {
+    // منع الإعداد المتكرر
+    if (windowFunctionsSetupRef.current) {
+      return;
+    }
+
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    // التحقق من أن الدوال غير موجودة بالفعل
+    if ((window as any).testFCMTokenUpdate && (window as any).testAndroidBridge && (window as any).getUserId) {
+      windowFunctionsSetupRef.current = true;
+      return;
+    }
+
+    console.log('🔧 [Window Functions] Setting up test functions on window object (ONE TIME ONLY)...');
+    windowFunctionsSetupRef.current = true;
+
+    // استخدام wrapper functions مع حماية من الاستدعاء المتكرر
+    (window as any).testFCMTokenUpdate = async (...args: any[]) => {
+      callCountRef.current.testFCMTokenUpdate++;
+      const callNumber = callCountRef.current.testFCMTokenUpdate;
+      const callStack = new Error().stack;
+      
+      console.log(`🔵 [testFCMTokenUpdate] ========== CALL #${callNumber} ==========`);
+      console.log('🔵 [testFCMTokenUpdate] Call stack:', callStack);
+      console.log('🔵 [testFCMTokenUpdate] Args:', args);
+      console.log('🔵 [testFCMTokenUpdate] Already executing?', isExecutingRef.current.testFCMTokenUpdate);
+      console.log('🔵 [testFCMTokenUpdate] Total calls so far:', callNumber);
+      
+      if (isExecutingRef.current.testFCMTokenUpdate) {
+        console.warn('⚠️ [testFCMTokenUpdate] Already executing, skipping call #' + callNumber);
+        return;
+      }
+      
+      isExecutingRef.current.testFCMTokenUpdate = true;
+      try {
+        const func = testFCMTokenUpdateRef.current;
+        if (args.length > 0) {
+          await func(args[0]);
+        } else {
+          await func('test-token-' + Date.now());
+        }
+      } catch (error) {
+        console.error('❌ [testFCMTokenUpdate] Error in call #' + callNumber + ':', error);
+      } finally {
+        isExecutingRef.current.testFCMTokenUpdate = false;
+        console.log(`🔵 [testFCMTokenUpdate] ========== CALL #${callNumber} ENDED ==========`);
+      }
+    };
+    
+    (window as any).testAndroidBridge = async (...args: any[]) => {
+      callCountRef.current.testAndroidBridge++;
+      const callNumber = callCountRef.current.testAndroidBridge;
+      const callStack = new Error().stack;
+      
+      console.log(`🔵 [testAndroidBridge] ========== CALL #${callNumber} ==========`);
+      console.log('🔵 [testAndroidBridge] Call stack:', callStack);
+      console.log('🔵 [testAndroidBridge] Args:', args);
+      console.log('🔵 [testAndroidBridge] Already executing?', isExecutingRef.current.testAndroidBridge);
+      console.log('🔵 [testAndroidBridge] Total calls so far:', callNumber);
+      
+      if (isExecutingRef.current.testAndroidBridge) {
+        console.warn('⚠️ [testAndroidBridge] Already executing, skipping call #' + callNumber);
+        return null;
+      }
+      
+      isExecutingRef.current.testAndroidBridge = true;
+      try {
+        const func = testAndroidBridgeRef.current;
+        const result = await func();
+        console.log(`🔵 [testAndroidBridge] ========== CALL #${callNumber} ENDED ==========`);
+        return result;
+      } catch (error) {
+        console.error('❌ [testAndroidBridge] Error in call #' + callNumber + ':', error);
+        return null;
+      } finally {
+        isExecutingRef.current.testAndroidBridge = false;
+      }
+    };
+
+    // دالة اختبار مباشرة باستخدام fetch (للتشخيص)
+    (window as any).testEdgeFunctionDirectly = async (testToken?: string, userId?: string) => {
+      const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+      const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+      
+      // محاولة الحصول على user ID من عدة مصادر
+      let targetUserId = userId;
+      
+      if (!targetUserId) {
+        // 1. من context (user state) - استخدام ref للحصول على أحدث قيمة
+        targetUserId = userRef.current?.id;
+        if (targetUserId) {
+          console.log('📱 [testEdgeFunctionDirectly] Found user ID from context:', targetUserId);
+        } else {
+          console.log('📱 [testEdgeFunctionDirectly] No user ID in context (user:', userRef.current, ')');
+        }
+      }
+      
+      if (!targetUserId) {
+        // 2. من localStorage (flash_user أولاً، ثم user للتوافق)
+        try {
+          let localUserStr = localStorage.getItem('flash_user');
+          if (!localUserStr) {
+            localUserStr = localStorage.getItem('user');
+          }
+          if (localUserStr) {
+            const localUser = JSON.parse(localUserStr);
+            targetUserId = localUser?.id;
+            if (targetUserId) {
+              console.log('📱 [testEdgeFunctionDirectly] Found user ID from localStorage:', targetUserId);
+            }
+          }
+        } catch (e) {
+          console.error('❌ [testEdgeFunctionDirectly] Error reading localStorage:', e);
+        }
+      }
+      
+      if (!targetUserId) {
+        // 3. من Supabase session
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user?.id) {
+            targetUserId = session.user.id;
+            console.log('📱 [testEdgeFunctionDirectly] Found user ID from session:', targetUserId);
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+      
+      if (!targetUserId) {
+        console.error('❌ [testEdgeFunctionDirectly] No user ID found');
+        console.error('💡 [testEdgeFunctionDirectly] Usage:');
+        console.error('   window.testEdgeFunctionDirectly("test-token", "user-id-here")');
+        console.error('   OR make sure you are logged in first');
+        console.error('   OR check localStorage for user data');
+        return;
+      }
+      
+      if (!supabaseUrl || supabaseUrl === 'https://placeholder.supabase.co') {
+        console.error('❌ [testEdgeFunctionDirectly] Supabase URL not configured');
+        console.error('💡 [testEdgeFunctionDirectly] Check EXPO_PUBLIC_SUPABASE_URL environment variable');
+        return;
+      }
+      
+      const token = testToken || 'test-token-' + Date.now();
+      const edgeFunctionUrl = `${supabaseUrl}/functions/v1/update-fcm-token`;
+      
+      console.log('🧪 [testEdgeFunctionDirectly] ========== Testing Edge Function Directly ==========');
+      console.log('🧪 [testEdgeFunctionDirectly] URL:', edgeFunctionUrl);
+      console.log('🧪 [testEdgeFunctionDirectly] User ID:', targetUserId);
+      console.log('🧪 [testEdgeFunctionDirectly] Test Token:', token);
+      
+      try {
+        console.log('🧪 [testEdgeFunctionDirectly] Sending request...');
+        const requestBody = {
+          user_id: targetUserId,
+          fcm_token: token,
+        };
+        console.log('🧪 [testEdgeFunctionDirectly] Request body:', requestBody);
+        
+        const response = await fetch(edgeFunctionUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${supabaseAnonKey}`,
+            'apikey': supabaseAnonKey,
+          },
+          body: JSON.stringify(requestBody),
+        });
+        
+        console.log('🧪 [testEdgeFunctionDirectly] ========== RESPONSE RECEIVED ==========');
+        console.log('🧪 [testEdgeFunctionDirectly] Response Status:', response.status);
+        console.log('🧪 [testEdgeFunctionDirectly] Response Status Text:', response.statusText);
+        console.log('🧪 [testEdgeFunctionDirectly] Response OK:', response.ok);
+        console.log('🧪 [testEdgeFunctionDirectly] Response Headers:', Object.fromEntries(response.headers.entries()));
+        
+        // قراءة Response كـ text أولاً للتأكد من عدم وجود أخطاء في parsing
+        const responseText = await response.text();
+        console.log('🧪 [testEdgeFunctionDirectly] Response Text (raw):', responseText);
+        
+        let data: any = null;
+        try {
+          data = JSON.parse(responseText);
+          console.log('🧪 [testEdgeFunctionDirectly] Response Data (parsed):', data);
+        } catch (parseError) {
+          console.error('❌ [testEdgeFunctionDirectly] Failed to parse response as JSON:', parseError);
+          console.error('❌ [testEdgeFunctionDirectly] Raw response:', responseText);
+        }
+        
+        if (response.ok && data?.success) {
+          console.log('✅ [testEdgeFunctionDirectly] ========== SUCCESS ==========');
+          console.log('✅ [testEdgeFunctionDirectly] Token saved successfully!');
+          console.log('✅ [testEdgeFunctionDirectly] User ID:', data.data?.user_id);
+          console.log('✅ [testEdgeFunctionDirectly] FCM Token (first 30 chars):', data.data?.fcm_token?.substring(0, 30) + '...');
+          console.log('✅ [testEdgeFunctionDirectly] Check Supabase Dashboard → Edge Functions → update-fcm-token → Logs');
+          console.log('✅ [testEdgeFunctionDirectly] ========== END ==========');
+        } else {
+          console.error('❌ [testEdgeFunctionDirectly] ========== FAILED ==========');
+          console.error('❌ [testEdgeFunctionDirectly] Status:', response.status);
+          console.error('❌ [testEdgeFunctionDirectly] Response:', data);
+          console.error('❌ [testEdgeFunctionDirectly] ========== END ==========');
+        }
+      } catch (error: any) {
+        console.error('❌ [testEdgeFunctionDirectly] ========== EXCEPTION ==========');
+        console.error('❌ [testEdgeFunctionDirectly] Exception:', error);
+        console.error('❌ [testEdgeFunctionDirectly] Error type:', error?.constructor?.name);
+        console.error('❌ [testEdgeFunctionDirectly] Error message:', error?.message);
+        console.error('❌ [testEdgeFunctionDirectly] Error stack:', error?.stack);
+        console.error('❌ [testEdgeFunctionDirectly] ========== END ==========');
+      }
+      
+      console.log('🧪 [testEdgeFunctionDirectly] ========== End ==========');
+    };
+
+    // دالة مساعدة للحصول على user ID من console
+    // نستخدم supabase مباشرة من import بدلاً من context
+    (window as any).getUserId = async () => {
+      console.log('🔍 [getUserId] Searching for user ID...');
+      
+      // 1. من localStorage (الأسرع)
+      try {
+        const localUserStr = localStorage.getItem('flash_user');
+        if (localUserStr) {
+          const localUser = JSON.parse(localUserStr);
+          if (localUser?.id) {
+            console.log('✅ [getUserId] Found from localStorage:', localUser.id);
+            return localUser.id;
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+      
+      // 2. من Supabase session
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) {
+          console.error('❌ [getUserId] Error getting session:', error);
+        } else if (session?.user?.id) {
+          console.log('✅ [getUserId] Found from session:', session.user.id);
+          return session.user.id;
+        }
+      } catch (e) {
+        console.error('❌ [getUserId] Exception getting session:', e);
+      }
+      
+      // 3. من context (آخر محاولة - قد لا يكون متاحاً)
+      try {
+        // محاولة الوصول إلى user من window إذا كان متاحاً
+        const contextUser = (window as any).__AUTH_USER__;
+        if (contextUser?.id) {
+          console.log('✅ [getUserId] Found from window context:', contextUser.id);
+          return contextUser.id;
+        }
+      } catch (e) {
+        // ignore
+      }
+      
+      console.error('❌ [getUserId] No user ID found');
+      console.log('💡 [getUserId] Make sure you are logged in');
+      console.log('💡 [getUserId] Try: window.testEdgeFunctionDirectly("test-token", "user-id-here")');
+      return null;
+    };
+
+    console.log('✅ [Window Functions] Test functions set up successfully');
+    console.log('✅ [Window Functions] Available in console:');
+    console.log('   - window.getUserId() // Get current user ID');
+    console.log('   - window.testFCMTokenUpdate("test-token")');
+    console.log('   - window.testAndroidBridge()');
+    console.log('   - window.testEdgeFunctionDirectly("test-token", "user-id") // Direct fetch test');
+    console.log('   - window.testEdgeFunctionDirectly("test-token") // Uses logged-in user');
+  }, []); // تشغيل مرة واحدة فقط
 
   useEffect(() => {
     let mounted = true;
@@ -231,6 +796,245 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       subscription.unsubscribe();
     };
   }, [loadUser]);
+
+  // استخدام refs لتتبع حالة FCM token polling
+  const fcmPollingRef = useRef<{
+    timeoutId: NodeJS.Timeout | null;
+    intervalId: NodeJS.Timeout | null;
+    isTokenSaved: boolean;
+    messagePrinted: boolean;
+    pollingStarted: boolean;
+  }>({
+    timeoutId: null,
+    intervalId: null,
+    isTokenSaved: false,
+    messagePrinted: false,
+    pollingStarted: false,
+  });
+
+  // useEffect لجلب FCM token وحفظه عند تسجيل الدخول
+  useEffect(() => {
+    if (!user?.id) {
+      return;
+    }
+
+    // التحقق من أننا في بيئة WebView (Android)
+    if (typeof window === 'undefined') {
+      console.log('📱 [useEffect] window is undefined, skipping FCM token update');
+      return;
+    }
+
+    // إيقاف أي polling سابق
+    if (fcmPollingRef.current.timeoutId) {
+      clearTimeout(fcmPollingRef.current.timeoutId);
+      fcmPollingRef.current.timeoutId = null;
+    }
+    if (fcmPollingRef.current.intervalId) {
+      clearInterval(fcmPollingRef.current.intervalId);
+      fcmPollingRef.current.intervalId = null;
+    }
+
+    // إعادة تعيين الحالة (لكن لا نعيد تعيين messagePrinted لتجنب التكرار)
+    fcmPollingRef.current.isTokenSaved = false;
+    // لا نعيد تعيين messagePrinted هنا - نتركه كما هو لتجنب التكرار
+    // fcmPollingRef.current.messagePrinted = false;
+    fcmPollingRef.current.pollingStarted = false;
+
+    let timeoutId: NodeJS.Timeout | null = null;
+    let intervalId: NodeJS.Timeout | null = null;
+    let isTokenSaved = false;
+
+    // دالة بسيطة للحصول على FCM Token وحفظه
+    const getAndSaveFCMToken = async () => {
+      if (isTokenSaved) {
+        return true; // تم حفظ التوكن بالفعل
+      }
+
+      // التحقق من وجود AndroidBridge
+      if (!window.AndroidBridge) {
+        return false;
+      }
+
+      // التحقق من وجود getFCMToken
+      if (!window.AndroidBridge.getFCMToken) {
+        console.warn('⚠️ [useEffect] AndroidBridge.getFCMToken is not available');
+        return false;
+      }
+
+      try {
+        // الحصول على FCM Token مباشرة
+        const fcmTokenResult = window.AndroidBridge.getFCMToken();
+        // التعامل مع Promise إذا كان getFCMToken async
+        const fcmToken = fcmTokenResult instanceof Promise ? await fcmTokenResult : fcmTokenResult;
+        
+        if (fcmToken && typeof fcmToken === 'string' && fcmToken.trim() !== '') {
+          console.log('✅ [useEffect] FCM Token:', fcmToken.substring(0, 30) + '...');
+          
+          // حفظ التوكن عبر Edge Function
+          updateFCMToken(user.id, fcmToken);
+          isTokenSaved = true;
+          
+          // إيقاف جميع المحاولات
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+            fcmPollingRef.current.timeoutId = null;
+          }
+          if (intervalId) {
+            clearInterval(intervalId);
+            fcmPollingRef.current.intervalId = null;
+          }
+          fcmPollingRef.current.isTokenSaved = true;
+          fcmPollingRef.current.pollingStarted = false;
+          return true;
+        } else {
+          console.log('⚠️ [useEffect] FCM Token not available yet');
+          return false;
+        }
+      } catch (error) {
+        console.error('❌ [useEffect] Error getting FCM Token:', error);
+        return false;
+      }
+    };
+
+    // محاولة فورية
+    getAndSaveFCMToken().then((saved) => {
+      if (saved) {
+        return;
+      }
+    });
+
+    // محاولة بعد تحميل الصفحة
+    const onPageLoad = async () => {
+      console.log('📱 [useEffect] Page loaded, trying to get FCM Token...');
+      const saved = await getAndSaveFCMToken();
+      if (saved) {
+        return;
+      }
+      
+      // إذا لم ينجح، نبدأ آلية الانتظار
+      startPolling();
+    };
+
+    // الاستماع لـ DOMContentLoaded و window.onload
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+      setTimeout(onPageLoad, 100);
+    } else {
+      window.addEventListener('DOMContentLoaded', onPageLoad);
+      window.addEventListener('load', onPageLoad);
+    }
+
+    // آلية polling مستمرة كل 500ms لمدة 30 ثانية
+    const startPolling = () => {
+      // منع بدء polling متعدد
+      if (fcmPollingRef.current.pollingStarted) {
+        return;
+      }
+      fcmPollingRef.current.pollingStarted = true;
+
+      let attempts = 0;
+      const maxAttempts = 60; // 60 محاولة على مدى 30 ثانية
+      const checkInterval = 500; // كل 500ms
+
+      intervalId = setInterval(() => {
+        attempts++;
+        
+        // التحقق من أن interval لا يزال نشطاً
+        if (!intervalId || !fcmPollingRef.current.intervalId) {
+          return;
+        }
+        
+        // التحقق من أن التوكن تم حفظه بالفعل
+        if (isTokenSaved || fcmPollingRef.current.isTokenSaved) {
+          const currentIntervalId = fcmPollingRef.current.intervalId;
+          if (currentIntervalId) {
+            clearInterval(currentIntervalId);
+            intervalId = null;
+            fcmPollingRef.current.intervalId = null;
+            fcmPollingRef.current.pollingStarted = false;
+          }
+          return;
+        }
+
+        // التحقق من عدد المحاولات قبل أي شيء آخر
+        if (attempts >= maxAttempts) {
+          // إيقاف interval فوراً قبل طباعة الرسالة
+          const currentIntervalId = fcmPollingRef.current.intervalId;
+          if (currentIntervalId) {
+            clearInterval(currentIntervalId);
+            intervalId = null;
+            fcmPollingRef.current.intervalId = null;
+            fcmPollingRef.current.pollingStarted = false;
+          }
+          
+          // طباعة الرسالة مرة واحدة فقط لكل user
+          const messageKey = `fcm_message_printed_${user?.id}`;
+          if (!fcmPollingRef.current.messagePrinted && !(window as any)[messageKey]) {
+            console.warn('⚠️ [useEffect] AndroidBridge not available after 30 seconds');
+            console.warn('🧪 [useEffect] You can test manually:');
+            console.warn('   window.testAndroidBridge()');
+            console.warn('   window.testFCMTokenUpdate("test-token-123")');
+            fcmPollingRef.current.messagePrinted = true;
+            (window as any)[messageKey] = true; // علامة في window لتجنب التكرار
+          }
+          
+          return; // إيقاف التنفيذ فوراً
+        }
+
+        getAndSaveFCMToken().then((saved) => {
+          if (saved) {
+            // نجح!
+            const currentIntervalId = fcmPollingRef.current.intervalId;
+            if (currentIntervalId) {
+              clearInterval(currentIntervalId);
+              intervalId = null;
+              fcmPollingRef.current.intervalId = null;
+              fcmPollingRef.current.pollingStarted = false;
+            }
+          }
+        });
+      }, checkInterval);
+      
+      // حفظ intervalId في ref فوراً
+      fcmPollingRef.current.intervalId = intervalId;
+    };
+
+    // بدء polling بعد تأخير قصير
+    timeoutId = setTimeout(() => {
+      if (!isTokenSaved && !fcmPollingRef.current.isTokenSaved) {
+        startPolling();
+      }
+    }, 1000);
+
+    // حفظ references في ref
+    fcmPollingRef.current.timeoutId = timeoutId;
+    if (intervalId) {
+      fcmPollingRef.current.intervalId = intervalId;
+    }
+
+    return () => {
+      // تنظيف timeout
+      if (fcmPollingRef.current.timeoutId) {
+        clearTimeout(fcmPollingRef.current.timeoutId);
+        fcmPollingRef.current.timeoutId = null;
+      }
+      // تنظيف interval
+      if (fcmPollingRef.current.intervalId) {
+        clearInterval(fcmPollingRef.current.intervalId);
+        fcmPollingRef.current.intervalId = null;
+      }
+      // تنظيف المتغيرات المحلية أيضاً
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+      fcmPollingRef.current.pollingStarted = false;
+      window.removeEventListener('DOMContentLoaded', onPageLoad);
+      window.removeEventListener('load', onPageLoad);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]); // updateFCMToken مستقرة (dependency array فارغ) ولا تحتاج إلى إضافتها
 
   const signIn = async (email: string, password: string) => {
     console.log('signIn: Attempting to sign in with email:', email);
@@ -442,13 +1246,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // محاولة الحصول على session من Supabase Auth (إذا كان موجوداً)
       // ملاحظة: في نظام PIN، قد لا يكون هناك session في auth.users
       // لذلك سنستخدم user مباشرة من profiles
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (session) {
-        setSession(session);
-      } else {
-        // إذا لم يكن هناك session، ننشئ session مؤقتة
-        // أو نستخدم user مباشرة بدون session
+      try {
+        const sessionPromise = supabase.auth.getSession();
+        const sessionTimeoutPromise = new Promise<{ data: { session: null } }>((resolve) =>
+          setTimeout(() => resolve({ data: { session: null } }), 3000)
+        );
+        
+        const sessionResult = await Promise.race([sessionPromise, sessionTimeoutPromise]);
+        const { data: { session } } = sessionResult as any;
+        
+        if (session) {
+          setSession(session);
+        } else {
+          // إذا لم يكن هناك session، ننشئ session مؤقتة
+          // أو نستخدم user مباشرة بدون session
+          setSession(null);
+        }
+      } catch (sessionError) {
+        console.warn('loginWithPin: Error getting session (non-critical):', sessionError);
+        // هذا خطأ غير حرج، نستمر بدون session
         setSession(null);
       }
       

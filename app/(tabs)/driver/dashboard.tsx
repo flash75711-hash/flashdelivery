@@ -120,7 +120,7 @@ export default function DriverDashboardScreen() {
           }
         )
         .subscribe();
-
+      
       // الاشتراك في Realtime لتحديث رصيد المحفظة تلقائياً
       const walletChannel = supabase
         .channel(`driver_wallet_${user.id}`)
@@ -251,7 +251,10 @@ export default function DriverDashboardScreen() {
   }, [user, driverProfile?.approval_status, registrationComplete]);
 
   const loadDriverStatus = async () => {
-    if (!user) return;
+    if (!user) {
+      setLoading(false); // تأكد من تعيين loading إلى false
+      return;
+    }
     
     // قراءة الحالة من localStorage أولاً (إذا كانت متاحة)
     let localStorageStatus: boolean | null = null;
@@ -287,15 +290,36 @@ export default function DriverDashboardScreen() {
         lastKnownOnlineStatusRef.current = true;
       }
       hasLoadedInitialStatusRef.current = true;
+      setLoading(false); // تأكد من تعيين loading إلى false قبل return
       return;
     }
     
     try {
-      const { data, error } = await supabase
+      // إضافة timeout لتجنب التعليق
+      const statusPromise = supabase
         .from('profiles')
         .select('is_online')
         .eq('id', user.id)
         .single();
+      
+      const timeoutPromise = new Promise<{ data: null; error: { code: string; message: string } }>((resolve) =>
+        setTimeout(() => resolve({ data: null, error: { code: 'TIMEOUT', message: 'Status fetch timeout' } }), 5000)
+      );
+      
+      const result = await Promise.race([statusPromise, timeoutPromise]);
+      const { data, error } = result;
+
+      if (error && error.code === 'TIMEOUT') {
+        console.warn('DriverDashboard: Status fetch timeout, using localStorage or current state');
+        // في حالة timeout، نستخدم localStorage أو الحالة الحالية
+        if (localStorageStatus !== null) {
+          setIsOnline(localStorageStatus);
+          lastKnownOnlineStatusRef.current = localStorageStatus;
+        }
+        hasLoadedInitialStatusRef.current = true;
+        setLoading(false); // تأكد من تعيين loading إلى false قبل return
+        return;
+      }
 
       if (error && error.code !== 'PGRST116') {
         console.error('Error loading driver status:', error);
@@ -416,12 +440,14 @@ export default function DriverDashboardScreen() {
   const loadDriverProfile = async () => {
     if (!user) {
       console.log('DriverDashboard: loadDriverProfile - no user');
+      setCheckingRegistration(false); // تأكد من تعيين checkingRegistration إلى false
       return;
     }
     
     // منع الاستدعاءات المتكررة
     if (isLoadingProfileRef.current) {
       console.log('DriverDashboard: loadDriverProfile - already loading, skipping');
+      // لا نعيد تعيين checkingRegistration هنا لأن التحميل جارٍ بالفعل
       return;
     }
     
@@ -437,27 +463,51 @@ export default function DriverDashboardScreen() {
       try {
         // محاولة جلب جميع البيانات بما فيها الصور وحالة الموافقة وحالة الحساب
         // تحديد الأعمدة المطلوبة فقط لتحسين الأداء
-        const result = await supabase
+        // إضافة timeout لتجنب التعليق
+        const profilePromise = supabase
           .from('profiles')
           .select('full_name, phone, id_card_image_url, selfie_image_url, approval_status, registration_complete, status, is_online, instapay_number, cash_number')
           .eq('id', user.id)
           .single();
+        
+        const timeoutPromise = new Promise<{ data: null; error: { code: string; message: string } }>((resolve) =>
+          setTimeout(() => resolve({ data: null, error: { code: 'TIMEOUT', message: 'Profile fetch timeout after 5 seconds' } }), 5000)
+        );
+        
+        const result = await Promise.race([profilePromise, timeoutPromise]);
         profile = result.data;
         error = result.error;
+        
+        if (error?.code === 'TIMEOUT') {
+          console.warn('DriverDashboard: Profile fetch timeout, trying basic fields only');
+          throw new Error('TIMEOUT');
+        }
       } catch (columnError: any) {
-        // إذا فشل بسبب أعمدة مفقودة، نحاول جلب البيانات الأساسية فقط
-        console.warn('DriverDashboard: Columns missing, trying basic fields only:', columnError);
-        const basicResult = await supabase
+        // إذا فشل بسبب timeout أو أعمدة مفقودة، نحاول جلب البيانات الأساسية فقط
+        console.warn('DriverDashboard: Columns missing or timeout, trying basic fields only:', columnError);
+        try {
+          const basicPromise = supabase
           .from('profiles')
           .select('full_name, phone')
           .eq('id', user.id)
           .single();
+          
+          const basicTimeoutPromise = new Promise<{ data: null; error: { code: string; message: string } }>((resolve) =>
+            setTimeout(() => resolve({ data: null, error: { code: 'TIMEOUT', message: 'Basic profile fetch timeout' } }), 3000)
+          );
+          
+          const basicResult = await Promise.race([basicPromise, basicTimeoutPromise]);
         profile = basicResult.data;
         error = basicResult.error;
+          
         // إضافة حقول الصور كقيم null
         if (profile) {
           profile.id_card_image_url = null;
           profile.selfie_image_url = null;
+          }
+        } catch (basicError) {
+          console.error('DriverDashboard: Basic profile fetch also failed:', basicError);
+          error = { code: 'FETCH_ERROR', message: 'Failed to fetch profile data' };
         }
       }
 
@@ -626,10 +676,20 @@ export default function DriverDashboardScreen() {
         setDriverProfile(null);
       }
 
-      // التحقق من إكمال التسجيل
-      const isComplete = await isRegistrationComplete(user.id);
+      // التحقق من إكمال التسجيل (مع timeout لتجنب التعليق)
+      try {
+        const registrationCheckPromise = isRegistrationComplete(user.id);
+        const timeoutPromise = new Promise<boolean>((resolve) => 
+          setTimeout(() => resolve(false), 5000) // timeout بعد 5 ثوان
+        );
+        const isComplete = await Promise.race([registrationCheckPromise, timeoutPromise]);
       console.log('DriverDashboard: Registration complete status:', isComplete);
       setRegistrationComplete(isComplete);
+      } catch (regError) {
+        console.error('DriverDashboard: Error checking registration completion:', regError);
+        // في حالة الخطأ، نعتبر التسجيل غير مكتمل
+        setRegistrationComplete(false);
+      }
     } catch (error) {
       console.error('DriverDashboard: Error loading driver profile:', error);
       setDriverProfile(null);

@@ -45,6 +45,46 @@ export default function FloatingNotification({
 
   useEffect(() => {
     if (visible && notification) {
+      // وضع علامة is_read: true عند العرض مباشرة (مرة واحدة فقط)
+      const markAsReadOnShow = async () => {
+        // تحديث الإشعار كمقروء فقط إذا كان ID صحيح (يبدأ بـ UUID أو ليس من نوع order_created_)
+        // تجنب تحديث الإشعارات المؤقتة التي تم إنشاؤها من useOrderNotifications
+        const isValidNotificationId = notification.id && 
+          !notification.id.startsWith('order_created_') && 
+          !notification.id.startsWith('order_status_') &&
+          !notification.id.startsWith('new_order_') &&
+          !notification.id.startsWith('order_completed_');
+        
+        if (isValidNotificationId) {
+          try {
+            // محاولة استخدام update مباشر أولاً
+            const { error: updateError } = await supabase
+              .from('notifications')
+              .update({ is_read: true })
+              .eq('id', notification.id);
+            
+            // إذا فشل (مثل RLS issue)، استخدم Edge Function
+            if (updateError) {
+              const { data: { user } } = await supabase.auth.getUser();
+              if (user) {
+                const { error: edgeError } = await supabase.functions.invoke('mark-notification-read', {
+                  body: { notification_id: notification.id, user_id: user.id },
+                });
+                
+                if (edgeError) {
+                  console.error('[FloatingNotification] Error marking notification as read (Edge Function):', edgeError);
+                }
+              }
+            }
+          } catch (error) {
+            console.error('[FloatingNotification] Error marking notification as read:', error);
+          }
+        }
+      };
+      
+      // وضع علامة is_read: true عند العرض مباشرة
+      markAsReadOnShow();
+
       // إظهار الإشعار بانتقال سلس
       Animated.parallel([
         Animated.spring(slideAnim, {

@@ -1726,7 +1726,7 @@ export default function TrackTripScreen() {
                             setPaidAmount(totalDue.toFixed(2));
                             setShowPaymentModal(true);
                           }}
-                        >
+                    >
                           <Ionicons name="cash" size={18} color="#fff" />
                           <Text style={styles.collectPaymentButtonText}>تم التحصيل</Text>
                     </TouchableOpacity>

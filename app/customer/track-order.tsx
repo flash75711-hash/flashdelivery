@@ -871,6 +871,102 @@ export default function TrackOrderScreen() {
         <Text style={styles.title}>متابعة الطلب</Text>
       </View>
 
+      {/* معلومات الطلب الأساسية */}
+      <View style={styles.orderInfoCard}>
+        <View style={styles.orderInfoRow}>
+          <View style={styles.orderInfoItem}>
+            <Ionicons name="cash-outline" size={20} color="#007AFF" />
+            <View style={styles.orderInfoContent}>
+              <Text style={styles.orderInfoLabel}>المبلغ الإجمالي</Text>
+              <Text style={styles.orderInfoValue}>{order.total_fee?.toFixed(2) || '0.00'} جنيه</Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.orderInfoRow}>
+          <View style={styles.orderInfoItem}>
+            <Ionicons 
+              name={
+                order.status === 'completed' ? 'checkmark-circle' :
+                order.status === 'in_progress' ? 'time' :
+                order.status === 'accepted' ? 'checkmark-circle-outline' :
+                'hourglass-outline'
+              } 
+              size={20} 
+              color={
+                order.status === 'completed' ? '#34C759' :
+                order.status === 'in_progress' ? '#FF9500' :
+                order.status === 'accepted' ? '#007AFF' :
+                '#999'
+              } 
+            />
+            <View style={styles.orderInfoContent}>
+              <Text style={styles.orderInfoLabel}>حالة الطلب</Text>
+              <Text style={[styles.orderInfoValue, {
+                color: 
+                  order.status === 'completed' ? '#34C759' :
+                  order.status === 'in_progress' ? '#FF9500' :
+                  order.status === 'accepted' ? '#007AFF' :
+                  '#999'
+              }]}>
+                {order.status === 'pending' ? 'قيد الانتظار' :
+                 order.status === 'accepted' ? 'تم القبول' :
+                 order.status === 'in_progress' ? 'جاري التنفيذ' :
+                 order.status === 'completed' ? 'تم التوصيل' :
+                 order.status === 'cancelled' ? 'ملغي' :
+                 order.status}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.orderInfoRow}>
+          <View style={styles.orderInfoItem}>
+            <Ionicons name="time-outline" size={20} color="#666" />
+            <View style={styles.orderInfoContent}>
+              <Text style={styles.orderInfoLabel}>وقت الإنشاء</Text>
+              <Text style={styles.orderInfoValue}>
+                {new Date(order.created_at).toLocaleString('ar-EG', {
+                  year: 'numeric',
+                  month: 'short',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {order.driver_id && driverLocation && (
+          <View style={styles.orderInfoRow}>
+            <View style={styles.orderInfoItem}>
+              <Ionicons name="navigate-outline" size={20} color="#FF9500" />
+              <View style={styles.orderInfoContent}>
+                <Text style={styles.orderInfoLabel}>السائق في الطريق</Text>
+                <Text style={[styles.orderInfoValue, { color: '#FF9500' }]}>
+                  {(() => {
+                    // استبعاد آخر عنصر (عنوان التوصيل) من العد
+                    const pickupItems = orderItems.length > 0 ? orderItems.slice(0, -1) : [];
+                    const remainingPickupItems = pickupItems.filter(item => !item.is_picked_up).length;
+                    const deliveryItem = orderItems.length > 0 ? orderItems[orderItems.length - 1] : null;
+                    const isDeliveryReached = deliveryItem?.is_picked_up;
+                    
+                    if (remainingPickupItems > 0) {
+                      return `${remainingPickupItems} عنصر متبقي للاستلام`;
+                    } else if (!isDeliveryReached) {
+                      return 'في الطريق للتوصيل';
+                    } else {
+                      return 'تم التوصيل';
+                    }
+                  })()}
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
+      </View>
+
       {/* معلومات السائق */}
       {order.driver_id && order.driver && (
         <View style={styles.driverInfo}>
@@ -920,44 +1016,111 @@ export default function TrackOrderScreen() {
         >
           <View style={styles.handleBar} />
           <Text style={styles.bottomSheetTitle}>
-            {orderItems.length > 0 ? `الطلبات (${orderItems.length})` : 'الطلبات'}
+            {(() => {
+              const pickupItemsCount = orderItems.length > 0 ? orderItems.length - 1 : 0;
+              return pickupItemsCount > 0 
+                ? `عناصر الاستلام (${pickupItemsCount})` 
+                : 'تفاصيل الطلب';
+            })()}
           </Text>
         </TouchableOpacity>
 
         <ScrollView style={styles.bottomSheetContent} showsVerticalScrollIndicator={false}>
-          {orderItems.length === 0 ? (
-            <View style={styles.emptyItemsContainer}>
-              <Ionicons name="cube-outline" size={48} color="#999" />
-              <Text style={styles.emptyItemsText}>لا توجد طلبات في هذا الطلب</Text>
-            </View>
-          ) : (
-            orderItems.map((item, index) => (
-              <View key={item.id} style={styles.orderItemCard}>
-                <View style={styles.orderItemHeader}>
-                  <View style={styles.orderItemNumber}>
-                    <Text style={styles.orderItemNumberText}>{index + 1}</Text>
-                  </View>
-                  <View style={styles.orderItemInfo}>
-                    <Text style={styles.orderItemAddress}>{item.address}</Text>
-                    {item.description && (
-                      <Text style={styles.orderItemDescription}>{item.description}</Text>
-                    )}
-                  </View>
-                  {item.is_picked_up ? (
-                    <View style={[styles.statusBadge, { backgroundColor: '#34C75920' }]}>
-                      <Ionicons name="checkmark-circle" size={20} color="#34C759" />
-                      <Text style={[styles.statusText, { color: '#34C759' }]}>تم الاستلام</Text>
-                    </View>
-                  ) : (
-                    <View style={[styles.statusBadge, { backgroundColor: '#FF950020' }]}>
-                      <Ionicons name="time" size={20} color="#FF9500" />
-                      <Text style={[styles.statusText, { color: '#FF9500' }]}>قيد الانتظار</Text>
-                    </View>
-                  )}
+          {(() => {
+            // تصفية العناصر: استبعاد آخر عنصر (عنوان التوصيل)
+            const pickupItems = orderItems.length > 0 
+              ? orderItems.slice(0, -1) // جميع العناصر عدا الأخير
+              : [];
+            
+            if (pickupItems.length === 0) {
+              return (
+                <View style={styles.emptyItemsContainer}>
+                  <Ionicons name="cube-outline" size={48} color="#999" />
+                  <Text style={styles.emptyItemsText}>لا توجد عناصر للاستلام</Text>
                 </View>
-              </View>
-            ))
-          )}
+              );
+            }
+
+            return (
+              <>
+                {/* عرض عنوان التوصيل بشكل منفصل */}
+                {orderItems.length > 0 && orderItems[orderItems.length - 1] && (
+                  <View style={styles.deliverySection}>
+                    <View style={styles.deliverySectionHeader}>
+                      <Ionicons name="location" size={18} color="#FF9500" />
+                      <Text style={styles.deliverySectionTitle}>عنوان التوصيل</Text>
+                    </View>
+                    <View style={[styles.orderItemCard, styles.deliveryCard]}>
+                      <View style={styles.orderItemHeader}>
+                        <View style={[styles.orderItemNumber, { backgroundColor: '#FF9500' }]}>
+                          <Ionicons name="location" size={16} color="#fff" />
+                        </View>
+                        <View style={styles.orderItemInfo}>
+                          <Text style={styles.orderItemAddress}>
+                            {orderItems[orderItems.length - 1].address || order.delivery_address}
+                          </Text>
+                          {orderItems[orderItems.length - 1].description && (
+                            <Text style={styles.orderItemDescription}>
+                              {orderItems[orderItems.length - 1].description}
+                            </Text>
+                          )}
+                        </View>
+                        {orderItems[orderItems.length - 1].is_picked_up ? (
+                          <View style={[styles.statusBadge, { backgroundColor: '#34C75920' }]}>
+                            <Ionicons name="checkmark-circle" size={20} color="#34C759" />
+                            <Text style={[styles.statusText, { color: '#34C759' }]}>تم الوصول</Text>
+                          </View>
+                        ) : (
+                          <View style={[styles.statusBadge, { backgroundColor: '#FF950020' }]}>
+                            <Ionicons name="time" size={20} color="#FF9500" />
+                            <Text style={[styles.statusText, { color: '#FF9500' }]}>في الانتظار</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  </View>
+                )}
+
+                {/* عرض عناصر الاستلام */}
+                {pickupItems.length > 0 && (
+                  <View style={styles.pickupSection}>
+                    <View style={styles.pickupSectionHeader}>
+                      <Ionicons name="cube" size={18} color="#007AFF" />
+                      <Text style={styles.pickupSectionTitle}>
+                        عناصر الاستلام ({pickupItems.length})
+                      </Text>
+                    </View>
+                    {pickupItems.map((item, index) => (
+                      <View key={item.id} style={styles.orderItemCard}>
+                        <View style={styles.orderItemHeader}>
+                          <View style={styles.orderItemNumber}>
+                            <Text style={styles.orderItemNumberText}>{index + 1}</Text>
+                          </View>
+                          <View style={styles.orderItemInfo}>
+                            <Text style={styles.orderItemAddress}>{item.address}</Text>
+                            {item.description && (
+                              <Text style={styles.orderItemDescription}>{item.description}</Text>
+                            )}
+                          </View>
+                          {item.is_picked_up ? (
+                            <View style={[styles.statusBadge, { backgroundColor: '#34C75920' }]}>
+                              <Ionicons name="checkmark-circle" size={20} color="#34C759" />
+                              <Text style={[styles.statusText, { color: '#34C759' }]}>تم الاستلام</Text>
+                            </View>
+                          ) : (
+                            <View style={[styles.statusBadge, { backgroundColor: '#FF950020' }]}>
+                              <Ionicons name="time" size={20} color="#FF9500" />
+                              <Text style={[styles.statusText, { color: '#FF9500' }]}>قيد الانتظار</Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </>
+            );
+          })()}
         </ScrollView>
       </Animated.View>
     </SafeAreaView>
@@ -1128,6 +1291,40 @@ const styles = StyleSheet.create({
     color: '#999',
     marginTop: 12,
   },
+  deliverySection: {
+    marginBottom: 20,
+  },
+  deliverySectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+    paddingHorizontal: 4,
+  },
+  deliverySectionTitle: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+  },
+  deliveryCard: {
+    borderLeftWidth: 3,
+    borderLeftColor: '#FF9500',
+  },
+  pickupSection: {
+    marginTop: 8,
+  },
+  pickupSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+    paddingHorizontal: 4,
+  },
+  pickupSectionTitle: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -1137,6 +1334,33 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: responsive.getResponsiveFontSize(14),
     color: '#666',
+  },
+  orderInfoCard: {
+    backgroundColor: '#fff',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  orderInfoRow: {
+    marginBottom: 12,
+  },
+  orderInfoItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  orderInfoContent: {
+    flex: 1,
+  },
+  orderInfoLabel: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    color: '#666',
+    marginBottom: 4,
+  },
+  orderInfoValue: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+    color: '#1a1a1a',
   },
 });
 

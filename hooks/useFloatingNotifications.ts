@@ -3,6 +3,39 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { FloatingNotificationData } from '@/components/FloatingNotification';
 
+// دالة مساعدة لقراءة الإشعارات المعروضة من localStorage
+const getShownNotificationIds = (userId: string): Set<string> => {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const key = `shown_notifications_${userId}`;
+    const stored = localStorage.getItem(key);
+    if (stored) {
+      const ids = JSON.parse(stored) as string[];
+      return new Set(ids);
+    }
+  } catch (error) {
+    console.error('[useFloatingNotifications] Error reading from localStorage:', error);
+  }
+  return new Set();
+};
+
+// دالة مساعدة لحفظ الإشعارات المعروضة في localStorage
+const saveShownNotificationId = (userId: string, notificationId: string) => {
+  if (typeof window === 'undefined') return;
+  try {
+    const key = `shown_notifications_${userId}`;
+    const current = getShownNotificationIds(userId);
+    current.add(notificationId);
+    
+    // حفظ آخر 1000 إشعار فقط لتجنب ملء localStorage
+    const idsArray = Array.from(current);
+    const limitedIds = idsArray.slice(-1000);
+    localStorage.setItem(key, JSON.stringify(limitedIds));
+  } catch (error) {
+    console.error('[useFloatingNotifications] Error saving to localStorage:', error);
+  }
+};
+
 export function useFloatingNotifications() {
   const { session, user, loading } = useAuth();
   const [currentNotification, setCurrentNotification] = useState<FloatingNotificationData | null>(null);
@@ -35,7 +68,7 @@ export function useFloatingNotifications() {
     }, 300);
   }, [showNextNotification]);
 
-  const addNotification = useCallback((notification: FloatingNotificationData) => {
+  const addNotification = useCallback((notification: FloatingNotificationData, userId?: string) => {
     // تجنب عرض نفس الإشعار مرتين (atomic check-and-add)
     const sizeBefore = shownNotificationIds.current.size;
     shownNotificationIds.current.add(notification.id);
@@ -43,6 +76,11 @@ export function useFloatingNotifications() {
     
     if (!wasAdded) {
       return;
+    }
+    
+    // حفظ الإشعار في localStorage إذا كان userId متاحاً
+    if (userId) {
+      saveShownNotificationId(userId, notification.id);
     }
     
     // إذا كان هناك إشعار معروض حالياً، نضيف الجديد إلى الطابور
@@ -107,6 +145,10 @@ export function useFloatingNotifications() {
 
       retryCount = 0; // إعادة تعيين عداد المحاولات عند النجاح
 
+      // تحميل الإشعارات المعروضة مسبقاً من localStorage
+      const storedShownIds = getShownNotificationIds(userId);
+      shownNotificationIds.current = storedShownIds;
+
       const channelName = `floating_notifications_${userId}`;
 
     // الاشتراك في Realtime للإشعارات الجديدة
@@ -143,7 +185,7 @@ export function useFloatingNotifications() {
             type: newNotification.type || 'info',
             order_id: newNotification.order_id,
             created_at: newNotification.created_at,
-          });
+          }, userId);
         }
       )
         .subscribe((status, err) => {
@@ -230,10 +272,14 @@ export function useFloatingNotifications() {
               type: firstNotification.type || 'info',
               order_id: firstNotification.order_id,
               created_at: firstNotification.created_at,
-            });
+            }, userId);
 
-            // إضافة الباقي إلى الطابور
+            // إضافة الباقي إلى الطابور مع حفظها في localStorage
             unreadNotifications.slice(1).forEach(notification => {
+              // حفظ الإشعار في localStorage
+              saveShownNotificationId(userId, notification.id);
+              shownNotificationIds.current.add(notification.id);
+              
               notificationQueue.current.push({
                 id: notification.id,
                 title: notification.title,
@@ -243,7 +289,7 @@ export function useFloatingNotifications() {
                 created_at: notification.created_at,
               });
             });
-          }
+        }
       } catch (error) {
           console.error('[useFloatingNotifications] Error in loadUnreadNotifications:', {
             error,
@@ -327,8 +373,8 @@ export function useFloatingNotifications() {
               type: latestNotification.type || 'info',
               order_id: latestNotification.order_id,
               created_at: latestNotification.created_at,
-            });
-          }
+            }, userId);
+        }
       } catch (error) {
           console.error('[useFloatingNotifications] Error polling notifications:', {
             error,

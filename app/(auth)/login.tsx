@@ -87,14 +87,28 @@ export default function LoginScreen() {
         showToast('تم تسجيل الدخول بنجاح', 'success');
         
         // استخدام AuthContext للدخول
-        if (authLogin) {
-          await authLogin(result.user);
+        try {
+          if (authLogin) {
+            // إضافة timeout لـ authLogin
+            const authLoginPromise = authLogin(result.user);
+            const authLoginTimeoutPromise = new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Auth login timeout after 5 seconds')), 5000)
+            );
+            
+            await Promise.race([authLoginPromise, authLoginTimeoutPromise]);
+          }
+          
+          // التنقل بعد تأخير قصير
+          setTimeout(() => {
+            router.replace('/(tabs)');
+          }, 500);
+        } catch (authError: any) {
+          console.error('Auth login error:', authError);
+          // حتى لو فشل authLogin، نستمر في التنقل
+          setTimeout(() => {
+            router.replace('/(tabs)');
+          }, 500);
         }
-        
-        // التنقل بعد تأخير قصير
-        setTimeout(() => {
-          router.replace('/(tabs)');
-        }, 500);
       } else {
         vibrateError();
         showToast(result.error || 'فشل تسجيل الدخول', 'error');
