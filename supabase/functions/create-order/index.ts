@@ -222,6 +222,54 @@ serve(async (req) => {
       );
     }
 
+    // إرسال إشعار لجميع السائقين النشطين
+    try {
+      // جلب جميع السائقين النشطين
+      const { data: activeDrivers, error: driversError } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('role', 'driver')
+        .eq('status', 'active')
+        .eq('approval_status', 'approved');
+
+      if (!driversError && activeDrivers && activeDrivers.length > 0) {
+        // إنشاء إشعارات لجميع السائقين
+        const notifications = activeDrivers.map((driver) => ({
+          user_id: driver.id,
+          title: 'طلب جديد متاح',
+          message: `طلب جديد من ${orderType === 'package' ? 'توصيل طرد' : 'طلب من خارج'} - السعر: ${totalFee} ج.م`,
+          type: 'info' as const,
+          order_id: newOrder.id,
+        }));
+
+        // إدراج الإشعارات باستخدام RPC function
+        for (const notification of notifications) {
+          try {
+            const { error: notifError } = await supabase.rpc('insert_notification_for_driver', {
+              p_user_id: notification.user_id,
+              p_title: notification.title,
+              p_message: notification.message,
+              p_type: notification.type,
+              p_order_id: notification.order_id,
+            });
+
+            if (notifError) {
+              console.error(`Error creating notification for driver ${notification.user_id}:`, notifError);
+            }
+          } catch (notifErr) {
+            console.error(`Exception creating notification for driver ${notification.user_id}:`, notifErr);
+          }
+        }
+
+        console.log(`✅ Sent notifications to ${activeDrivers.length} active drivers for order ${newOrder.id}`);
+      } else {
+        console.log('No active drivers found to notify');
+      }
+    } catch (notificationError) {
+      // لا نوقف العملية إذا فشلت الإشعارات
+      console.error('Error sending notifications to drivers:', notificationError);
+    }
+
     return new Response(
       JSON.stringify({
         success: true,

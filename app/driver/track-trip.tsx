@@ -1028,6 +1028,21 @@ export default function TrackTripScreen() {
         throw new Error(updateData?.error || 'فشل تحديث حالة الطلب');
       }
 
+      // إرسال إشعار للعميل عند إكمال الطلب
+      if (order.customer_id) {
+        try {
+          await createNotification({
+            user_id: order.customer_id,
+            title: 'تم إكمال الطلب',
+            message: 'تم إكمال طلبك بنجاح. شكراً لاستخدامك Flash Delivery!',
+            type: 'success',
+            order_id: order.id,
+          });
+        } catch (notifError) {
+          console.error('[handleCollectPayment] Error sending completion notification to customer:', notifError);
+        }
+      }
+
       // إضافة المبلغ لمحفظة السائق (بعد خصم العمولة)
       let driverWalletData: any = null;
       if (user?.id && order.driver_id === user.id) {
@@ -1458,8 +1473,8 @@ export default function TrackTripScreen() {
           if (!updateError && updateData?.success) {
             setOrder(prev => prev ? { ...prev, status: 'pickedUp' } : null);
 
-            // إرسال إشعار للعميل
-            if (firstPickedUp && order.customer_id) {
+            // إرسال إشعار للعميل عند استلام الطلب
+            if (order.customer_id) {
               try {
                 await createNotification({
                   user_id: order.customer_id,
@@ -1472,6 +1487,39 @@ export default function TrackTripScreen() {
                 console.error('[handleConfirmPickupWithState] Error sending notification:', notifError);
               }
             }
+
+            // تحديث الحالة إلى inTransit بعد 2 ثانية (تلقائياً)
+            setTimeout(async () => {
+              try {
+                const { data: transitData, error: transitError } = await supabase.functions.invoke('update-order', {
+                  body: {
+                    orderId: order.id,
+                    status: 'inTransit',
+                  },
+                });
+
+                if (!transitError && transitData?.success) {
+                  setOrder(prev => prev ? { ...prev, status: 'inTransit' } : null);
+
+                  // إرسال إشعار للعميل عند بدء التوصيل
+                  if (order.customer_id) {
+                    try {
+                      await createNotification({
+                        user_id: order.customer_id,
+                        title: 'الطلب قيد التوصيل',
+                        message: 'طلبك في الطريق إليك الآن.',
+                        type: 'info',
+                        order_id: order.id,
+                      });
+                    } catch (notifError) {
+                      console.error('[handleConfirmPickupWithState] Error sending inTransit notification:', notifError);
+                    }
+                  }
+                }
+              } catch (error) {
+                console.error('[handleConfirmPickupWithState] Error updating to inTransit:', error);
+              }
+            }, 2000);
           }
         }
       }

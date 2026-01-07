@@ -10,12 +10,41 @@ export interface CreateNotificationParams {
 
 /**
  * إرسال Push Notification للمستخدم
- * ⚠️ Web فقط: لا يتم إرسال Push Notifications (In-App فقط)
+ * يستخدم Edge Function لإرسال Push Notifications عبر FCM
  */
 async function sendPushNotification(userId: string, title: string, message: string, data?: any) {
-  // على الويب، نستخدم In-App Notifications فقط (Supabase Realtime)
-  // لا حاجة لإرسال Push Notifications
-  return;
+  try {
+    // التحقق من وجود session
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session) {
+      console.log('[sendPushNotification] No session, skipping push notification');
+      return;
+    }
+
+    // استدعاء Edge Function لإرسال Push Notification
+    const { data: edgeData, error: edgeError } = await supabase.functions.invoke('send-push-notification', {
+      body: {
+        user_id: userId,
+        title: title,
+        message: message,
+        data: data || {},
+      },
+    });
+
+    if (edgeError) {
+      console.error('[sendPushNotification] Error sending push notification:', edgeError);
+      return;
+    }
+
+    if (edgeData?.sent && edgeData.sent > 0) {
+      console.log(`[sendPushNotification] Push notification sent successfully to ${edgeData.sent} device(s)`);
+    } else {
+      console.log('[sendPushNotification] No devices found or push notification not sent');
+    }
+  } catch (error) {
+    console.error('[sendPushNotification] Exception sending push notification:', error);
+  }
 }
 
 /**
