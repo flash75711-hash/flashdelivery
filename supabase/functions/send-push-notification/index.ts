@@ -146,30 +146,43 @@ async function getAccessToken(serviceAccount: ServiceAccount): Promise<string> {
 
 Deno.serve(async (req: Request) => {
   try {
-    // التحقق من JWT
+    // التحقق من JWT أو Service Role Key
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: 'Missing authorization header' }),
-        { status: 401, headers: { 'Content-Type': 'application/json' } }
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    
+    // السماح بالاستدعاء من Edge Functions أخرى باستخدام Service Role Key
+    const isInternalCall = req.headers.get('X-Internal-Call') === 'true' || 
+                           (authHeader && authHeader.includes('Bearer') && authHeader.includes(serviceRoleKey || ''));
+    
+    let user: any = null;
+    
+    if (authHeader && !isInternalCall) {
+      // استدعاء عادي من العميل - يحتاج JWT
+      const supabaseClient = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+        {
+          global: {
+            headers: { Authorization: authHeader },
+          },
+        }
       );
-    }
 
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      {
-        global: {
-          headers: { Authorization: authHeader },
-        },
+      // التحقق من المستخدم
+      const { data: { user: authUser }, error: userError } = await supabaseClient.auth.getUser();
+      if (userError || !authUser) {
+        return new Response(
+          JSON.stringify({ error: 'Unauthorized' }),
+          { status: 401, headers: { 'Content-Type': 'application/json' } }
+        );
       }
-    );
-
-    // التحقق من المستخدم
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
-    if (userError || !user) {
+      user = authUser;
+    } else if (isInternalCall) {
+      // استدعاء داخلي من Edge Function أخرى - لا يحتاج JWT
+      console.log('[send-push-notification] Internal call detected, skipping JWT verification');
+    } else {
       return new Response(
-        JSON.stringify({ error: 'Unauthorized' }),
+        JSON.stringify({ error: 'Missing authorization header or internal call flag' }),
         { status: 401, headers: { 'Content-Type': 'application/json' } }
       );
     }

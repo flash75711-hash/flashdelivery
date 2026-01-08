@@ -242,9 +242,10 @@ serve(async (req) => {
           order_id: newOrder.id,
         }));
 
-        // إدراج الإشعارات باستخدام RPC function
+        // إدراج الإشعارات وإرسال Push Notifications
         for (const notification of notifications) {
           try {
+            // إنشاء In-App Notification
             const { error: notifError } = await supabase.rpc('insert_notification_for_driver', {
               p_user_id: notification.user_id,
               p_title: notification.title,
@@ -255,6 +256,36 @@ serve(async (req) => {
 
             if (notifError) {
               console.error(`Error creating notification for driver ${notification.user_id}:`, notifError);
+            }
+
+            // إرسال Push Notification
+            try {
+              const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
+              const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+              
+              const pushResponse = await fetch(`${supabaseUrl}/functions/v1/send-push-notification`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${serviceRoleKey}`,
+                  'X-Internal-Call': 'true',
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  user_id: notification.user_id,
+                  title: notification.title,
+                  message: notification.message,
+                  data: notification.order_id ? { order_id: notification.order_id } : {},
+                }),
+              });
+
+              const pushResult = await pushResponse.json();
+              if (pushResponse.ok && pushResult.sent && pushResult.sent > 0) {
+                console.log(`✅ Push notification sent to driver ${notification.user_id}`);
+              } else {
+                console.log(`⚠️ Push notification not sent to driver ${notification.user_id}:`, pushResult.message || 'No FCM token');
+              }
+            } catch (pushErr) {
+              console.error(`Error sending push notification to driver ${notification.user_id}:`, pushErr);
             }
           } catch (notifErr) {
             console.error(`Exception creating notification for driver ${notification.user_id}:`, notifErr);
