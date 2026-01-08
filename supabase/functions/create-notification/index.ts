@@ -94,6 +94,34 @@ Deno.serve(async (req) => {
       );
     }
 
+    // إرسال Push Notification
+    try {
+      const pushResponse = await fetch(`${supabaseUrl}/functions/v1/send-push-notification`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${supabaseServiceKey}`,
+          'X-Internal-Call': 'true',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: user_id,
+          title: title,
+          message: message,
+          data: order_id ? { order_id: order_id } : {},
+        }),
+      });
+
+      const pushResult = await pushResponse.json();
+      if (pushResponse.ok && pushResult.sent && pushResult.sent > 0) {
+        console.log(`✅ Push notification sent to user ${user_id}`);
+      } else {
+        console.log(`⚠️ Push notification not sent to user ${user_id}:`, pushResult.message || 'No FCM token');
+      }
+    } catch (pushErr) {
+      // لا نوقف العملية إذا فشلت Push Notification
+      console.error('Error sending push notification:', pushErr);
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
