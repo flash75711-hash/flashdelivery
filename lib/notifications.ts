@@ -17,12 +17,37 @@ async function sendPushNotification(userId: string, title: string, message: stri
     // التحقق من وجود session
     const { data: { session } } = await supabase.auth.getSession();
     
+    // إذا لم يكن هناك session، استخدم Edge Function create-notification
+    // لأنها ترسل Push Notification تلقائياً
     if (!session) {
-      console.log('[sendPushNotification] No session, skipping push notification');
-      return;
+      console.log('[sendPushNotification] No session, using create-notification Edge Function');
+      try {
+        const { data: edgeData, error: edgeError } = await supabase.functions.invoke('create-notification', {
+          body: {
+            user_id: userId,
+            title: title,
+            message: message,
+            type: 'info',
+            order_id: data?.order_id || null,
+          },
+        });
+
+        if (edgeError) {
+          console.error('[sendPushNotification] Error from create-notification Edge Function:', edgeError);
+          return;
+        }
+
+        if (edgeData?.success) {
+          console.log('[sendPushNotification] Push notification sent via create-notification Edge Function');
+        }
+        return;
+      } catch (edgeErr) {
+        console.error('[sendPushNotification] Exception calling create-notification Edge Function:', edgeErr);
+        return;
+      }
     }
 
-    // استدعاء Edge Function لإرسال Push Notification
+    // إذا كان هناك session، استخدم send-push-notification Edge Function
     const { data: edgeData, error: edgeError } = await supabase.functions.invoke('send-push-notification', {
       body: {
         user_id: userId,
