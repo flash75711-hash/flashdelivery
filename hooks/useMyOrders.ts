@@ -34,7 +34,8 @@ export interface Order {
   search_status?: string;
   pickup_latitude?: number;
   pickup_longitude?: number;
-  deadline?: string | null;
+  deadline?: string | null; // للحفاظ على التوافق مع الكود القديم
+  driver_response_deadline?: string | null; // الحقل الفعلي في قاعدة البيانات
 }
 
 export function useMyOrders() {

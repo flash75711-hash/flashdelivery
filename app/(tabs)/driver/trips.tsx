@@ -17,6 +17,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import responsive, { createShadowStyle } from '@/utils/responsive';
 import { showSimpleAlert } from '@/lib/alert';
+import OrderSearchCountdown from '@/components/OrderSearchCountdown';
 
 interface Order {
   id: string;
@@ -175,7 +176,7 @@ export default function DriverTripsScreen() {
         
         const { data: driverOrders, error: queryError } = await supabase
           .from('orders')
-          .select('id, status, order_type, items, pickup_address, delivery_address, total_fee, created_at, expires_at, customer_id, driver_id, created_by_role')
+          .select('id, status, order_type, items, pickup_address, delivery_address, total_fee, created_at, expires_at, customer_id, driver_id, created_by_role, search_status')
           .eq('driver_id', user.id)
           .order('created_at', { ascending: false })
           .limit(50);
@@ -220,7 +221,7 @@ export default function DriverTripsScreen() {
           // محاولة جلب جميع الطلبات النشطة ثم تصفية محلياً
           const { data: allActiveOrders, error: altError } = await supabase
             .from('orders')
-            .select('id, status, order_type, items, pickup_address, delivery_address, total_fee, created_at, expires_at, customer_id, driver_id, created_by_role')
+            .select('id, status, order_type, items, pickup_address, delivery_address, total_fee, created_at, expires_at, customer_id, driver_id, created_by_role, search_status')
             .in('status', ['accepted', 'pickedUp', 'inTransit'])
             .order('created_at', { ascending: false })
             .limit(50);
@@ -269,16 +270,31 @@ export default function DriverTripsScreen() {
       const now = new Date().toISOString();
       const { data: availableData, error: availableError } = await supabase
         .from('orders')
-        .select('id, status, order_type, items, pickup_address, delivery_address, total_fee, created_at, expires_at, customer_id, driver_id, created_by_role')
+        .select('id, status, order_type, items, pickup_address, delivery_address, total_fee, created_at, expires_at, customer_id, driver_id, created_by_role, search_status, search_started_at, search_expanded_at')
         .eq('status', 'pending')
         .is('driver_id', null)
         .order('created_at', { ascending: false })
         .limit(50); // تحديد عدد الطلبات
 
-      // تصفية الطلبات المنتهية الصلاحية أو الملغاة
+      // تصفية الطلبات المنتهية الصلاحية أو الملغاة أو المقبولة
       const filteredAvailable = (availableData || []).filter((order: any) => {
         // استبعاد الطلبات الملغاة
-        if (order.status === 'cancelled') return false;
+        if (order.status === 'cancelled') {
+          console.log('🛑 طلب ملغي:', order.id);
+          return false;
+        }
+        
+        // استبعاد الطلبات المقبولة (لأنها لم تعد متاحة)
+        if (order.status === 'accepted' && order.driver_id) {
+          console.log('✅ طلب مقبول من سائق آخر:', order.id);
+          return false;
+        }
+        
+        // استبعاد الطلبات التي انتهى البحث عنها (search_status = 'stopped')
+        if (order.search_status === 'stopped') {
+          console.log('🛑 طلب متوقف البحث:', order.id);
+          return false;
+        }
         
         // استبعاد الطلبات المنتهية الصلاحية
         if (order.expires_at) {
@@ -654,20 +670,6 @@ export default function DriverTripsScreen() {
     });
   };
 
-  const getTimeRemaining = (expiresAt: string | null | undefined): number | null => {
-    if (!expiresAt) return null;
-    const now = new Date().getTime();
-    const expires = new Date(expiresAt).getTime();
-    const remaining = Math.max(0, Math.floor((expires - now) / 1000)); // بالثواني
-    return remaining;
-  };
-
-  const formatTime = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -772,7 +774,6 @@ export default function DriverTripsScreen() {
             </View>
           ) : (
             availableOrders.map((order) => {
-              const timeRemaining = getTimeRemaining(order.expires_at);
               return (
                 <View key={order.id} style={styles.orderCard}>
                   <View style={styles.orderHeader}>
@@ -797,14 +798,12 @@ export default function DriverTripsScreen() {
                     </View>
                   </View>
 
-                  {/* شريط زمني */}
-                  {timeRemaining !== null && timeRemaining > 0 && (
-                    <View style={styles.timerContainer}>
-                      <Ionicons name="time" size={16} color="#FF9500" />
-                      <Text style={styles.timerText}>
-                        متبقي: {formatTime(timeRemaining)}
-                      </Text>
-                    </View>
+                  {/* شريط العداد التنازلي للبحث عن السائقين */}
+                  {order.status === 'pending' && (
+                    <OrderSearchCountdown 
+                      orderId={order.id} 
+                      onRestartSearch={undefined}
+                    />
                   )}
 
                   {order.items && Array.isArray(order.items) && order.items.length > 2 ? (
@@ -842,12 +841,12 @@ export default function DriverTripsScreen() {
                         </TouchableOpacity>
                       )}
                       <TouchableOpacity
-                        style={[styles.acceptButton, (loading || (timeRemaining !== null && timeRemaining <= 0)) && styles.acceptButtonDisabled]}
+                        style={styles.acceptButton}
                         onPress={() => {
                           console.log('👆 [trips] تم الضغط على قبول الطلب:', order.id);
                           handleAcceptOrder(order);
                         }}
-                        disabled={loading || (timeRemaining !== null && timeRemaining <= 0)}
+                        disabled={loading}
                       >
                         {loading ? (
                           <ActivityIndicator size="small" color="#fff" />
@@ -953,22 +952,6 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   statusText: {
     fontSize: responsive.getResponsiveFontSize(12),
     fontWeight: '600',
-  },
-  timerContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 12,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: '#FFF4E6',
-    borderRadius: 8,
-    alignSelf: 'flex-start',
-  },
-  timerText: {
-    fontSize: responsive.getResponsiveFontSize(14),
-    fontWeight: '600',
-    color: '#FF9500',
   },
   addressRow: {
     flexDirection: 'row',

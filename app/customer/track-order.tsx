@@ -16,6 +16,7 @@ import { supabase, geocodeAddress } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import responsive, { createShadowStyle } from '@/utils/responsive';
 import { showSimpleAlert } from '@/lib/alert';
+import OrderTimeline from '@/components/OrderTimeline';
 // WebView is not supported on web, we'll use iframe instead
 
 interface Order {
@@ -29,10 +30,11 @@ interface Order {
   delivery_address: string;
   total_fee: number;
   created_at: string;
+  search_status?: string;
   driver?: {
     full_name?: string;
     phone?: string;
-  };
+  } | null;
 }
 
 interface OrderItem {
@@ -41,8 +43,8 @@ interface OrderItem {
   item_index: number;
   address: string;
   description?: string;
-  latitude?: number;
-  longitude?: number;
+  latitude?: number | null;
+  longitude?: number | null;
   is_picked_up: boolean;
   picked_up_at?: string | null;
 }
@@ -248,7 +250,7 @@ export default function TrackOrderScreen() {
       // محاولة الاستعلام المباشر أولاً
       const { data, error } = await supabase
         .from('orders')
-        .select('id, customer_id, driver_id, status, order_type, items, pickup_address, delivery_address, total_fee, created_at, expires_at, created_by_role, package_description')
+        .select('id, customer_id, driver_id, status, order_type, items, pickup_address, delivery_address, total_fee, created_at, expires_at, created_by_role, package_description, search_status')
         .eq('id', orderId)
         .eq('customer_id', user.id)
         .maybeSingle();
@@ -353,7 +355,7 @@ export default function TrackOrderScreen() {
         
         setOrder({
           ...data,
-          driver: profile || null,
+          driver: profile || undefined,
         });
       } else {
         setOrder(data);
@@ -634,7 +636,7 @@ export default function TrackOrderScreen() {
     const points: Array<{ lat: number; lon: number; label: string; color: string }> = [];
     
     // موقع السائق (إذا كان موجوداً)
-    if (driverLocation) {
+    if (driverLocation && order) {
       points.push({
         lat: driverLocation.lat,
         lon: driverLocation.lon,
@@ -716,7 +718,7 @@ export default function TrackOrderScreen() {
                     setOrderItems(prevItems => 
                       prevItems.map(prevItem => 
                         prevItem.id === item.id 
-                          ? { ...prevItem, latitude: lat, longitude: lon }
+                          ? { ...prevItem, latitude: lat ?? undefined, longitude: lon ?? undefined }
                           : prevItem
                       )
                     );
@@ -967,6 +969,9 @@ export default function TrackOrderScreen() {
         )}
       </View>
 
+      {/* الشريط الزمني للطلب */}
+      <OrderTimeline order={order} />
+
       {/* معلومات السائق */}
       {order.driver_id && order.driver && (
         <View style={styles.driverInfo}>
@@ -981,9 +986,9 @@ export default function TrackOrderScreen() {
       {/* الخريطة */}
       <View style={styles.mapContainer}>
         {mapHtml ? (
-          // @ts-ignore - srcdoc is valid HTML attribute
+          // @ts-ignore - srcDoc is valid HTML attribute for iframe
           <iframe
-            srcdoc={mapHtml}
+            srcDoc={mapHtml}
             style={{
               width: '100%',
               height: '100%',

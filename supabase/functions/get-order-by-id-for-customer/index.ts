@@ -86,7 +86,8 @@ Deno.serve(async (req) => {
         search_expanded_at,
         cancelled_by,
         cancelled_at,
-        deadline
+        deadline,
+        driver_response_deadline
       `)
       .eq('id', orderId)
       .single();

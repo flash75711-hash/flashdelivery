@@ -180,11 +180,6 @@ export default function AdminSettingsScreen() {
           )}
         </View>
 
-        {setting.setting_key === 'max_auto_retry_attempts' && (
-          <Text style={styles.helperText}>
-            💡 عدد المرات التي سيحاول فيها النظام إرسال الطلب تلقائياً للسائقين
-          </Text>
-        )}
         {setting.setting_key === 'driver_response_timeout' && (
           <Text style={styles.helperText}>
             ⏱️ المدة التي ينتظرها النظام للحصول على رد من السائق قبل إعادة المحاولة

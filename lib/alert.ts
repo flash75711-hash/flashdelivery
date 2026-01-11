@@ -29,13 +29,14 @@ export function showToast(
     timer: duration,
     timerProgressBar: false, // إزالة شريط التقدم لتقليل الحجم
     width: 'auto',
-    maxWidth: '350px', // تحديد أقصى عرض
     padding: '0.5rem 0.75rem', // تقليل padding
     background: '#fff',
-    backdrop: false, // إزالة الخلفية المعتمة
-    allowOutsideClick: true,
-    allowEscapeKey: true,
     didOpen: (toast) => {
+      // Set max-width via CSS instead of invalid maxWidth parameter
+      // For toasts, the toast parameter is the popup element itself
+      if (toast && toast instanceof HTMLElement) {
+        toast.style.maxWidth = '350px';
+      }
       toast.addEventListener('mouseenter', Swal.stopTimer);
       toast.addEventListener('mouseleave', Swal.resumeTimer);
     },

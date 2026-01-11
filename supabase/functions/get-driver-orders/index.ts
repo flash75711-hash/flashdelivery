@@ -73,7 +73,11 @@ Deno.serve(async (req) => {
         expires_at,
         customer_id,
         driver_id,
-        created_by_role
+        created_by_role,
+        search_status,
+        search_started_at,
+        search_expanded_at,
+        driver_response_deadline
       `)
       .eq('driver_id', driverId)
       .order('created_at', { ascending: false })

@@ -5,7 +5,7 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import responsive, { createShadowStyle } from '@/utils/responsive';
 import type { Order } from '@/hooks/useMyOrders';
-import { OrderCountdownBar } from './OrderCountdownBar';
+import OrderSearchCountdown from './OrderSearchCountdown';
 import { showConfirm, showSimpleAlert } from '@/lib/alert';
 import { supabase } from '@/lib/supabase';
 import { createNotification } from '@/lib/notifications';
@@ -95,6 +95,11 @@ export default function OrderCard({
     // إذا كان البحث متوقفاً، عرض رسالة واضحة
     if (order.search_status === 'stopped' && status === 'pending') {
       return 'لم يتم العثور على سائق';
+    }
+    
+    // إذا كان البحث جارياً، عرض رسالة واضحة
+    if ((order.search_status === 'searching' || order.search_status === 'expanded') && status === 'pending') {
+      return 'جاري البحث عن سائق';
     }
     
     switch (status) {
@@ -465,7 +470,6 @@ export default function OrderCard({
             </Text>
           </View>
         </View>
-        <OrderCountdownBar deadline={order.deadline || null} />
         <View
           style={[
             styles.statusBadge,
@@ -477,6 +481,14 @@ export default function OrderCard({
           </Text>
         </View>
       </View>
+
+      {/* شريط العداد التنازلي للبحث عن السائقين */}
+      {order.status === 'pending' && (
+        <OrderSearchCountdown 
+          orderId={order.id} 
+          onRestartSearch={onRestartSearch}
+        />
+      )}
 
       {isMultiPoint ? (
         <View style={styles.multiPointContainer}>

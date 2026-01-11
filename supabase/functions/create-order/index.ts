@@ -167,7 +167,23 @@ serve(async (req) => {
       );
     }
 
+    // جلب وقت استجابة السائق من الإعدادات
+    const { data: settings } = await supabase
+      .from('app_settings')
+      .select('setting_value')
+      .eq('setting_key', 'driver_response_timeout')
+      .maybeSingle();
+
+    const timeoutSeconds = settings?.setting_value 
+      ? parseInt(settings.setting_value) 
+      : 300; // 5 دقائق افتراضياً (300 ثانية)
+
+    const driverResponseDeadline = new Date(
+      Date.now() + timeoutSeconds * 1000
+    ).toISOString();
+
     // Build order data
+    const now = new Date().toISOString();
     const orderData: any = {
       customer_id: customerId,
       vendor_id: vendorId || null,
@@ -178,6 +194,11 @@ serve(async (req) => {
       total_fee: totalFee,
       order_type: orderType,
       created_by_role: createdByRole,
+      // إضافة الحقول المطلوبة للعداد التنازلي
+      driver_response_deadline: driverResponseDeadline,
+      search_status: 'searching', // بدء البحث تلقائياً
+      search_started_at: now, // تعيين timestamp لضمان دقة العداد التنازلي
+      search_expanded_at: null, // سيتم تعيينه عند توسيع البحث
     };
 
     // Add optional fields
@@ -222,83 +243,95 @@ serve(async (req) => {
       );
     }
 
-    // إرسال إشعار لجميع السائقين النشطين
+    // بدء البحث التلقائي عن السائقين
     try {
-      // جلب جميع السائقين النشطين
-      const { data: activeDrivers, error: driversError } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('role', 'driver')
-        .eq('status', 'active')
-        .eq('approval_status', 'approved');
-
-      if (!driversError && activeDrivers && activeDrivers.length > 0) {
-        // إنشاء إشعارات لجميع السائقين
-        const notifications = activeDrivers.map((driver) => ({
-          user_id: driver.id,
-          title: 'طلب جديد متاح',
-          message: `طلب جديد من ${orderType === 'package' ? 'توصيل طرد' : 'طلب من خارج'} - السعر: ${totalFee} ج.م`,
-          type: 'info' as const,
-          order_id: newOrder.id,
-        }));
-
-        // إدراج الإشعارات وإرسال Push Notifications
-        for (const notification of notifications) {
+      // تحديد نقطة البحث حسب نوع الطلب
+      let searchPoint: { lat: number; lon: number } | null = null;
+      
+      if (orderType === 'outside') {
+        // طلب من بره: البحث من أبعد نقطة في items
+        if (items && Array.isArray(items) && items.length > 0) {
+          // البحث عن أبعد نقطة (أول نقطة في items هي أبعد نقطة عادة)
+          // لأن items مرتبة من الأبعد للأقرب
+          const farthestItemAddress = items[0]?.address || pickupAddress;
+          
+          // استخدام Nominatim للـ forward geocoding (من العنوان إلى إحداثيات)
           try {
-            // إنشاء In-App Notification
-            const { error: notifError } = await supabase.rpc('insert_notification_for_driver', {
-              p_user_id: notification.user_id,
-              p_title: notification.title,
-              p_message: notification.message,
-              p_type: notification.type,
-              p_order_id: notification.order_id,
+            const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(farthestItemAddress)}&limit=1&accept-language=ar`;
+            const geocodeResponse = await fetch(nominatimUrl, {
+              headers: {
+                'User-Agent': 'FlashDelivery/1.0',
+              },
             });
-
-            if (notifError) {
-              console.error(`Error creating notification for driver ${notification.user_id}:`, notifError);
-            }
-
-            // إرسال Push Notification
-            try {
-              const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
-              const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-              
-              const pushResponse = await fetch(`${supabaseUrl}/functions/v1/send-push-notification`, {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${serviceRoleKey}`,
-                  'X-Internal-Call': 'true',
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  user_id: notification.user_id,
-                  title: notification.title,
-                  message: notification.message,
-                  data: notification.order_id ? { order_id: notification.order_id } : {},
-                }),
-              });
-
-              const pushResult = await pushResponse.json();
-              if (pushResponse.ok && pushResult.sent && pushResult.sent > 0) {
-                console.log(`✅ Push notification sent to driver ${notification.user_id}`);
-              } else {
-                console.log(`⚠️ Push notification not sent to driver ${notification.user_id}:`, pushResult.message || 'No FCM token');
+            
+            if (geocodeResponse.ok) {
+              const geocodeData = await geocodeResponse.json();
+              if (geocodeData && geocodeData.length > 0) {
+                searchPoint = {
+                  lat: parseFloat(geocodeData[0].lat),
+                  lon: parseFloat(geocodeData[0].lon),
+                };
+                console.log(`📍 Using farthest point for search: ${farthestItemAddress} -> (${searchPoint.lat}, ${searchPoint.lon})`);
               }
-            } catch (pushErr) {
-              console.error(`Error sending push notification to driver ${notification.user_id}:`, pushErr);
             }
-          } catch (notifErr) {
-            console.error(`Exception creating notification for driver ${notification.user_id}:`, notifErr);
+          } catch (geocodeErr) {
+            console.error('Error geocoding address for search:', geocodeErr);
           }
         }
-
-        console.log(`✅ Sent notifications to ${activeDrivers.length} active drivers for order ${newOrder.id}`);
-      } else {
-        console.log('No active drivers found to notify');
+      } else if (orderType === 'package') {
+        // توصيل طرد: البحث من نقطة الانطلاق (pickupAddress)
+        try {
+          const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(pickupAddress)}&limit=1&accept-language=ar`;
+          const geocodeResponse = await fetch(nominatimUrl, {
+            headers: {
+              'User-Agent': 'FlashDelivery/1.0',
+            },
+          });
+          
+          if (geocodeResponse.ok) {
+            const geocodeData = await geocodeResponse.json();
+            if (geocodeData && geocodeData.length > 0) {
+              searchPoint = {
+                lat: parseFloat(geocodeData[0].lat),
+                lon: parseFloat(geocodeData[0].lon),
+              };
+            }
+          }
+        } catch (geocodeErr) {
+          console.error('Error geocoding pickup address for search:', geocodeErr);
+        }
       }
-    } catch (notificationError) {
-      // لا نوقف العملية إذا فشلت الإشعارات
-      console.error('Error sending notifications to drivers:', notificationError);
+
+      // إذا تم تحديد نقطة البحث، ابدأ البحث التلقائي
+      if (searchPoint) {
+        try {
+          const searchResponse = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/start-order-search`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              order_id: newOrder.id,
+              search_point: searchPoint,
+            }),
+          });
+
+          const searchResult = await searchResponse.json();
+          if (searchResponse.ok && searchResult.success) {
+            console.log(`✅ Started automatic search for order ${newOrder.id} from point (${searchPoint.lat}, ${searchPoint.lon})`);
+          } else {
+            console.error('Error starting order search:', searchResult.error);
+          }
+        } catch (searchErr) {
+          console.error('Exception starting order search:', searchErr);
+        }
+      } else {
+        console.log('⚠️ Could not determine search point, skipping automatic search');
+      }
+    } catch (searchError) {
+      // لا نوقف العملية إذا فشل البحث
+      console.error('Error starting order search:', searchError);
     }
 
     return new Response(

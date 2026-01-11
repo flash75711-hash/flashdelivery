@@ -17,9 +17,7 @@ CREATE TABLE IF NOT EXISTS app_settings (
 
 -- إضافة الإعدادات الافتراضية
 INSERT INTO app_settings (setting_key, setting_value, setting_type, description, category) VALUES
-  ('driver_response_timeout', '30', 'number', 'مدة انتظار رد السائق بالثواني', 'orders'),
-  ('max_auto_retry_attempts', '3', 'number', 'عدد محاولات إعادة الإرسال التلقائية', 'orders'),
-  ('retry_interval', '30', 'number', 'الفاصل الزمني بين كل محاولة (بالثواني)', 'orders')
+  ('driver_response_timeout', '30', 'number', 'مدة انتظار رد السائق بالثواني', 'orders')
 ON CONFLICT (setting_key) DO NOTHING;
 
 -- إضافة أعمدة جديدة لجدول orders
@@ -120,48 +118,7 @@ END;
 $$;
 
 -- Function لإعادة محاولة الطلب
-CREATE OR REPLACE FUNCTION retry_order_search(p_order_id UUID)
-RETURNS BOOLEAN
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-  v_timeout INTEGER;
-  v_current_retry INTEGER;
-  v_max_retries INTEGER;
-BEGIN
-  -- جلب الإعدادات
-  SELECT setting_value::INTEGER INTO v_timeout
-  FROM app_settings
-  WHERE setting_key = 'driver_response_timeout';
-  
-  SELECT setting_value::INTEGER INTO v_max_retries
-  FROM app_settings
-  WHERE setting_key = 'max_auto_retry_attempts';
-  
-  -- جلب عدد المحاولات الحالي
-  SELECT retry_count INTO v_current_retry
-  FROM orders
-  WHERE id = p_order_id;
-  
-  -- التحقق من أننا لم نتجاوز الحد الأقصى
-  IF v_current_retry >= v_max_retries THEN
-    RETURN FALSE;
-  END IF;
-  
-  -- تحديث الطلب
-  UPDATE orders
-  SET 
-    driver_response_deadline = NOW() + (v_timeout || ' seconds')::INTERVAL,
-    retry_count = retry_count + 1,
-    last_retry_at = NOW(),
-    driver_id = NULL  -- إعادة تعيين السائق للبحث مرة أخرى
-  WHERE id = p_order_id
-    AND status = 'pending';
-  
-  RETURN FOUND;
-END;
-$$;
+-- تم إزالة function retry_order_search - نظام إعادة المحاولات التلقائية غير مفعّل حالياً
 
 -- Trigger لتحديث updated_at تلقائياً
 CREATE OR REPLACE FUNCTION update_app_settings_timestamp()
@@ -187,7 +144,7 @@ COMMENT ON COLUMN app_settings.category IS 'تصنيف الإعداد';
 
 COMMENT ON FUNCTION get_app_setting IS 'جلب قيمة إعداد معين';
 COMMENT ON FUNCTION update_app_setting IS 'تحديث إعداد (للمدراء فقط)';
-COMMENT ON FUNCTION retry_order_search IS 'إعادة محاولة البحث عن سائق للطلب';
+-- تم إزالة function retry_order_search
 
 
 

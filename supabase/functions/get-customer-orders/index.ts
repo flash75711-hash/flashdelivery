@@ -65,6 +65,9 @@ Deno.serve(async (req) => {
       .eq('customer_id', customerId)
       .order('created_at', { ascending: false })
       .limit(100);
+    
+    // التأكد من وجود driver_response_deadline في البيانات
+    // (select('*') يجب أن يجلب جميع الحقول تلقائياً)
 
     if (ordersError) {
       console.error('Error fetching orders:', ordersError);

@@ -18,6 +18,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import responsive, { createShadowStyle } from '@/utils/responsive';
 import { createNotification } from '@/lib/notifications';
 import { showAlert, showSimpleAlert, showConfirm } from '@/lib/alert';
+import OrderTimeline from '@/components/OrderTimeline';
 
 interface Order {
   id: string;
@@ -367,6 +368,9 @@ export default function OrderDetailScreen() {
               </Text>
             </TouchableOpacity>
           )}
+
+          {/* الشريط الزمني للطلب */}
+          <OrderTimeline order={order} />
 
           {/* أزرار إعادة البحث وإلغاء الطلب للعميل عندما البحث متوقف */}
           {isCustomer && order.search_status === 'stopped' && order.status === 'pending' && (
