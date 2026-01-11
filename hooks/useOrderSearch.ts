@@ -238,14 +238,14 @@ export function useOrderSearch({
       }
     }, 1000);
 
-    // التحقق من قبول الطلب كل ثانية
+    // التحقق من قبول الطلب كل 5 ثوان (تقليل من كل ثانية لتقليل استدعاءات API)
     checkIntervalRef.current = setInterval(async () => {
       const accepted = await checkOrderAccepted();
       if (accepted) {
         clearInterval(intervalRef.current!);
         clearInterval(checkIntervalRef.current!);
       }
-    }, 1000);
+    }, 5000); // تقليل من 1 ثانية إلى 5 ثوان
   }, [orderId, searchPoint, settings, findDriversInRadius, notifyDrivers, checkOrderAccepted, loadSettings]);
 
   // توسيع البحث
@@ -291,14 +291,14 @@ export function useOrderSearch({
       }
     }, 1000);
 
-    // التحقق من قبول الطلب
+    // التحقق من قبول الطلب كل 5 ثوان (تقليل من كل ثانية لتقليل استدعاءات API)
     checkIntervalRef.current = setInterval(async () => {
       const accepted = await checkOrderAccepted();
       if (accepted) {
         clearInterval(intervalRef.current!);
         clearInterval(checkIntervalRef.current!);
       }
-    }, 1000);
+    }, 5000); // تقليل من 1 ثانية إلى 5 ثوان
   }, [orderId, settings, foundDrivers, findDriversInRadius, notifyDrivers, checkOrderAccepted]);
 
   // إيقاف البحث

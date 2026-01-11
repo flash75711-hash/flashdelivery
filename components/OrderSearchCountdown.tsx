@@ -31,6 +31,8 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
   const localStartTimeRef = useRef<number | null>(null);
   const fastPollingActiveRef = useRef<boolean>(false);
   const fastPollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastDbCheckRef = useRef<number>(0); // لتتبع آخر وقت fetch من قاعدة البيانات
+  const dbCheckThrottle = 5000; // 5 ثوان - throttle للـ database checks
 
   useEffect(() => {
     // جلب الإعدادات
@@ -287,19 +289,23 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
         return prev;
       });
       
-      // جلب البيانات من قاعدة البيانات للتأكد من التزامن
-      supabase
-        .from('orders')
-        .select('search_status, search_started_at, search_expanded_at')
-        .eq('id', orderId)
-        .single()
-        .then(({ data, error }) => {
-          if (!error && data) {
-            updateTimeRemaining(data, settingsRef.current);
-          } else if (error) {
-            console.error(`[OrderSearchCountdown] Error fetching order status:`, error);
-          }
-        });
+      // جلب البيانات من قاعدة البيانات للتأكد من التزامن (مع throttle لتجنب الاستدعاءات المفرطة)
+      const now = Date.now();
+      if (now - lastDbCheckRef.current > dbCheckThrottle) {
+        lastDbCheckRef.current = now;
+        supabase
+          .from('orders')
+          .select('search_status, search_started_at, search_expanded_at')
+          .eq('id', orderId)
+          .single()
+          .then(({ data, error }) => {
+            if (!error && data) {
+              updateTimeRemaining(data, settingsRef.current);
+            } else if (error) {
+              console.error(`[OrderSearchCountdown] Error fetching order status:`, error);
+            }
+          });
+      }
     }, 1000);
 
     return () => {
@@ -452,31 +458,9 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
     });
   }, [orderId, searchStatus, timeRemaining, currentRadius]);
 
-  // إذا توقف البحث، عرض رسالة واضحة مع زر إعادة البحث
+  // إذا توقف البحث، لا نعرض شيئاً (تم حذف البطاقة لأن الوظيفة متكررة)
   if (searchStatus === 'stopped') {
-    return (
-      <View style={styles.container}>
-        <View style={[styles.countdownBar, styles.stoppedBar]}>
-          <Ionicons name="close-circle" size={20} color="#FF3B30" />
-          <View style={styles.stoppedContent}>
-            <View style={styles.stoppedTextContainer}>
-              <Text style={styles.stoppedStatusText}>انتهى البحث - لم يتم العثور على سائق</Text>
-              <Text style={styles.stoppedHintText}>لم يتم العثور على سائق متاح في النطاق المحدد</Text>
-            </View>
-            {onRestartSearch && (
-              <TouchableOpacity 
-                style={styles.restartButton}
-                onPress={onRestartSearch}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="refresh" size={18} color="#007AFF" />
-                <Text style={styles.restartButtonText}>إعادة البحث</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-      </View>
-    );
+    return null;
   }
 
   // إذا تم العثور على سائق، لا نعرض شيئاً
@@ -646,47 +630,6 @@ const styles = StyleSheet.create({
   progressBar: {
     height: '100%',
     borderRadius: 2,
-  },
-  stoppedBar: {
-    borderLeftColor: '#FF3B30',
-    backgroundColor: '#FFF5F5',
-  },
-  stoppedContent: {
-    flex: 1,
-    gap: 8,
-  },
-  stoppedTextContainer: {
-    flex: 1,
-  },
-  stoppedStatusText: {
-    fontSize: responsive.getResponsiveFontSize(14),
-    fontWeight: '600',
-    color: '#FF3B30',
-    textAlign: 'right',
-  },
-  stoppedHintText: {
-    fontSize: responsive.getResponsiveFontSize(12),
-    color: '#666',
-    textAlign: 'right',
-    marginTop: 4,
-  },
-  restartButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    backgroundColor: '#F0F7FF',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#007AFF',
-    marginTop: 4,
-  },
-  restartButtonText: {
-    fontSize: responsive.getResponsiveFontSize(13),
-    fontWeight: '600',
-    color: '#007AFF',
   },
   expansionNotice: {
     flexDirection: 'row',

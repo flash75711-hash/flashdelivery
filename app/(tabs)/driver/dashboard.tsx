@@ -158,12 +158,21 @@ export default function DriverDashboardScreen() {
         )
         .subscribe((status) => {
           console.log('DriverDashboard: Wallet channel subscription status:', status);
+          // حفظ حالة الاشتراك في ref للتحقق منها في polling
+          (walletChannel as any).__subscriptionStatus = status;
         });
       
-      // إضافة interval للتحقق من رصيد المحفظة كل 5 ثوان (كحل احتياطي)
+      // إضافة interval للتحقق من رصيد المحفظة كل 30 ثانية (كحل احتياطي) - تقليل من 5 ثوان
+      // إذا كان Realtime subscription يعمل، لا نحتاج للـ polling
       const walletCheckInterval = setInterval(() => {
+        // التحقق من أن Realtime subscription لا يزال نشطاً
+        const walletStatus = (walletChannel as any)?.__subscriptionStatus;
+        if (walletChannel && walletStatus === 'SUBSCRIBED') {
+          // Realtime يعمل، لا حاجة للـ polling
+          return;
+        }
         loadWalletBalance();
-      }, 5000);
+      }, 30000); // تقليل من 5 ثوان إلى 30 ثانية
 
       return () => {
         // تنظيف عند unmount
@@ -204,6 +213,7 @@ export default function DriverDashboardScreen() {
 
     console.log('DriverDashboard: Starting approval polling for pending status...');
     
+    // تقليل تكرار التحقق من الموافقة من كل 5 ثوان إلى كل 30 ثانية
     const checkApprovalInterval = setInterval(async () => {
       try {
         console.log('DriverDashboard: Polling - Checking approval status...');
@@ -242,7 +252,7 @@ export default function DriverDashboardScreen() {
       } catch (error) {
         console.error('DriverDashboard: Error checking approval status:', error);
       }
-    }, 5000); // كل 5 ثواني (أسرع)
+    }, 30000); // تقليل من 5 ثوان إلى 30 ثانية لتقليل استدعاءات API
 
     return () => {
       console.log('DriverDashboard: Stopping approval polling');

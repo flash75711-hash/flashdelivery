@@ -198,10 +198,15 @@ export function useMyOrders() {
                 return prev;
               });
               
-              // إعادة تحميل الطلبات بعد تأخير للتأكد من التحديث الكامل
-              setTimeout(() => {
-                loadOrders();
-              }, 1000);
+              // إعادة تحميل الطلبات بعد تأخير للتأكد من التحديث الكامل (مع debounce لتجنب cascade)
+              // نستخدم ref لتتبع آخر وقت تحميل
+              const lastReloadTime = Date.now();
+              if (lastReloadTime - (window as any).__lastOrdersReload || 0 > 2000) {
+                (window as any).__lastOrdersReload = lastReloadTime;
+                setTimeout(() => {
+                  loadOrders();
+                }, 2000); // زيادة التأخير لتقليل cascade
+              }
             } else if (payload.eventType === 'INSERT' && payload.new) {
               // إضافة طلب جديد
               const newOrder = payload.new as Order;
@@ -220,10 +225,14 @@ export function useMyOrders() {
                 return prev;
               });
               
-              // إعادة تحميل بعد تأخير
-              setTimeout(() => {
-                loadOrders();
-              }, 1000);
+              // إعادة تحميل بعد تأخير (مع debounce لتجنب cascade)
+              const lastReloadTime = Date.now();
+              if (lastReloadTime - (window as any).__lastOrdersReload || 0 > 2000) {
+                (window as any).__lastOrdersReload = lastReloadTime;
+                setTimeout(() => {
+                  loadOrders();
+                }, 2000); // زيادة التأخير لتقليل cascade
+              }
             } else if (payload.eventType === 'DELETE' && payload.old) {
               // حذف الطلب من الـ state
               setOrders(prev => prev.filter(o => o.id !== payload.old.id));
@@ -257,16 +266,16 @@ export function useMyOrders() {
     // إعداد الاشتراك
     setupSubscription();
 
-    // Polling كل 5 ثوانٍ كـ fallback للتأكد من التحديثات
+    // Polling كل 30 ثانية كـ fallback للتأكد من التحديثات (تقليل من 5 ثوان)
     // حتى لو كان الاشتراك يعمل، نستخدم polling كـ backup
     const pollingInterval = setInterval(() => {
       const timeSinceLastUpdate = Date.now() - lastUpdateTime;
-      // إذا مر أكثر من 5 ثوانٍ، نعيد تحميل البيانات للتأكد من التحديثات
-      if (timeSinceLastUpdate > 5000) {
+      // إذا مر أكثر من 30 ثانية، نعيد تحميل البيانات للتأكد من التحديثات
+      if (timeSinceLastUpdate > 30000) {
         loadOrders();
         lastUpdateTime = Date.now();
       }
-    }, 5000);
+    }, 30000); // تقليل من 5 ثوان إلى 30 ثانية
 
     return () => {
       if (subscription) {

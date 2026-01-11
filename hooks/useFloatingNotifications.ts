@@ -129,12 +129,16 @@ export function useFloatingNotifications() {
       if (!userId) {
         if (retryCount < maxRetries && isMounted) {
           retryCount++;
-          // إعادة المحاولة بعد ثانية واحدة
+          // إعادة المحاولة بعد ثانية واحدة (مع exponential backoff)
+          const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 10000); // max 10 seconds
           setTimeout(() => {
             if (isMounted) {
               initializeNotifications();
             }
-          }, 1000);
+          }, delay);
+        } else if (retryCount >= maxRetries) {
+          // توقف بعد maxRetries لتجنب infinite loop
+          console.error('[useFloatingNotifications] Max retries reached, stopping initialization');
         }
         return;
       }
@@ -190,6 +194,9 @@ export function useFloatingNotifications() {
       )
         .subscribe((status, err) => {
           if (!isMounted) return;
+          
+          // حفظ حالة الاشتراك في ref للتحقق منها في polling
+          (notificationsChannel as any).__subscriptionStatus = status;
           
           if (status === 'CHANNEL_ERROR') {
             console.error('[useFloatingNotifications] خطأ في الاشتراك في Realtime', {
@@ -300,8 +307,15 @@ export function useFloatingNotifications() {
 
     loadUnreadNotifications();
 
-    // Fallback: التحقق من الإشعارات الجديدة كل 3 ثواني (في حالة فشل Realtime)
+    // Fallback: التحقق من الإشعارات الجديدة كل 10 ثواني (في حالة فشل Realtime) - تقليل من 3 ثوان
+    // إذا كان Realtime subscription يعمل، لا نحتاج للـ polling
           pollInterval = setInterval(async () => {
+            // التحقق من أن Realtime subscription لا يزال نشطاً
+            const channelStatus = (notificationsChannel as any)?.__subscriptionStatus;
+            if (notificationsChannel && channelStatus === 'SUBSCRIBED') {
+              // Realtime يعمل، لا حاجة للـ polling
+              return;
+            }
             if (!isMounted || !userId) return;
             
       try {
