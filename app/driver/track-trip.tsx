@@ -1054,12 +1054,15 @@ export default function TrackTripScreen() {
           });
           
           // إضافة المبلغ لمحفظة السائق باستخدام Edge Function
+          // إرسال deliveryFee و itemsFee منفصلين لحساب العمولة من حساب المشوار فقط
           const { data, error: driverWalletError } = await supabase.functions.invoke('add-to-driver-wallet', {
             body: {
               driverId: user.id,
-              amount: totalDue,
+              amount: totalDue, // للتوافق مع الكود القديم
               orderId: order.id,
               description: `تحصيل من طلب #${order.id.substring(0, 8)}`,
+              deliveryFee: order.total_fee, // حساب المشوار فقط
+              itemsFee: totalItemsFee, // حساب العناصر
             },
           });
 

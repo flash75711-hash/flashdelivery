@@ -8,9 +8,11 @@ const corsHeaders = {
 
 interface AddToDriverWalletRequest {
   driverId: string;
-  amount: number;
+  amount: number; // المبلغ الكلي (للتوافق مع الكود القديم)
   orderId: string;
   description?: string;
+  deliveryFee?: number; // حساب المشوار (اختياري - إذا لم يُرسل، نستخدم amount)
+  itemsFee?: number; // حساب العناصر (اختياري)
 }
 
 Deno.serve(async (req) => {
@@ -29,7 +31,7 @@ Deno.serve(async (req) => {
     });
 
     const body: AddToDriverWalletRequest = await req.json();
-    const { driverId, amount, orderId, description } = body;
+    const { driverId, amount, orderId, description, deliveryFee, itemsFee } = body;
 
     if (!driverId || amount === undefined || amount <= 0 || !orderId) {
       return new Response(
@@ -67,8 +69,27 @@ Deno.serve(async (req) => {
       .single();
 
     const commissionRate = commissionSetting ? parseFloat(commissionSetting.setting_value) : 10; // افتراضي 10%
-    const commission = (amount * commissionRate) / 100;
-    const driverAmount = amount - commission;
+    
+    // حساب العمولة من حساب المشوار فقط (deliveryFee) وليس من الحساب الكلي
+    // إذا لم يُرسل deliveryFee، نستخدم amount للتوافق مع الكود القديم
+    const actualDeliveryFee = deliveryFee !== undefined ? deliveryFee : amount;
+    const actualItemsFee = itemsFee !== undefined ? itemsFee : 0;
+    
+    // العمولة تُحسب من حساب المشوار فقط
+    const commission = (actualDeliveryFee * commissionRate) / 100;
+    
+    // المبلغ الذي يحصل عليه السائق = (حساب المشوار - العمولة) + حساب العناصر
+    const driverAmount = (actualDeliveryFee - commission) + actualItemsFee;
+    
+    console.log(`[add-to-driver-wallet] Commission calculation:`, {
+      totalAmount: amount,
+      deliveryFee: actualDeliveryFee,
+      itemsFee: actualItemsFee,
+      commissionRate: `${commissionRate}%`,
+      commission: commission,
+      driverAmount: driverAmount,
+      note: 'العمولة تُحسب من حساب المشوار فقط',
+    });
 
     // إضافة المبلغ لمحفظة السائق
     const { data: walletEntry, error: walletError } = await supabase

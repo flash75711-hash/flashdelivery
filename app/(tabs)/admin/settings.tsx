@@ -47,11 +47,16 @@ export default function AdminSettingsScreen() {
 
       if (error) throw error;
 
-      setSettings(data || []);
+      // تصفية max_auto_retry_attempts لأن الوظيفة متكررة وليس لها لازمة
+      const filteredData = (data || []).filter(
+        setting => setting.setting_key !== 'max_auto_retry_attempts'
+      );
+
+      setSettings(filteredData);
       
-      // تهيئة القيم المعدلة
+      // تهيئة القيم المعدلة (مع تصفية max_auto_retry_attempts)
       const initialValues: Record<string, string> = {};
-      data?.forEach(setting => {
+      filteredData.forEach(setting => {
         initialValues[setting.setting_key] = setting.setting_value;
       });
       setEditedValues(initialValues);
