@@ -169,9 +169,13 @@ export function useMyOrders() {
           (payload) => {
             lastUpdateTime = Date.now();
             
-            // تحديث فوري للـ state إذا كان التحديث متعلقاً بحالة الطلب
+              // تحديث فوري للـ state إذا كان التحديث متعلقاً بحالة الطلب
             if (payload.eventType === 'UPDATE' && payload.new) {
               const updatedOrder = payload.new as Order;
+              const oldOrder = payload.old as Order;
+              
+              // تحديد ما إذا كان هذا قبول طلب (status تغير من pending إلى accepted)
+              const isOrderAccepted = oldOrder?.status === 'pending' && updatedOrder.status === 'accepted' && updatedOrder.driver_id;
               
               // تحديث فوري للـ state
               setOrders(prev => {
@@ -198,14 +202,19 @@ export function useMyOrders() {
                 return prev;
               });
               
-              // إعادة تحميل الطلبات بعد تأخير للتأكد من التحديث الكامل (مع debounce لتجنب cascade)
-              // نستخدم ref لتتبع آخر وقت تحميل
-              const lastReloadTime = Date.now();
-              if (lastReloadTime - (window as any).__lastOrdersReload || 0 > 2000) {
-                (window as any).__lastOrdersReload = lastReloadTime;
-                setTimeout(() => {
-                  loadOrders();
-                }, 2000); // زيادة التأخير لتقليل cascade
+              // عند قبول الطلب، نعيد التحميل فوراً (بدون تأخير) للعميل
+              if (isOrderAccepted && user.role === 'customer') {
+                // تحديث فوري بدون تأخير
+                loadOrders();
+              } else {
+                // للتحسينات الأخرى، نستخدم debounce
+                const lastReloadTime = Date.now();
+                if (lastReloadTime - ((window as any).__lastOrdersReload || 0) > 2000) {
+                  (window as any).__lastOrdersReload = lastReloadTime;
+                  setTimeout(() => {
+                    loadOrders();
+                  }, 2000);
+                }
               }
             } else if (payload.eventType === 'INSERT' && payload.new) {
               // إضافة طلب جديد

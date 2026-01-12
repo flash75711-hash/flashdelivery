@@ -103,6 +103,9 @@ Deno.serve(async (req) => {
       .select('id, customer_id, driver_id, status')
       .eq('id', orderId)
       .single();
+    
+    // تحديد ما إذا كان هذا قبول طلب جديد (status = 'accepted' و driverId موجود)
+    const isAcceptingOrder = status === 'accepted' && driverId && existingOrder?.status === 'pending' && !existingOrder?.driver_id;
 
     if (checkError && checkError.code !== 'PGRST116') {
       console.error('Error checking order:', checkError);
@@ -155,6 +158,38 @@ Deno.serve(async (req) => {
       .eq('id', orderId)
       .select()
       .single();
+
+    // إرسال إشعار للعميل فوراً عند قبول الطلب (قبل معالجة الأخطاء)
+    if (isAcceptingOrder && existingOrder?.customer_id) {
+      try {
+        console.log('[update-order] إرسال إشعار للعميل عند قبول الطلب...', {
+          customer_id: existingOrder.customer_id,
+          order_id: orderId,
+        });
+        
+        // إرسال الإشعار للعميل
+        const { error: notifError } = await supabase
+          .from('notifications')
+          .insert({
+            user_id: existingOrder.customer_id,
+            title: 'تم قبول طلبك',
+            message: 'تم قبول طلبك وسيتم البدء في التوصيل قريباً.',
+            type: 'success',
+            order_id: orderId,
+            is_read: false,
+          });
+        
+        if (notifError) {
+          console.error('[update-order] خطأ في إرسال الإشعار للعميل:', notifError);
+          // لا نوقف العملية إذا فشل الإشعار
+        } else {
+          console.log('[update-order] تم إرسال إشعار للعميل بنجاح');
+        }
+      } catch (notifErr) {
+        console.error('[update-order] خطأ في إرسال الإشعار (catch):', notifErr);
+        // لا نوقف العملية إذا فشل الإشعار
+      }
+    }
 
     if (updateError) {
       console.error('Error updating order:', updateError);
