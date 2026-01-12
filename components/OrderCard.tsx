@@ -64,7 +64,10 @@ export default function OrderCard({
   }, [isDriverInNegotiation, order.negotiated_price, order.total_fee]);
   
   // Wrapper function لـ onRestartSearch لتتوافق مع OrderSearchCountdown
-  const handleRestartSearch = useCallback(() => {
+  const handleRestartSearch = useCallback((e?: any) => {
+    if (e) {
+      e.stopPropagation();
+    }
     if (onRestartSearch) {
       onRestartSearch(order);
     }
@@ -436,13 +439,6 @@ export default function OrderCard({
       showSimpleAlert('خطأ', error.message || 'فشل قبول الاقتراح', 'error');
     } finally {
       setIsNegotiating(false);
-    }
-  };
-
-  const handleRestartSearch = (e: any) => {
-    e.stopPropagation();
-    if (onRestartSearch) {
-      onRestartSearch(order);
     }
   };
 
