@@ -285,9 +285,12 @@ Deno.serve(async (req) => {
             p_type: 'info',
             p_order_id: order_id,
           });
+          notifiedCount++;
+          console.log(`[expand-order-search] ✅ In-app notification created for driver ${driver.driver_id} (distance: ${driver.distance_km?.toFixed(2) || 'N/A'} km)`);
 
           // إرسال Push Notification
           try {
+            console.log(`[expand-order-search] 📤 Attempting to send push notification to driver ${driver.driver_id}...`);
             const pushResponse = await fetch(`${supabaseUrl}/functions/v1/send-push-notification`, {
               method: 'POST',
               headers: {
@@ -302,13 +305,23 @@ Deno.serve(async (req) => {
                 data: { order_id: order_id },
               }),
             });
+            
             const pushResult = await pushResponse.json();
+            console.log(`[expand-order-search] Push notification response for driver ${driver.driver_id}:`, {
+              status: pushResponse.status,
+              ok: pushResponse.ok,
+              sent: pushResult.sent,
+              result: pushResult,
+            });
+            
             if (pushResponse.ok && pushResult.sent && pushResult.sent > 0) {
-              notifiedCount++;
-              console.log(`✅ Push notification sent to driver ${driver.driver_id}`);
+              pushSentCount++;
+              console.log(`✅ [expand-order-search] Push notification sent successfully to driver ${driver.driver_id}`);
+            } else {
+              console.warn(`⚠️ [expand-order-search] Push notification not sent to driver ${driver.driver_id}:`, pushResult);
             }
           } catch (pushErr) {
-            console.error(`Error sending push notification to driver ${driver.driver_id}:`, pushErr);
+            console.error(`❌ [expand-order-search] Error sending push notification to driver ${driver.driver_id}:`, pushErr);
           }
         } catch (notifErr) {
           console.error(`Error notifying driver ${driver.driver_id}:`, notifErr);
