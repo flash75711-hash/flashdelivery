@@ -132,15 +132,27 @@ Deno.serve(async (req) => {
     if (initialError) {
       console.error('[start-order-search] ❌ Error finding drivers in initial radius:', initialError);
     } else {
-      console.log(`[start-order-search] ✅ Found ${initialDrivers?.length || 0} drivers in initial radius (0-${initialRadius} km)`);
-    }
-
-    // إرسال Push Notifications للسائقين في النطاق 0-5 كيلو
-    console.log(`[start-order-search] 📤 Sending push notifications to ${initialDrivers?.length || 0} drivers in radius 0-${initialRadius} km`);
-    if (initialDrivers && initialDrivers.length > 0) {
-      for (const driver of initialDrivers) {
+      // التحقق من أن جميع السائقين في النطاق المحدد
+      const validInitialDrivers = initialDrivers?.filter(driver => {
+        if (driver.distance_km && driver.distance_km > initialRadius) {
+          console.warn(`[start-order-search] ⚠️ Driver ${driver.driver_id} is ${driver.distance_km.toFixed(2)} km away (exceeds ${initialRadius} km limit)`);
+          return false;
+        }
+        return true;
+      }) || [];
+      
+      console.log(`[start-order-search] ✅ Found ${initialDrivers?.length || 0} drivers, ${validInitialDrivers.length} within ${initialRadius} km radius`);
+      
+      // استخدام validInitialDrivers فقط
+      const driversToNotify = validInitialDrivers;
+      
+      // إرسال Push Notifications للسائقين في النطاق 0-5 كيلو
+      console.log(`[start-order-search] 📤 Sending push notifications to ${driversToNotify.length} drivers in radius 0-${initialRadius} km`);
+      let pushSentCount = 0;
+      if (driversToNotify && driversToNotify.length > 0) {
+        for (const driver of driversToNotify) {
         try {
-          console.log(`[start-order-search] Notifying driver ${driver.driver_id}...`);
+          console.log(`[start-order-search] Notifying driver ${driver.driver_id} (distance: ${driver.distance_km?.toFixed(2) || 'N/A'} km)...`);
           await supabase.rpc('insert_notification_for_driver', {
             p_user_id: driver.driver_id,
             p_title: 'طلب جديد متاح',
@@ -152,7 +164,7 @@ Deno.serve(async (req) => {
 
           // إرسال Push Notification
           try {
-            console.log(`[start-order-search] Sending push notification to driver ${driver.driver_id}...`);
+            console.log(`[start-order-search] 📤 Attempting to send push notification to driver ${driver.driver_id}...`);
             const pushResponse = await fetch(`${supabaseUrl}/functions/v1/send-push-notification`, {
               method: 'POST',
               headers: {
@@ -167,9 +179,18 @@ Deno.serve(async (req) => {
                 data: { order_id: order_id },
               }),
             });
+            
             const pushResult = await pushResponse.json();
+            console.log(`[start-order-search] Push notification response for driver ${driver.driver_id}:`, {
+              status: pushResponse.status,
+              ok: pushResponse.ok,
+              sent: pushResult.sent,
+              result: pushResult,
+            });
+            
             if (pushResponse.ok && pushResult.sent && pushResult.sent > 0) {
-              console.log(`✅ [start-order-search] Push notification sent to driver ${driver.driver_id}`);
+              pushSentCount++;
+              console.log(`✅ [start-order-search] Push notification sent successfully to driver ${driver.driver_id}`);
             } else {
               console.warn(`⚠️ [start-order-search] Push notification not sent to driver ${driver.driver_id}:`, pushResult);
             }
@@ -180,6 +201,10 @@ Deno.serve(async (req) => {
           console.error(`Error notifying driver ${driver.driver_id}:`, notifErr);
         }
       }
+      
+      console.log(`[start-order-search] 📊 Summary: ${driversToNotify.length} drivers notified, ${pushSentCount} push notifications sent`);
+    } else {
+      console.log(`[start-order-search] ⚠️ No drivers found in initial radius (0-${initialRadius} km)`);
     }
 
     // بدء البحث الموسع بعد انتهاء المدة الأولية (30 ثانية)
@@ -248,16 +273,28 @@ Deno.serve(async (req) => {
       if (expandedError) {
         console.error('[start-order-search] ❌ Error finding drivers in expanded radius:', expandedError);
       } else {
-        console.log(`[start-order-search] ✅ Found ${expandedDrivers?.length || 0} drivers in expanded radius (0-${expandedRadius} km)`);
-      }
-
-      // إرسال Push Notifications لجميع السائقين في النطاق 0-10 كيلو
-      // وليس فقط السائقين الجدد، لأن النطاق الموسع يبدأ من 0
-      console.log(`[start-order-search] 📤 Sending push notifications to ${expandedDrivers?.length || 0} drivers in expanded radius (0-${expandedRadius} km)`);
-      if (expandedDrivers && expandedDrivers.length > 0) {
-        for (const driver of expandedDrivers) {
+        // التحقق من أن جميع السائقين في النطاق المحدد
+        const validExpandedDrivers = expandedDrivers?.filter(driver => {
+          if (driver.distance_km && driver.distance_km > expandedRadius) {
+            console.warn(`[start-order-search] ⚠️ Driver ${driver.driver_id} is ${driver.distance_km.toFixed(2)} km away (exceeds ${expandedRadius} km limit)`);
+            return false;
+          }
+          return true;
+        }) || [];
+        
+        console.log(`[start-order-search] ✅ Found ${expandedDrivers?.length || 0} drivers, ${validExpandedDrivers.length} within ${expandedRadius} km radius`);
+        
+        // استخدام validExpandedDrivers فقط
+        const driversToNotifyExpanded = validExpandedDrivers;
+        
+        // إرسال Push Notifications لجميع السائقين في النطاق 0-10 كيلو
+        // وليس فقط السائقين الجدد، لأن النطاق الموسع يبدأ من 0
+        console.log(`[start-order-search] 📤 Sending push notifications to ${driversToNotifyExpanded.length} drivers in expanded radius (0-${expandedRadius} km)`);
+        let pushSentCountExpanded = 0;
+        if (driversToNotifyExpanded && driversToNotifyExpanded.length > 0) {
+          for (const driver of driversToNotifyExpanded) {
           try {
-            console.log(`[start-order-search] Notifying driver ${driver.driver_id} (expanded radius)...`);
+            console.log(`[start-order-search] Notifying driver ${driver.driver_id} (expanded radius, distance: ${driver.distance_km?.toFixed(2) || 'N/A'} km)...`);
             await supabase.rpc('insert_notification_for_driver', {
               p_user_id: driver.driver_id,
               p_title: 'طلب جديد متاح',
@@ -269,7 +306,7 @@ Deno.serve(async (req) => {
 
             // إرسال Push Notification
             try {
-              console.log(`[start-order-search] Sending push notification to driver ${driver.driver_id} (expanded radius)...`);
+              console.log(`[start-order-search] 📤 Attempting to send push notification to driver ${driver.driver_id} (expanded radius)...`);
               const pushResponse = await fetch(`${supabaseUrl}/functions/v1/send-push-notification`, {
                 method: 'POST',
                 headers: {
@@ -284,9 +321,18 @@ Deno.serve(async (req) => {
                   data: { order_id: order_id },
                 }),
               });
+              
               const pushResult = await pushResponse.json();
+              console.log(`[start-order-search] Push notification response for driver ${driver.driver_id} (expanded):`, {
+                status: pushResponse.status,
+                ok: pushResponse.ok,
+                sent: pushResult.sent,
+                result: pushResult,
+              });
+              
               if (pushResponse.ok && pushResult.sent && pushResult.sent > 0) {
-                console.log(`✅ [start-order-search] Push notification sent to driver ${driver.driver_id} (expanded)`);
+                pushSentCountExpanded++;
+                console.log(`✅ [start-order-search] Push notification sent successfully to driver ${driver.driver_id} (expanded)`);
               } else {
                 console.warn(`⚠️ [start-order-search] Push notification not sent to driver ${driver.driver_id} (expanded):`, pushResult);
               }
@@ -297,6 +343,10 @@ Deno.serve(async (req) => {
             console.error(`[start-order-search] Error notifying driver ${driver.driver_id} (expanded):`, notifErr);
           }
         }
+        
+        console.log(`[start-order-search] 📊 Summary (expanded): ${driversToNotifyExpanded.length} drivers notified, ${pushSentCountExpanded} push notifications sent`);
+      } else {
+        console.log(`[start-order-search] ⚠️ No drivers found in expanded radius (0-${expandedRadius} km)`);
       }
 
       // إيقاف البحث بعد انتهاء المدة الموسعة

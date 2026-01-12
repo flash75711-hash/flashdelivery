@@ -193,15 +193,19 @@ Deno.serve(async (req) => {
         searchPoint = await geocodeAddress(order.pickup_address);
       }
     } else if (order.order_type === 'package') {
-      // توصيل طرد: البحث من نقطة الانطلاق (pickupAddress)
+      // توصيل طرد: البحث من نقطة الانطلاق (pickupAddress) فقط
+      // لا نستخدم delivery_address أبداً
       if (order.pickup_address) {
         searchPoint = await geocodeAddress(order.pickup_address);
       }
       
-      // للطلبات package فقط، يمكن استخدام delivery_address كحل أخير
-      if (!searchPoint && order.delivery_address) {
-        console.log('⚠️ Using delivery_address as fallback for package order');
-        searchPoint = await geocodeAddress(order.delivery_address);
+      // إذا لم يكن هناك pickup_address، نحاول استخدام items[0].address
+      if (!searchPoint && order.items && Array.isArray(order.items) && order.items.length > 0) {
+        const firstItemAddress = order.items[0]?.address;
+        if (firstItemAddress) {
+          console.log(`[expand-order-search] Using first item address for package order: ${firstItemAddress}`);
+          searchPoint = await geocodeAddress(firstItemAddress);
+        }
       }
     }
 
@@ -252,15 +256,27 @@ Deno.serve(async (req) => {
     if (expandedError) {
       console.error('[expand-order-search] ❌ Error finding drivers in expanded radius:', expandedError);
     } else {
-      console.log(`[expand-order-search] ✅ Found ${expandedDrivers?.length || 0} drivers in expanded radius (0-${expandedRadius} km)`);
-    }
+      // التحقق من أن جميع السائقين في النطاق المحدد
+      const validDrivers = expandedDrivers?.filter(driver => {
+        if (driver.distance_km && driver.distance_km > expandedRadius) {
+          console.warn(`[expand-order-search] ⚠️ Driver ${driver.driver_id} is ${driver.distance_km.toFixed(2)} km away (exceeds ${expandedRadius} km limit)`);
+          return false;
+        }
+        return true;
+      }) || [];
+      
+      console.log(`[expand-order-search] ✅ Found ${expandedDrivers?.length || 0} drivers, ${validDrivers.length} within ${expandedRadius} km radius`);
+      
+      // استخدام validDrivers فقط
+      const driversToNotify = validDrivers;
 
     // إرسال Push Notifications لجميع السائقين في النطاق 0-10 كيلو
     // وليس فقط السائقين الجدد، لأن النطاق الموسع يبدأ من 0
-    console.log(`[expand-order-search] 📤 Sending push notifications to ${expandedDrivers?.length || 0} drivers in expanded radius (0-${expandedRadius} km)`);
+    console.log(`[expand-order-search] 📤 Sending push notifications to ${driversToNotify.length} drivers in expanded radius (0-${expandedRadius} km)`);
     let notifiedCount = 0;
-    if (expandedDrivers && expandedDrivers.length > 0) {
-      for (const driver of expandedDrivers) {
+    let pushSentCount = 0;
+    if (driversToNotify && driversToNotify.length > 0) {
+      for (const driver of driversToNotify) {
         try {
           await supabase.rpc('insert_notification_for_driver', {
             p_user_id: driver.driver_id,
@@ -305,8 +321,9 @@ Deno.serve(async (req) => {
         success: true,
         message: 'تم توسيع البحث بنجاح',
         expanded_radius: expandedRadius,
-        drivers_found: expandedDrivers?.length || 0,
-        new_drivers_notified: notifiedCount,
+        drivers_found: driversToNotify.length,
+        in_app_notifications: notifiedCount,
+        push_notifications_sent: pushSentCount,
       }),
       {
         status: 200,

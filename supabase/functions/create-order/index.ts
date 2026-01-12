@@ -345,9 +345,8 @@ serve(async (req) => {
           }
         }
       } else if (orderType === 'package') {
-        // توصيل طرد: البحث من نقطة الانطلاق (pickupAddress)
-        // سيتم إرسال push لأقرب السائقين لنقطة البداية/الانطلاق
-        // من 0-5 كيلو لمدة 30 ثانية، ثم من 0-10 كيلو لمدة 30 ثانية
+        // توصيل طرد: البحث من نقطة الانطلاق (pickupAddress) فقط
+        // لا نستخدم delivery_address أبداً
         console.log(`[create-order] Order type is 'package', using pickup address for search point: ${pickupAddress}`);
         try {
           const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(pickupAddress)}&limit=1&accept-language=ar`;
@@ -374,6 +373,35 @@ serve(async (req) => {
           }
         } catch (geocodeErr) {
           console.error('[create-order] ❌ Error geocoding pickup address for search:', geocodeErr);
+        }
+        
+        // إذا لم يكن هناك pickup_address، نحاول استخدام items[0].address
+        if (!searchPoint && items && Array.isArray(items) && items.length > 0) {
+          const firstItemAddress = items[0]?.address;
+          if (firstItemAddress) {
+            console.log(`[create-order] ⚠️ Falling back to first item address for package order: ${firstItemAddress}`);
+            try {
+              const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(firstItemAddress)}&limit=1&accept-language=ar`;
+              const geocodeResponse = await fetch(nominatimUrl, {
+                headers: {
+                  'User-Agent': 'FlashDelivery/1.0',
+                },
+              });
+              
+              if (geocodeResponse.ok) {
+                const geocodeData = await geocodeResponse.json();
+                if (geocodeData && geocodeData.length > 0) {
+                  searchPoint = {
+                    lat: parseFloat(geocodeData[0].lat),
+                    lon: parseFloat(geocodeData[0].lon),
+                  };
+                  console.log(`[create-order] ✅ Using first item address as fallback: ${firstItemAddress} -> (${searchPoint.lat}, ${searchPoint.lon})`);
+                }
+              }
+            } catch (geocodeErr) {
+              console.error('[create-order] ❌ Error geocoding first item address:', geocodeErr);
+            }
+          }
         }
       } else {
         console.warn(`[create-order] ⚠️ Unknown order type: ${orderType}`);
