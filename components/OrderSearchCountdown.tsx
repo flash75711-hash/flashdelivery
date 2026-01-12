@@ -76,7 +76,7 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
           .from('orders')
           .select('search_status, search_started_at, search_expanded_at, status')
           .eq('id', orderId)
-          .single();
+          .maybeSingle();
 
         if (!error && data) {
           console.log(`[OrderSearchCountdown] Order ${orderId} status:`, {
@@ -131,7 +131,7 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
               .from('orders')
               .select('search_status')
               .eq('id', orderId)
-              .single();
+              .maybeSingle();
 
             // إذا كانت الحالة لا تزال 'expanded'، نستدعي stop-order-search
             if (currentOrder?.search_status === 'expanded') {
@@ -161,7 +161,7 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
                     .from('orders')
                     .select('search_status, search_started_at, search_expanded_at')
                     .eq('id', orderId)
-                    .single();
+                    .maybeSingle();
                   
                   if (updatedOrder) {
                     updateTimeRemaining(updatedOrder, settingsRef.current);
@@ -191,7 +191,7 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
               .from('orders')
               .select('search_status')
               .eq('id', orderId)
-              .single();
+              .maybeSingle();
 
             // إذا كانت الحالة لا تزال 'searching'، نستدعي expand-order-search
             if (currentOrder?.search_status === 'searching') {
@@ -222,7 +222,7 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
                     .from('orders')
                     .select('search_status, search_started_at, search_expanded_at')
                     .eq('id', orderId)
-                    .single();
+                    .maybeSingle();
                   
                   if (updatedOrder) {
                     updateTimeRemaining(updatedOrder, settingsRef.current);
@@ -244,7 +244,7 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
               .from('orders')
               .select('search_status, search_started_at, search_expanded_at')
               .eq('id', orderId)
-              .single()
+              .maybeSingle()
               .then(({ data, error }) => {
                 if (!error && data) {
                   console.log(`[OrderSearchCountdown] Fast polling - order status: ${data.search_status}`);
@@ -297,7 +297,7 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
           .from('orders')
           .select('search_status, search_started_at, search_expanded_at')
           .eq('id', orderId)
-          .single()
+          .maybeSingle()
           .then(({ data, error }) => {
             if (!error && data) {
               updateTimeRemaining(data, settingsRef.current);
