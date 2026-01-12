@@ -137,6 +137,9 @@ Deno.serve(async (req) => {
     const expandedRadius = parseFloat(
       settings?.find(s => s.setting_key === 'expanded_search_radius_km')?.setting_value || '10'
     );
+    const expandedDuration = parseFloat(
+      settings?.find(s => s.setting_key === 'expanded_search_duration_seconds')?.setting_value || '30'
+    );
 
     // تحديد نقطة البحث
     let searchPoint: { lat: number; lon: number } | null = null;
@@ -208,13 +211,20 @@ Deno.serve(async (req) => {
     }
 
     // تحديث حالة البحث إلى expanded
+    const expandedAt = new Date();
+    const expandedExpiresAt = new Date(expandedAt);
+    expandedExpiresAt.setSeconds(expandedExpiresAt.getSeconds() + expandedDuration);
+    
     const { error: updateError } = await supabase
       .from('orders')
       .update({
         search_status: 'expanded',
-        search_expanded_at: new Date().toISOString(),
+        search_expanded_at: expandedAt.toISOString(),
+        search_expires_at: expandedExpiresAt.toISOString(),
       })
       .eq('id', order_id);
+    
+    console.log(`[expand-order-search] Setting search_expires_at for order ${order_id}: ${expandedExpiresAt.toISOString()} (${expandedDuration}s from expanded start)`);
 
     if (updateError) {
       console.error('Error updating search status:', updateError);

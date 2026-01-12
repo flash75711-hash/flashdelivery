@@ -96,12 +96,21 @@ Deno.serve(async (req) => {
 
     // إذا لم يكن هناك timestamp موجود، نضيفه الآن
     // إذا كان موجوداً بالفعل، نحافظ عليه لضمان دقة العداد
+    let searchStartedAt: Date;
     if (!existingOrder?.search_started_at) {
-      updateData.search_started_at = new Date().toISOString();
+      searchStartedAt = new Date();
+      updateData.search_started_at = searchStartedAt.toISOString();
       console.log(`[start-order-search] Setting search_started_at for order ${order_id}`);
     } else {
+      searchStartedAt = new Date(existingOrder.search_started_at);
       console.log(`[start-order-search] Preserving existing search_started_at for order ${order_id}: ${existingOrder.search_started_at}`);
     }
+
+    // تحديد search_expires_at بناءً على search_started_at + initialDuration
+    const searchExpiresAt = new Date(searchStartedAt);
+    searchExpiresAt.setSeconds(searchExpiresAt.getSeconds() + initialDuration);
+    updateData.search_expires_at = searchExpiresAt.toISOString();
+    console.log(`[start-order-search] Setting search_expires_at for order ${order_id}: ${searchExpiresAt.toISOString()} (${initialDuration}s from start)`);
 
     await supabase
       .from('orders')
@@ -197,13 +206,20 @@ Deno.serve(async (req) => {
       }
 
       // تحديث حالة البحث إلى expanded
+      const expandedAt = new Date();
+      const expandedExpiresAt = new Date(expandedAt);
+      expandedExpiresAt.setSeconds(expandedExpiresAt.getSeconds() + expandedDuration);
+      
       await supabase
         .from('orders')
         .update({
           search_status: 'expanded',
-          search_expanded_at: new Date().toISOString(),
+          search_expanded_at: expandedAt.toISOString(),
+          search_expires_at: expandedExpiresAt.toISOString(),
         })
         .eq('id', order_id);
+      
+      console.log(`[start-order-search] Expanded search for order ${order_id} - expires at: ${expandedExpiresAt.toISOString()} (${expandedDuration}s from expanded start)`);
 
       // البحث الموسع: العثور على السائقين في النطاق الموسع (0-10 كيلو)
       const { data: expandedDrivers, error: expandedError } = await supabase.rpc(

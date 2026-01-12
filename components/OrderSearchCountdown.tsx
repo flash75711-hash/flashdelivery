@@ -77,7 +77,7 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
       try {
         const { data, error } = await supabase
           .from('orders')
-          .select('search_status, search_started_at, search_expanded_at, status')
+          .select('search_status, search_started_at, search_expanded_at, search_expires_at, status')
           .eq('id', orderId)
           .maybeSingle();
 
@@ -169,6 +169,8 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
         return;
       }
       // تحديث محلي للعداد أولاً (للعداد التنازلي السلس)
+      // ملاحظة: الحساب الفعلي يتم من search_expires_at في updateTimeRemaining
+      // هذا التحديث المحلي فقط للعداد السلس
       setTimeRemaining(prev => {
         const currentStatus = searchStatusRef.current;
         // إذا وصل العداد إلى 0 في المرحلة الموسعة، نستدعي stop-order-search
@@ -211,7 +213,7 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
                   // تحديث الحالة فوراً بعد الاستدعاء
                   const { data: updatedOrder } = await supabase
                     .from('orders')
-                    .select('search_status, search_started_at, search_expanded_at')
+                    .select('search_status, search_started_at, search_expanded_at, search_expires_at')
                     .eq('id', orderId)
                     .maybeSingle();
                   
@@ -272,7 +274,7 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
                   // تحديث الحالة فوراً بعد الاستدعاء
                   const { data: updatedOrder } = await supabase
                     .from('orders')
-                    .select('search_status, search_started_at, search_expanded_at')
+                    .select('search_status, search_started_at, search_expanded_at, search_expires_at')
                     .eq('id', orderId)
                     .maybeSingle();
                   
@@ -294,7 +296,7 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
           fastPollingIntervalRef.current = setInterval(() => {
             supabase
               .from('orders')
-              .select('search_status, search_started_at, search_expanded_at')
+              .select('search_status, search_started_at, search_expanded_at, search_expires_at')
               .eq('id', orderId)
               .maybeSingle()
               .then(({ data, error }) => {
@@ -347,7 +349,7 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
         lastDbCheckRef.current = now;
         supabase
           .from('orders')
-          .select('search_status, search_started_at, search_expanded_at, status')
+          .select('search_status, search_started_at, search_expanded_at, search_expires_at, status')
           .eq('id', orderId)
           .maybeSingle()
           .then(({ data, error }) => {
@@ -435,6 +437,7 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
       status: order.status,
       search_started_at: order.search_started_at,
       search_expanded_at: order.search_expanded_at,
+      search_expires_at: order.search_expires_at,
     });
 
     if (!order.search_status || order.search_status === 'stopped' || order.search_status === 'found') {
@@ -443,6 +446,32 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
       return;
     }
 
+    // استخدام search_expires_at مباشرة من السيرفر (الأفضل لتجنب التأخير)
+    if (order.search_expires_at) {
+      const expiresAt = new Date(order.search_expires_at).getTime();
+      const now = Date.now();
+      const remaining = Math.max(0, Math.floor((expiresAt - now) / 1000));
+      
+      setTimeRemaining(remaining);
+      
+      // تحديد النطاق بناءً على search_status
+      if (order.search_status === 'searching') {
+        setCurrentRadius(5);
+      } else if (order.search_status === 'expanded') {
+        setCurrentRadius(10);
+        // إيقاف الـ polling السريع إذا كان نشطاً
+        if (fastPollingIntervalRef.current) {
+          clearInterval(fastPollingIntervalRef.current);
+          fastPollingIntervalRef.current = null;
+        }
+        fastPollingActiveRef.current = false;
+      }
+      
+      console.log(`[OrderSearchCountdown] Using search_expires_at - remaining: ${remaining}s`);
+      return;
+    }
+
+    // Fallback: إذا لم يكن search_expires_at موجوداً، نستخدم الطريقة القديمة
     if (order.search_status === 'searching' && order.search_started_at) {
       // استخدام timestamp من قاعدة البيانات
       const startedAt = new Date(order.search_started_at).getTime();
@@ -450,16 +479,7 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
       const elapsed = Math.floor((now - startedAt) / 1000);
       const remaining = Math.max(0, currentSettings.initialDuration - elapsed);
       
-      // عندما يصل العداد إلى 0، نبقى على 0 حتى يتم تحديث الحالة إلى expanded
-      // إذا كان remaining = 0، نعرض 0 بدون تقليل أكثر
-      if (remaining === 0 && elapsed >= currentSettings.initialDuration) {
-        // العداد وصل إلى 0، نبقى على 0 وننتظر تحديث الحالة
-        // إذا مرت أكثر من 30 ثانية ولم يتم التحديث، قد نحتاج إلى التحقق مرة أخرى
-        setTimeRemaining(0);
-      } else {
-        setTimeRemaining(remaining);
-      }
-      
+      setTimeRemaining(remaining);
       setCurrentRadius(5);
       localStartTimeRef.current = startedAt;
     } else if (order.search_status === 'expanded' && order.search_expanded_at) {
