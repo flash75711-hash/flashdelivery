@@ -150,6 +150,7 @@ export default function OrderDetailScreen() {
 
     setIsRestarting(true);
     try {
+      // تحديث حالة البحث لإعادة التشغيل
       const { error: updateError } = await supabase
         .from('orders')
         .update({
@@ -164,6 +165,69 @@ export default function OrderDetailScreen() {
         showSimpleAlert('خطأ', 'فشل تحديث حالة البحث', 'error');
         setIsRestarting(false);
         return;
+      }
+
+      // تحديد نقطة البحث حسب نوع الطلب
+      let searchPoint: { lat: number; lon: number } | null = null;
+      let searchAddress = '';
+
+      if (order.order_type === 'outside' && order.items && Array.isArray(order.items) && order.items.length > 0) {
+        // طلب من بره: البحث من أبعد نقطة في items
+        searchAddress = order.items[0]?.address || order.pickup_address || '';
+      } else if (order.order_type === 'package') {
+        // توصيل طرد: البحث من نقطة الانطلاق
+        searchAddress = order.pickup_address || '';
+      }
+
+      // إذا لم نجد عنوان، نستخدم delivery_address كحل أخير
+      if (!searchAddress && order.delivery_address) {
+        searchAddress = order.delivery_address;
+      }
+
+      if (searchAddress) {
+        // تحويل العنوان إلى إحداثيات باستخدام Nominatim API
+        try {
+          const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchAddress)}&limit=1&accept-language=ar`;
+          const geocodeResponse = await fetch(nominatimUrl, {
+            headers: {
+              'User-Agent': 'FlashDelivery/1.0',
+            },
+          });
+
+          if (geocodeResponse.ok) {
+            const geocodeData = await geocodeResponse.json();
+            if (geocodeData && geocodeData.length > 0) {
+              searchPoint = {
+                lat: parseFloat(geocodeData[0].lat),
+                lon: parseFloat(geocodeData[0].lon),
+              };
+            }
+          }
+        } catch (geocodeErr) {
+          console.error('Error geocoding address:', geocodeErr);
+        }
+      }
+
+      // إذا تم تحديد نقطة البحث، ابدأ البحث التلقائي
+      if (searchPoint) {
+        try {
+          const searchResponse = await supabase.functions.invoke('start-order-search', {
+            body: {
+              order_id: order.id,
+              search_point: searchPoint,
+            },
+          });
+
+          if (searchResponse.error) {
+            console.error('Error starting order search:', searchResponse.error);
+          } else if (searchResponse.data?.success) {
+            console.log('✅ Started search for order:', order.id);
+          }
+        } catch (searchErr) {
+          console.error('Exception starting order search:', searchErr);
+        }
+      } else {
+        console.warn('⚠️ Could not determine search point, search may not start automatically');
       }
 
       await showSimpleAlert('نجح', 'تم بدء البحث عن سائق جديد. سيتم البحث تلقائياً.', 'success');
