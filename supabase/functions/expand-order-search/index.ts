@@ -174,7 +174,7 @@ Deno.serve(async (req) => {
     };
 
     if (order.order_type === 'outside') {
-      // طلب من بره: البحث من أبعد نقطة في items
+      // طلب من بره: البحث من أبعد نقطة في items (وليس delivery_address)
       if (order.items && Array.isArray(order.items) && order.items.length > 0) {
         // محاولة استخدام أول عنصر في items (أبعد نقطة)
         const farthestItemAddress = order.items[0]?.address;
@@ -182,12 +182,14 @@ Deno.serve(async (req) => {
           searchPoint = await geocodeAddress(farthestItemAddress);
         }
         
-        // إذا فشل، نجرب pickup_address
+        // إذا فشل، نجرب pickup_address (وليس delivery_address)
         if (!searchPoint && order.pickup_address) {
+          console.log(`[expand-order-search] ⚠️ Falling back to pickup_address: ${order.pickup_address}`);
           searchPoint = await geocodeAddress(order.pickup_address);
         }
       } else if (order.pickup_address) {
-        // إذا لم يكن هناك items، نستخدم pickup_address
+        // إذا لم يكن هناك items، نستخدم pickup_address (وليس delivery_address)
+        console.log(`[expand-order-search] No items found, using pickup_address: ${order.pickup_address}`);
         searchPoint = await geocodeAddress(order.pickup_address);
       }
     } else if (order.order_type === 'package') {
@@ -195,12 +197,12 @@ Deno.serve(async (req) => {
       if (order.pickup_address) {
         searchPoint = await geocodeAddress(order.pickup_address);
       }
-    }
-    
-    // إذا فشل كل شيء، نجرب delivery_address كحل أخير
-    if (!searchPoint && order.delivery_address) {
-      console.log('⚠️ Using delivery_address as fallback for search point');
-      searchPoint = await geocodeAddress(order.delivery_address);
+      
+      // للطلبات package فقط، يمكن استخدام delivery_address كحل أخير
+      if (!searchPoint && order.delivery_address) {
+        console.log('⚠️ Using delivery_address as fallback for package order');
+        searchPoint = await geocodeAddress(order.delivery_address);
+      }
     }
 
     if (!searchPoint) {

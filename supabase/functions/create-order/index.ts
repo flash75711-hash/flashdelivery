@@ -250,45 +250,99 @@ serve(async (req) => {
       let searchPoint: { lat: number; lon: number } | null = null;
       
       if (orderType === 'outside') {
-        // طلب من بره: البحث من أبعد نقطة في items
+        // طلب من بره: البحث من أبعد نقطة في items (وليس delivery_address)
         // سيتم إرسال push للسائقين القريبين من 0-5 كيلو من أبعد مكان لمدة 30 ثانية
         // ثم من 0-10 كيلو لمدة 30 ثانية
         console.log(`[create-order] Order type is 'outside', checking items...`);
         if (items && Array.isArray(items) && items.length > 0) {
           // البحث عن أبعد نقطة (أول نقطة في items هي أبعد نقطة عادة)
           // لأن items مرتبة من الأبعد للأقرب
-          const farthestItemAddress = items[0]?.address || pickupAddress;
-          console.log(`[create-order] 📍 Using farthest item address for search point: ${farthestItemAddress}`);
-          
-          // استخدام Nominatim للـ forward geocoding (من العنوان إلى إحداثيات)
-          try {
-            const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(farthestItemAddress)}&limit=1&accept-language=ar`;
-            console.log(`[create-order] Geocoding address: ${nominatimUrl}`);
-            const geocodeResponse = await fetch(nominatimUrl, {
-              headers: {
-                'User-Agent': 'FlashDelivery/1.0',
-              },
-            });
+          const farthestItemAddress = items[0]?.address;
+          if (farthestItemAddress) {
+            console.log(`[create-order] 📍 Using farthest item address for search point: ${farthestItemAddress}`);
             
-            if (geocodeResponse.ok) {
-              const geocodeData = await geocodeResponse.json();
-              if (geocodeData && geocodeData.length > 0) {
-                searchPoint = {
-                  lat: parseFloat(geocodeData[0].lat),
-                  lon: parseFloat(geocodeData[0].lon),
-                };
-                console.log(`[create-order] ✅ Using farthest point for search: ${farthestItemAddress} -> (${searchPoint.lat}, ${searchPoint.lon})`);
+            // استخدام Nominatim للـ forward geocoding (من العنوان إلى إحداثيات)
+            try {
+              const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(farthestItemAddress)}&limit=1&accept-language=ar`;
+              console.log(`[create-order] Geocoding address: ${nominatimUrl}`);
+              const geocodeResponse = await fetch(nominatimUrl, {
+                headers: {
+                  'User-Agent': 'FlashDelivery/1.0',
+                },
+              });
+              
+              if (geocodeResponse.ok) {
+                const geocodeData = await geocodeResponse.json();
+                if (geocodeData && geocodeData.length > 0) {
+                  searchPoint = {
+                    lat: parseFloat(geocodeData[0].lat),
+                    lon: parseFloat(geocodeData[0].lon),
+                  };
+                  console.log(`[create-order] ✅ Using farthest point for search: ${farthestItemAddress} -> (${searchPoint.lat}, ${searchPoint.lon})`);
+                } else {
+                  console.warn(`[create-order] ⚠️ No geocoding results for address: ${farthestItemAddress}`);
+                }
               } else {
-                console.warn(`[create-order] ⚠️ No geocoding results for address: ${farthestItemAddress}`);
+                console.error(`[create-order] ❌ Geocoding failed with status: ${geocodeResponse.status}`);
               }
-            } else {
-              console.error(`[create-order] ❌ Geocoding failed with status: ${geocodeResponse.status}`);
+            } catch (geocodeErr) {
+              console.error('[create-order] ❌ Error geocoding address for search:', geocodeErr);
             }
-          } catch (geocodeErr) {
-            console.error('[create-order] ❌ Error geocoding address for search:', geocodeErr);
+          } else {
+            console.warn(`[create-order] ⚠️ No address found in first item`);
+          }
+          
+          // إذا فشل، نجرب pickup_address كبديل (وليس delivery_address)
+          if (!searchPoint && pickupAddress) {
+            console.log(`[create-order] ⚠️ Falling back to pickup_address: ${pickupAddress}`);
+            try {
+              const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(pickupAddress)}&limit=1&accept-language=ar`;
+              const geocodeResponse = await fetch(nominatimUrl, {
+                headers: {
+                  'User-Agent': 'FlashDelivery/1.0',
+                },
+              });
+              
+              if (geocodeResponse.ok) {
+                const geocodeData = await geocodeResponse.json();
+                if (geocodeData && geocodeData.length > 0) {
+                  searchPoint = {
+                    lat: parseFloat(geocodeData[0].lat),
+                    lon: parseFloat(geocodeData[0].lon),
+                  };
+                  console.log(`[create-order] ✅ Using pickup_address as fallback: ${pickupAddress} -> (${searchPoint.lat}, ${searchPoint.lon})`);
+                }
+              }
+            } catch (geocodeErr) {
+              console.error('[create-order] ❌ Error geocoding pickup_address:', geocodeErr);
+            }
           }
         } else {
-          console.warn(`[create-order] ⚠️ No items found for 'outside' order type`);
+          // إذا لم يكن هناك items، نستخدم pickup_address (وليس delivery_address)
+          console.warn(`[create-order] ⚠️ No items found for 'outside' order type, using pickup_address`);
+          if (pickupAddress) {
+            try {
+              const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(pickupAddress)}&limit=1&accept-language=ar`;
+              const geocodeResponse = await fetch(nominatimUrl, {
+                headers: {
+                  'User-Agent': 'FlashDelivery/1.0',
+                },
+              });
+              
+              if (geocodeResponse.ok) {
+                const geocodeData = await geocodeResponse.json();
+                if (geocodeData && geocodeData.length > 0) {
+                  searchPoint = {
+                    lat: parseFloat(geocodeData[0].lat),
+                    lon: parseFloat(geocodeData[0].lon),
+                  };
+                  console.log(`[create-order] ✅ Using pickup_address: ${pickupAddress} -> (${searchPoint.lat}, ${searchPoint.lon})`);
+                }
+              }
+            } catch (geocodeErr) {
+              console.error('[create-order] ❌ Error geocoding pickup_address:', geocodeErr);
+            }
+          }
         }
       } else if (orderType === 'package') {
         // توصيل طرد: البحث من نقطة الانطلاق (pickupAddress)
