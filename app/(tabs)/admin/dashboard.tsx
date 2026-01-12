@@ -414,29 +414,6 @@ export default function AdminDashboardScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* قسم إعدادات الطلبات */}
-        <View style={styles.settingsSection}>
-          <Text style={styles.settingsTitle}>إعدادات الطلبات</Text>
-          
-          <TouchableOpacity
-            style={styles.managementCard}
-            onPress={() => {
-              router.push('/(tabs)/admin/settings');
-            }}
-          >
-            <View style={styles.managementInfo}>
-              <Ionicons name="settings" size={24} color="#FF9500" />
-              <View style={styles.managementTextContainer}>
-                <Text style={styles.managementLabel}>إعدادات الطلبات والمحاولات</Text>
-                <Text style={styles.managementDescription}>
-                  مدة الشريط الزمني • عدد المحاولات التلقائية • الفاصل الزمني
-                </Text>
-              </View>
-            </View>
-            <Ionicons name="chevron-forward" size={24} color="#999" />
-          </TouchableOpacity>
-        </View>
-
         {/* قسم إعدادات البحث عن السائقين */}
         <View style={styles.settingsSection}>
           <Text style={styles.settingsTitle}>إعدادات البحث عن السائقين</Text>
@@ -568,31 +545,35 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   },
   newOrderCard: {
     backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
+    borderRadius: 20,
+    padding: 24,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 16,
+    marginBottom: 16,
     ...createShadowStyle({
       shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 8,
-      elevation: 4,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.06,
+      shadowRadius: 16,
+      elevation: 6,
     }),
   },
   newOrderTextContainer: {
     flex: 1,
   },
   newOrderTitle: {
-    fontSize: responsive.getResponsiveFontSize(18),
-    fontWeight: '600',
+    fontSize: responsive.getResponsiveFontSize(19),
+    fontWeight: '700',
     color: '#1a1a1a',
-    marginBottom: 4,
+    marginBottom: 6,
+    letterSpacing: 0.2,
   },
   newOrderDescription: {
-    fontSize: responsive.getResponsiveFontSize(14),
-    color: '#666',
+    fontSize: responsive.getResponsiveFontSize(15),
+    color: '#8E8E93',
+    lineHeight: 22,
+    fontWeight: '400',
   },
   statsGrid: {
     flexDirection: 'row',
@@ -602,15 +583,16 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   statCard: {
     width: '47%',
     backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
+    borderRadius: 20,
+    padding: 24,
     alignItems: 'center',
+    marginBottom: 16,
     ...createShadowStyle({
       shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 8,
-      elevation: 4,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.06,
+      shadowRadius: 16,
+      elevation: 6,
     }),
   },
   statIcon: {
@@ -619,18 +601,20 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     borderRadius: 32,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 16,
   },
   statValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    fontSize: 26,
+    fontWeight: '700',
     color: '#1a1a1a',
     marginBottom: 8,
+    letterSpacing: 0.3,
   },
   statLabel: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: 15,
+    color: '#8E8E93',
     textAlign: 'center',
+    fontWeight: '400',
   },
   settingsSection: {
     marginTop: 32,
@@ -753,15 +737,15 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: '#fff',
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 20,
     marginBottom: 16,
     ...createShadowStyle({
       shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 8,
-      elevation: 4,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.06,
+      shadowRadius: 16,
+      elevation: 6,
     }),
   },
   managementInfo: {
@@ -774,17 +758,19 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     flex: 1,
   },
   managementLabel: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 17,
+    fontWeight: '700',
     color: '#1a1a1a',
-    marginBottom: 4,
+    marginBottom: 6,
     textAlign: 'right',
+    letterSpacing: 0.2,
   },
   managementDescription: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: 15,
+    color: '#8E8E93',
     textAlign: 'right',
-    lineHeight: 20,
+    lineHeight: 22,
+    fontWeight: '400',
   },
   logoutSection: {
     marginTop: 32,

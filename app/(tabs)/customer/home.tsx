@@ -56,15 +56,15 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   },
   card: {
     backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: responsive.isTablet() ? 32 : 24,
+    borderRadius: 20,
+    padding: responsive.isTablet() ? 36 : 28,
     alignItems: 'center',
     ...createShadowStyle({
       shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 8,
-      elevation: 4,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.06,
+      shadowRadius: 16,
+      elevation: 6,
     }),
     ...(responsive.isLargeScreen() && {
       maxWidth: 600,
@@ -73,19 +73,22 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     }),
   },
   cardIcon: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   cardTitle: {
-    fontSize: responsive.getResponsiveFontSize(20),
-    fontWeight: '600',
+    fontSize: responsive.getResponsiveFontSize(22),
+    fontWeight: '700',
     color: '#1a1a1a',
-    marginBottom: 8,
+    marginBottom: 10,
     textAlign: 'center',
+    letterSpacing: 0.2,
   },
   cardDescription: {
-    fontSize: responsive.getResponsiveFontSize(14),
-    color: '#666',
+    fontSize: responsive.getResponsiveFontSize(15),
+    color: '#8E8E93',
     textAlign: 'center',
+    lineHeight: 22,
+    fontWeight: '400',
   },
 });
 

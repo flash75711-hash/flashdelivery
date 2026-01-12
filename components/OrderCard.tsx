@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, TextInput, ActivityIndicator, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -62,6 +62,13 @@ export default function OrderCard({
       setShowNegotiation(true);
     }
   }, [isDriverInNegotiation, order.negotiated_price, order.total_fee]);
+  
+  // Wrapper function لـ onRestartSearch لتتوافق مع OrderSearchCountdown
+  const handleRestartSearch = useCallback(() => {
+    if (onRestartSearch) {
+      onRestartSearch(order);
+    }
+  }, [onRestartSearch, order]);
   
   // تحديد الأزرار المتاحة حسب الدور وحالة الطلب
   const canCancel = isActive && (isCustomer || (isDriver && order.status === 'pending'));
@@ -486,7 +493,7 @@ export default function OrderCard({
       {order.status === 'pending' && (
         <OrderSearchCountdown 
           orderId={order.id} 
-          onRestartSearch={onRestartSearch}
+          onRestartSearch={onRestartSearch ? handleRestartSearch : undefined}
         />
       )}
 
@@ -920,14 +927,15 @@ export default function OrderCard({
 const styles = StyleSheet.create({
   card: {
     backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 16,
     ...createShadowStyle({
       shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 8,
-      elevation: 4,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.06,
+      shadowRadius: 16,
+      elevation: 6,
     }),
   },
   header: {
@@ -946,19 +954,21 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   orderType: {
-    fontSize: responsive.getResponsiveFontSize(16),
-    fontWeight: '600',
+    fontSize: responsive.getResponsiveFontSize(18),
+    fontWeight: '700',
     color: '#1a1a1a',
-    marginBottom: 4,
+    marginBottom: 6,
+    letterSpacing: 0.2,
   },
   date: {
-    fontSize: responsive.getResponsiveFontSize(12),
-    color: '#666',
+    fontSize: responsive.getResponsiveFontSize(13),
+    color: '#8E8E93',
+    fontWeight: '400',
   },
   statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 16,
   },
   statusText: {
     fontSize: responsive.getResponsiveFontSize(12),
@@ -971,16 +981,18 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   address: {
-    fontSize: responsive.getResponsiveFontSize(14),
-    color: '#666',
+    fontSize: responsive.getResponsiveFontSize(15),
+    color: '#8E8E93',
     flex: 1,
     textAlign: 'right',
+    lineHeight: 22,
+    fontWeight: '400',
   },
   multiPointContainer: {
-    backgroundColor: '#f9f9f9',
-    borderRadius: 12,
-    padding: 12,
-    marginTop: 8,
+    backgroundColor: '#F5F5F7',
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 12,
   },
   multiPointTitle: {
     fontSize: responsive.getResponsiveFontSize(14),
@@ -996,10 +1008,11 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   multiPointAddress: {
-    fontSize: responsive.getResponsiveFontSize(12),
-    color: '#666',
+    fontSize: responsive.getResponsiveFontSize(13),
+    color: '#8E8E93',
     flex: 1,
     textAlign: 'right',
+    lineHeight: 20,
   },
   multiPointMore: {
     fontSize: responsive.getResponsiveFontSize(12),
@@ -1009,64 +1022,68 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   footer: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 0,
   },
   fee: {
-    fontSize: responsive.getResponsiveFontSize(18),
-    fontWeight: 'bold',
+    fontSize: responsive.getResponsiveFontSize(20),
+    fontWeight: '700',
     color: '#34C759',
     textAlign: 'right',
+    letterSpacing: 0.3,
   },
   actionsContainer: {
     flexDirection: 'row',
-    gap: 8,
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+    gap: 12,
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 0,
     flexWrap: 'wrap',
     justifyContent: 'flex-end',
   },
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 12,
-    minWidth: 100,
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 16,
+    minWidth: 110,
     justifyContent: 'center',
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.08,
+      shadowRadius: 8,
+      elevation: 3,
+    }),
   },
   acceptButton: {
-    backgroundColor: '#34C75920',
-    borderWidth: 1,
-    borderColor: '#34C759',
+    backgroundColor: '#34C759',
+    borderWidth: 0,
   },
   negotiateButton: {
-    backgroundColor: '#FF950020',
-    borderWidth: 1,
-    borderColor: '#FF9500',
+    backgroundColor: '#FF9500',
+    borderWidth: 0,
   },
   cancelButton: {
-    backgroundColor: '#FF3B3020',
-    borderWidth: 1,
-    borderColor: '#FF3B30',
+    backgroundColor: '#FF3B30',
+    borderWidth: 0,
   },
   actionButtonText: {
-    fontSize: responsive.getResponsiveFontSize(14),
+    fontSize: responsive.getResponsiveFontSize(15),
     fontWeight: '600',
+    color: '#fff',
   },
   acceptButtonText: {
-    color: '#34C759',
+    color: '#fff',
   },
   negotiateButtonText: {
-    color: '#FF9500',
+    color: '#fff',
   },
   cancelButtonText: {
-    color: '#FF3B30',
+    color: '#fff',
   },
   restartSearchButton: {
     backgroundColor: '#E3F2FD',
@@ -1272,6 +1289,11 @@ const styles = StyleSheet.create({
     fontSize: responsive.getResponsiveFontSize(18),
     fontWeight: 'bold',
     color: '#007AFF',
+  },
+  negotiationOriginalPrice: {
+    fontSize: responsive.getResponsiveFontSize(16),
+    fontWeight: '600',
+    color: '#8E8E93',
   },
   customerProposeContainer: {
     marginTop: 16,

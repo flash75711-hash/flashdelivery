@@ -47,9 +47,9 @@ export default function AdminSettingsScreen() {
 
       if (error) throw error;
 
-      // تصفية max_auto_retry_attempts لأن الوظيفة متكررة وليس لها لازمة
+      // تصفية max_auto_retry_attempts وإعدادات الطلبات (category === 'orders') لأنها غير مطلوبة
       const filteredData = (data || []).filter(
-        setting => setting.setting_key !== 'max_auto_retry_attempts'
+        setting => setting.setting_key !== 'max_auto_retry_attempts' && setting.category !== 'orders'
       );
 
       setSettings(filteredData);
@@ -244,7 +244,7 @@ export default function AdminSettingsScreen() {
         {Object.entries(groupedSettings).map(([category, categorySettings]) => (
           <View key={category} style={styles.categoryContainer}>
             <Text style={styles.categoryTitle}>
-              {category === 'orders' ? '📋 إعدادات الطلبات' : category === 'commission' ? '💰 إعدادات العمولة والتوريد' : category}
+              {category === 'commission' ? '💰 إعدادات العمولة والتوريد' : category}
             </Text>
             {categorySettings.map(renderSetting)}
             {category === 'commission' && (

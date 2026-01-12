@@ -10,6 +10,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useMyOrders } from '@/hooks/useMyOrders';
 import OrderCard from '@/components/OrderCard';
@@ -23,6 +24,7 @@ import type { Order } from '@/hooks/useMyOrders';
 
 export default function CustomerMyOrdersScreen() {
   const { t } = useTranslation();
+  const router = useRouter();
   const { orders, loading, refreshing, onRefresh, reload } = useMyOrders();
   const cancelingOrderIdRef = useRef<string | null>(null);
 
@@ -176,6 +178,7 @@ export default function CustomerMyOrdersScreen() {
         renderItem={({ item }) => (
           <OrderCard 
             order={item} 
+            onPress={(order) => router.push(`/orders/${order.id}`)}
             onCancel={handleCancelOrder}
             onRestartSearch={handleRestartSearch}
             onOrderUpdated={onRefresh}
