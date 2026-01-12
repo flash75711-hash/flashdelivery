@@ -262,14 +262,28 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
                 console.log(`[OrderSearchCountdown] 🔄 Calling expand-order-search for order ${orderId}`);
                 
                 try {
-                  // استخدام supabase.functions.invoke للتعامل مع المصادقة تلقائياً
-                  const { data: result, error: invokeError } = await supabase.functions.invoke('expand-order-search', {
-                    body: { order_id: orderId },
-                  });
-
-                  if (invokeError) {
-                    console.error(`[OrderSearchCountdown] ❌ Error invoking expand-order-search:`, invokeError);
+                  // التحقق من وجود session قبل الاستدعاء
+                  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+                  if (sessionError || !sessionData?.session) {
+                    console.error(`[OrderSearchCountdown] ❌ No session found:`, sessionError);
                     // Retry بعد ثانية واحدة
+                    setTimeout(() => {
+                      if (fastPollingActiveRef.current) {
+                        console.log(`[OrderSearchCountdown] 🔄 Retrying expand-order-search after session check for order ${orderId}`);
+                        expandSearch();
+                      }
+                    }, 1000);
+                    return;
+                  }
+                  
+                  console.log(`[OrderSearchCountdown] ✅ Session found, calling expand-order-search with order_id: ${orderId}`);
+                  
+                  // استخدام fetch مباشرة مع JWT token من session
+                  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+                  const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+                  
+                  if (!supabaseUrl || !supabaseAnonKey) {
+                    console.error(`[OrderSearchCountdown] ❌ Missing Supabase configuration`);
                     setTimeout(() => {
                       if (fastPollingActiveRef.current) {
                         console.log(`[OrderSearchCountdown] 🔄 Retrying expand-order-search for order ${orderId}`);
@@ -278,8 +292,23 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
                     }, 1000);
                     return;
                   }
+                  
+                  const functionUrl = `${supabaseUrl}/functions/v1/expand-order-search`;
+                  const authToken = sessionData.session.access_token;
+                  
+                  const response = await fetch(functionUrl, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${authToken}`,
+                      'apikey': supabaseAnonKey,
+                    },
+                    body: JSON.stringify({ order_id: orderId }),
+                  });
 
-                  if (result && result.success) {
+                  const result = await response.json();
+                  
+                  if (response.ok && result && result.success) {
                     console.log(`[OrderSearchCountdown] ✅ Successfully expanded search for order ${orderId} - ${result.drivers_found || 0} drivers found`);
                     // تحديث الحالة فوراً بعد الاستدعاء
                     const { data: updatedOrder } = await supabase
@@ -294,7 +323,7 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
                     fastPollingActiveRef.current = false;
                     setIsExpanding(false); // إخفاء رسالة التوسيع
                   } else {
-                    console.error(`[OrderSearchCountdown] ❌ Error expanding search:`, result?.error || result);
+                    console.error(`[OrderSearchCountdown] ❌ Error expanding search:`, result?.error || result, `Status: ${response.status}`);
                     // Retry بعد ثانية واحدة
                     setTimeout(() => {
                       if (fastPollingActiveRef.current) {
