@@ -188,7 +188,7 @@ Deno.serve(async (req) => {
         })
         .eq('id', order_id);
 
-      // البحث الموسع: العثور على السائقين في النطاق الموسع
+      // البحث الموسع: العثور على السائقين في النطاق الموسع (0-10 كيلو)
       const { data: expandedDrivers, error: expandedError } = await supabase.rpc(
         'find_drivers_in_radius',
         {
@@ -202,14 +202,10 @@ Deno.serve(async (req) => {
         console.error('Error finding drivers in expanded radius:', expandedError);
       }
 
-      // إرسال إشعارات للسائقين الجدد فقط (الذين لم يتلقوا إشعاراً في النطاق الأولي)
+      // إرسال إشعارات لجميع السائقين في النطاق الموسع (0-10 كيلو)
+      // وليس فقط السائقين الجدد، لأن النطاق الموسع يبدأ من 0
       if (expandedDrivers && expandedDrivers.length > 0) {
-        const initialDriverIds = (initialDrivers || []).map(d => d.driver_id);
-        const newDrivers = expandedDrivers.filter(
-          d => !initialDriverIds.includes(d.driver_id)
-        );
-
-        for (const driver of newDrivers) {
+        for (const driver of expandedDrivers) {
           try {
             await supabase.rpc('insert_notification_for_driver', {
               p_user_id: driver.driver_id,
@@ -269,14 +265,17 @@ Deno.serve(async (req) => {
 
             // إرسال إشعار للعميل بأن البحث انتهى ولم يتم العثور على سائق
             try {
-              // إنشاء In-App Notification
-              await supabase.rpc('insert_notification_for_driver', {
-                p_user_id: finalOrder.customer_id,
-                p_title: 'انتهى البحث عن سائق',
-                p_message: 'لم يتم العثور على سائق في النطاق المحدد. يمكنك إعادة البحث أو إلغاء الطلب.',
-                p_type: 'warning',
-                p_order_id: order_id,
-              });
+              // إنشاء In-App Notification مباشرة (باستخدام Service Role Key)
+              await supabase
+                .from('notifications')
+                .insert({
+                  user_id: finalOrder.customer_id,
+                  title: 'انتهى البحث عن سائق',
+                  message: 'لم يتم العثور على سائق في النطاق المحدد. يمكنك إعادة البحث أو إلغاء الطلب.',
+                  type: 'warning',
+                  order_id: order_id,
+                  is_read: false,
+                });
 
               // إرسال Push Notification
               try {

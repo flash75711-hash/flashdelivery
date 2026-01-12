@@ -38,10 +38,10 @@ export function useOrderSearch({
   const [timeRemaining, setTimeRemaining] = useState<number>(0);
   const [foundDrivers, setFoundDrivers] = useState<DriverLocation[]>([]);
   const [settings, setSettings] = useState<SearchSettings>({
-    initialRadius: 3,
-    expandedRadius: 6,
-    initialDuration: 10,
-    expandedDuration: 10,
+    initialRadius: 5, // القيمة الافتراضية 5 كيلو (تطابق Edge Function)
+    expandedRadius: 10, // القيمة الافتراضية 10 كيلو (تطابق Edge Function)
+    initialDuration: 30, // القيمة الافتراضية 30 ثانية (تطابق Edge Function)
+    expandedDuration: 30, // القيمة الافتراضية 30 ثانية (تطابق Edge Function)
   });
 
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -60,10 +60,10 @@ export function useOrderSearch({
       }
 
       const newSettings: SearchSettings = {
-        initialRadius: 3,
-        expandedRadius: 6,
-        initialDuration: 10,
-        expandedDuration: 10,
+        initialRadius: 5, // القيمة الافتراضية 5 كيلو (تطابق Edge Function)
+        expandedRadius: 10, // القيمة الافتراضية 10 كيلو (تطابق Edge Function)
+        initialDuration: 30, // القيمة الافتراضية 30 ثانية (تطابق Edge Function)
+        expandedDuration: 30, // القيمة الافتراضية 30 ثانية (تطابق Edge Function)
       };
 
       data?.forEach((setting) => {
@@ -184,22 +184,25 @@ export function useOrderSearch({
   const notifyDrivers = useCallback(async (drivers: DriverLocation[], radius: number) => {
     if (!drivers.length) return;
 
-      const title = 'طلب جديد متاح';
-      const message = `يوجد طلب جديد متاح في نطاق ${radius} كم. تحقق من قائمة الطلبات.`;
+    const title = 'طلب جديد متاح';
+    const message = `يوجد طلب جديد متاح في نطاق ${radius} كم. تحقق من قائمة الطلبات.`;
 
-      for (const driver of drivers) {
-        try {
-          await supabase.rpc('insert_notification_for_driver', {
-            p_user_id: driver.driver_id,
-            p_title: title,
-            p_message: message,
-          p_type: 'info',
-          });
-        } catch (error) {
+    // استخدام createNotification لإرسال In-App + Push Notifications
+    for (const driver of drivers) {
+      try {
+        await createNotification({
+          user_id: driver.driver_id,
+          title: title,
+          message: message,
+          type: 'info',
+          order_id: orderId, // إضافة order_id للإشعار
+        });
+      } catch (error) {
+        console.error(`[notifyDrivers] Error notifying driver ${driver.driver_id}:`, error);
         // تجاهل الأخطاء في إشعار سائق واحد
       }
     }
-  }, []);
+  }, [orderId]);
 
   // بدء البحث
   const startSearch = useCallback(async () => {
@@ -267,17 +270,14 @@ export function useOrderSearch({
     setCurrentRadius(settings.expandedRadius);
     setTimeRemaining(settings.expandedDuration);
 
-    // البحث الموسع
+    // البحث الموسع: البحث في نطاق 0-10 كيلو (جميع السائقين في النطاق الموسع)
     const expandedDrivers = await findDriversInRadius(settings.expandedRadius);
     setFoundDrivers(expandedDrivers);
 
-    // إرسال إشعارات للسائقين الجدد فقط
-    const newDrivers = expandedDrivers.filter(
-      driver => !foundDrivers.some(fd => fd.driver_id === driver.driver_id)
-    );
-
-    if (newDrivers.length) {
-      await notifyDrivers(newDrivers, settings.expandedRadius);
+    // إرسال إشعارات لجميع السائقين في النطاق الموسع (0-10 كيلو)
+    // وليس فقط السائقين الجدد، لأن النطاق الموسع يبدأ من 0
+    if (expandedDrivers.length > 0) {
+      await notifyDrivers(expandedDrivers, settings.expandedRadius);
     }
 
     // عداد الوقت للبحث الموسع
