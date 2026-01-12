@@ -260,45 +260,55 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
               // إذا كانت الحالة لا تزال 'searching'، نستدعي expand-order-search
               if (currentOrder?.search_status === 'searching') {
                 console.log(`[OrderSearchCountdown] 🔄 Calling expand-order-search for order ${orderId}`);
-                const { data: session } = await supabase.auth.getSession();
-                const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
                 
-                if (!supabaseUrl || supabaseUrl.includes('placeholder')) {
-                  console.error(`[OrderSearchCountdown] ❌ Invalid Supabase URL: ${supabaseUrl}`);
-                  fastPollingActiveRef.current = false;
-                  return;
-                }
-                
-                const response = await fetch(`${supabaseUrl}/functions/v1/expand-order-search`, {
-                  method: 'POST',
-                  headers: {
-                    'Authorization': `Bearer ${session?.session?.access_token || ''}`,
-                    'Content-Type': 'application/json',
-                  },
-                  body: JSON.stringify({ order_id: orderId }),
-                });
+                try {
+                  // استخدام supabase.functions.invoke للتعامل مع المصادقة تلقائياً
+                  const { data: result, error: invokeError } = await supabase.functions.invoke('expand-order-search', {
+                    body: { order_id: orderId },
+                  });
 
-                const result = await response.json();
-                if (response.ok && result.success) {
-                  console.log(`[OrderSearchCountdown] ✅ Successfully expanded search for order ${orderId} - ${result.drivers_found || 0} drivers found`);
-                  // تحديث الحالة فوراً بعد الاستدعاء
-                  const { data: updatedOrder } = await supabase
-                    .from('orders')
-                    .select('search_status, search_started_at, search_expanded_at, search_expires_at')
-                    .eq('id', orderId)
-                    .maybeSingle();
-                  
-                  if (updatedOrder) {
-                    updateTimeRemaining(updatedOrder, settingsRef.current);
+                  if (invokeError) {
+                    console.error(`[OrderSearchCountdown] ❌ Error invoking expand-order-search:`, invokeError);
+                    // Retry بعد ثانية واحدة
+                    setTimeout(() => {
+                      if (fastPollingActiveRef.current) {
+                        console.log(`[OrderSearchCountdown] 🔄 Retrying expand-order-search for order ${orderId}`);
+                        expandSearch();
+                      }
+                    }, 1000);
+                    return;
                   }
-                  fastPollingActiveRef.current = false;
-                  setIsExpanding(false); // إخفاء رسالة التوسيع
-                } else {
-                  console.error(`[OrderSearchCountdown] ❌ Error expanding search:`, result.error || result);
+
+                  if (result && result.success) {
+                    console.log(`[OrderSearchCountdown] ✅ Successfully expanded search for order ${orderId} - ${result.drivers_found || 0} drivers found`);
+                    // تحديث الحالة فوراً بعد الاستدعاء
+                    const { data: updatedOrder } = await supabase
+                      .from('orders')
+                      .select('search_status, search_started_at, search_expanded_at, search_expires_at')
+                      .eq('id', orderId)
+                      .maybeSingle();
+                    
+                    if (updatedOrder) {
+                      updateTimeRemaining(updatedOrder, settingsRef.current);
+                    }
+                    fastPollingActiveRef.current = false;
+                    setIsExpanding(false); // إخفاء رسالة التوسيع
+                  } else {
+                    console.error(`[OrderSearchCountdown] ❌ Error expanding search:`, result?.error || result);
+                    // Retry بعد ثانية واحدة
+                    setTimeout(() => {
+                      if (fastPollingActiveRef.current) {
+                        console.log(`[OrderSearchCountdown] 🔄 Retrying expand-order-search for order ${orderId}`);
+                        expandSearch();
+                      }
+                    }, 1000);
+                  }
+                } catch (expandErr) {
+                  console.error(`[OrderSearchCountdown] ❌ Exception calling expand-order-search:`, expandErr);
                   // Retry بعد ثانية واحدة
                   setTimeout(() => {
                     if (fastPollingActiveRef.current) {
-                      console.log(`[OrderSearchCountdown] 🔄 Retrying expand-order-search for order ${orderId}`);
+                      console.log(`[OrderSearchCountdown] 🔄 Retrying expand-order-search after error for order ${orderId}`);
                       expandSearch();
                     }
                   }, 1000);
@@ -309,7 +319,7 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
                 setIsExpanding(false); // إخفاء رسالة التوسيع
               }
             } catch (expandErr) {
-              console.error(`[OrderSearchCountdown] ❌ Exception calling expand-order-search:`, expandErr);
+              console.error(`[OrderSearchCountdown] ❌ Exception in expandSearch function:`, expandErr);
               // Retry بعد ثانية واحدة
               setTimeout(() => {
                 if (fastPollingActiveRef.current) {
