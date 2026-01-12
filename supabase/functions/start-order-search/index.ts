@@ -32,9 +32,11 @@ Deno.serve(async (req) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  console.log('[start-order-search] ========== Function called ==========');
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    console.log('[start-order-search] Environment variables loaded');
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey, {
       auth: {
@@ -46,7 +48,13 @@ Deno.serve(async (req) => {
     const body: StartOrderSearchRequest = await req.json();
     const { order_id, search_point } = body;
 
+    console.log('[start-order-search] Request received:', {
+      order_id,
+      search_point: search_point ? { lat: search_point.lat, lon: search_point.lon } : null,
+    });
+
     if (!order_id || !search_point || !search_point.lat || !search_point.lon) {
+      console.error('[start-order-search] ❌ Missing required fields');
       return new Response(
         JSON.stringify({ success: false, error: 'order_id and search_point (lat, lon) are required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -101,6 +109,7 @@ Deno.serve(async (req) => {
       .eq('id', order_id);
 
     // البحث الأولي: العثور على السائقين في النطاق الأولي
+    console.log(`[start-order-search] Searching for drivers in radius ${initialRadius} km from point (${search_point.lat}, ${search_point.lon})`);
     const { data: initialDrivers, error: initialError } = await supabase.rpc(
       'find_drivers_in_radius',
       {
@@ -111,13 +120,17 @@ Deno.serve(async (req) => {
     );
 
     if (initialError) {
-      console.error('Error finding drivers in initial radius:', initialError);
+      console.error('[start-order-search] ❌ Error finding drivers in initial radius:', initialError);
+    } else {
+      console.log(`[start-order-search] ✅ Found ${initialDrivers?.length || 0} drivers in initial radius (${initialRadius} km)`);
     }
 
     // إرسال إشعارات للسائقين في النطاق الأولي
+    console.log(`[start-order-search] Found ${initialDrivers?.length || 0} drivers in initial radius (${initialRadius} km)`);
     if (initialDrivers && initialDrivers.length > 0) {
       for (const driver of initialDrivers) {
         try {
+          console.log(`[start-order-search] Notifying driver ${driver.driver_id}...`);
           await supabase.rpc('insert_notification_for_driver', {
             p_user_id: driver.driver_id,
             p_title: 'طلب جديد متاح',
@@ -125,9 +138,11 @@ Deno.serve(async (req) => {
             p_type: 'info',
             p_order_id: order_id,
           });
+          console.log(`[start-order-search] ✅ In-app notification created for driver ${driver.driver_id}`);
 
           // إرسال Push Notification
           try {
+            console.log(`[start-order-search] Sending push notification to driver ${driver.driver_id}...`);
             const pushResponse = await fetch(`${supabaseUrl}/functions/v1/send-push-notification`, {
               method: 'POST',
               headers: {
@@ -144,10 +159,12 @@ Deno.serve(async (req) => {
             });
             const pushResult = await pushResponse.json();
             if (pushResponse.ok && pushResult.sent && pushResult.sent > 0) {
-              console.log(`✅ Push notification sent to driver ${driver.driver_id}`);
+              console.log(`✅ [start-order-search] Push notification sent to driver ${driver.driver_id}`);
+            } else {
+              console.warn(`⚠️ [start-order-search] Push notification not sent to driver ${driver.driver_id}:`, pushResult);
             }
           } catch (pushErr) {
-            console.error(`Error sending push notification to driver ${driver.driver_id}:`, pushErr);
+            console.error(`❌ [start-order-search] Error sending push notification to driver ${driver.driver_id}:`, pushErr);
           }
         } catch (notifErr) {
           console.error(`Error notifying driver ${driver.driver_id}:`, notifErr);
@@ -204,9 +221,11 @@ Deno.serve(async (req) => {
 
       // إرسال إشعارات لجميع السائقين في النطاق الموسع (0-10 كيلو)
       // وليس فقط السائقين الجدد، لأن النطاق الموسع يبدأ من 0
+      console.log(`[start-order-search] Found ${expandedDrivers?.length || 0} drivers in expanded radius (${expandedRadius} km)`);
       if (expandedDrivers && expandedDrivers.length > 0) {
         for (const driver of expandedDrivers) {
           try {
+            console.log(`[start-order-search] Notifying driver ${driver.driver_id} (expanded radius)...`);
             await supabase.rpc('insert_notification_for_driver', {
               p_user_id: driver.driver_id,
               p_title: 'طلب جديد متاح',
@@ -214,9 +233,11 @@ Deno.serve(async (req) => {
               p_type: 'info',
               p_order_id: order_id,
             });
+            console.log(`[start-order-search] ✅ In-app notification created for driver ${driver.driver_id} (expanded)`);
 
             // إرسال Push Notification
             try {
+              console.log(`[start-order-search] Sending push notification to driver ${driver.driver_id} (expanded radius)...`);
               const pushResponse = await fetch(`${supabaseUrl}/functions/v1/send-push-notification`, {
                 method: 'POST',
                 headers: {
@@ -233,13 +254,15 @@ Deno.serve(async (req) => {
               });
               const pushResult = await pushResponse.json();
               if (pushResponse.ok && pushResult.sent && pushResult.sent > 0) {
-                console.log(`✅ Push notification sent to driver ${driver.driver_id}`);
+                console.log(`✅ [start-order-search] Push notification sent to driver ${driver.driver_id} (expanded)`);
+              } else {
+                console.warn(`⚠️ [start-order-search] Push notification not sent to driver ${driver.driver_id} (expanded):`, pushResult);
               }
             } catch (pushErr) {
-              console.error(`Error sending push notification to driver ${driver.driver_id}:`, pushErr);
+              console.error(`❌ [start-order-search] Error sending push notification to driver ${driver.driver_id} (expanded):`, pushErr);
             }
           } catch (notifErr) {
-            console.error(`Error notifying driver ${driver.driver_id}:`, notifErr);
+            console.error(`[start-order-search] Error notifying driver ${driver.driver_id} (expanded):`, notifErr);
           }
         }
       }

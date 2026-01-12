@@ -14,6 +14,8 @@ export interface CreateNotificationParams {
  */
 async function sendPushNotification(userId: string, title: string, message: string, data?: any) {
   try {
+    console.log('[sendPushNotification] Starting push notification for user:', userId);
+    
     // التحقق من وجود session
     const { data: { session } } = await supabase.auth.getSession();
     
@@ -38,7 +40,9 @@ async function sendPushNotification(userId: string, title: string, message: stri
         }
 
         if (edgeData?.success) {
-          console.log('[sendPushNotification] Push notification sent via create-notification Edge Function');
+          console.log('[sendPushNotification] ✅ Push notification sent via create-notification Edge Function');
+        } else {
+          console.warn('[sendPushNotification] ⚠️ create-notification returned success=false:', edgeData);
         }
         return;
       } catch (edgeErr) {
@@ -47,7 +51,8 @@ async function sendPushNotification(userId: string, title: string, message: stri
       }
     }
 
-    // إذا كان هناك session، استخدم send-push-notification Edge Function
+    // إذا كان هناك session، استخدم send-push-notification Edge Function مباشرة
+    console.log('[sendPushNotification] Session found, using send-push-notification Edge Function');
     const { data: edgeData, error: edgeError } = await supabase.functions.invoke('send-push-notification', {
       body: {
         user_id: userId,
@@ -58,17 +63,17 @@ async function sendPushNotification(userId: string, title: string, message: stri
     });
 
     if (edgeError) {
-      console.error('[sendPushNotification] Error sending push notification:', edgeError);
+      console.error('[sendPushNotification] ❌ Error sending push notification:', edgeError);
       return;
     }
 
     if (edgeData?.sent && edgeData.sent > 0) {
-      console.log(`[sendPushNotification] Push notification sent successfully to ${edgeData.sent} device(s)`);
+      console.log(`[sendPushNotification] ✅ Push notification sent successfully to ${edgeData.sent} device(s)`);
     } else {
-      console.log('[sendPushNotification] No devices found or push notification not sent');
+      console.warn('[sendPushNotification] ⚠️ No devices found or push notification not sent:', edgeData);
     }
   } catch (error) {
-    console.error('[sendPushNotification] Exception sending push notification:', error);
+    console.error('[sendPushNotification] ❌ Exception sending push notification:', error);
   }
 }
 

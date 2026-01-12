@@ -245,19 +245,23 @@ serve(async (req) => {
 
     // بدء البحث التلقائي عن السائقين
     try {
+      console.log(`[create-order] 🔍 Determining search point for order type: ${orderType}`);
       // تحديد نقطة البحث حسب نوع الطلب
       let searchPoint: { lat: number; lon: number } | null = null;
       
       if (orderType === 'outside') {
         // طلب من بره: البحث من أبعد نقطة في items
+        console.log(`[create-order] Order type is 'outside', checking items...`);
         if (items && Array.isArray(items) && items.length > 0) {
           // البحث عن أبعد نقطة (أول نقطة في items هي أبعد نقطة عادة)
           // لأن items مرتبة من الأبعد للأقرب
           const farthestItemAddress = items[0]?.address || pickupAddress;
+          console.log(`[create-order] Using farthest item address: ${farthestItemAddress}`);
           
           // استخدام Nominatim للـ forward geocoding (من العنوان إلى إحداثيات)
           try {
             const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(farthestItemAddress)}&limit=1&accept-language=ar`;
+            console.log(`[create-order] Geocoding address: ${nominatimUrl}`);
             const geocodeResponse = await fetch(nominatimUrl, {
               headers: {
                 'User-Agent': 'FlashDelivery/1.0',
@@ -271,17 +275,25 @@ serve(async (req) => {
                   lat: parseFloat(geocodeData[0].lat),
                   lon: parseFloat(geocodeData[0].lon),
                 };
-                console.log(`📍 Using farthest point for search: ${farthestItemAddress} -> (${searchPoint.lat}, ${searchPoint.lon})`);
+                console.log(`[create-order] ✅ Using farthest point for search: ${farthestItemAddress} -> (${searchPoint.lat}, ${searchPoint.lon})`);
+              } else {
+                console.warn(`[create-order] ⚠️ No geocoding results for address: ${farthestItemAddress}`);
               }
+            } else {
+              console.error(`[create-order] ❌ Geocoding failed with status: ${geocodeResponse.status}`);
             }
           } catch (geocodeErr) {
-            console.error('Error geocoding address for search:', geocodeErr);
+            console.error('[create-order] ❌ Error geocoding address for search:', geocodeErr);
           }
+        } else {
+          console.warn(`[create-order] ⚠️ No items found for 'outside' order type`);
         }
       } else if (orderType === 'package') {
         // توصيل طرد: البحث من نقطة الانطلاق (pickupAddress)
+        console.log(`[create-order] Order type is 'package', using pickup address: ${pickupAddress}`);
         try {
           const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(pickupAddress)}&limit=1&accept-language=ar`;
+          console.log(`[create-order] Geocoding pickup address: ${nominatimUrl}`);
           const geocodeResponse = await fetch(nominatimUrl, {
             headers: {
               'User-Agent': 'FlashDelivery/1.0',
@@ -295,16 +307,24 @@ serve(async (req) => {
                 lat: parseFloat(geocodeData[0].lat),
                 lon: parseFloat(geocodeData[0].lon),
               };
+              console.log(`[create-order] ✅ Using pickup address for search: ${pickupAddress} -> (${searchPoint.lat}, ${searchPoint.lon})`);
+            } else {
+              console.warn(`[create-order] ⚠️ No geocoding results for pickup address: ${pickupAddress}`);
             }
+          } else {
+            console.error(`[create-order] ❌ Geocoding failed with status: ${geocodeResponse.status}`);
           }
         } catch (geocodeErr) {
-          console.error('Error geocoding pickup address for search:', geocodeErr);
+          console.error('[create-order] ❌ Error geocoding pickup address for search:', geocodeErr);
         }
+      } else {
+        console.warn(`[create-order] ⚠️ Unknown order type: ${orderType}`);
       }
 
       // إذا تم تحديد نقطة البحث، ابدأ البحث التلقائي
       if (searchPoint) {
         try {
+          console.log(`[create-order] Starting search for order ${newOrder.id} from point (${searchPoint.lat}, ${searchPoint.lon})`);
           const searchResponse = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/start-order-search`, {
             method: 'POST',
             headers: {
@@ -319,15 +339,16 @@ serve(async (req) => {
 
           const searchResult = await searchResponse.json();
           if (searchResponse.ok && searchResult.success) {
-            console.log(`✅ Started automatic search for order ${newOrder.id} from point (${searchPoint.lat}, ${searchPoint.lon})`);
+            console.log(`✅ [create-order] Started automatic search for order ${newOrder.id} from point (${searchPoint.lat}, ${searchPoint.lon})`);
+            console.log(`[create-order] Search result:`, searchResult);
           } else {
-            console.error('Error starting order search:', searchResult.error);
+            console.error('[create-order] ❌ Error starting order search:', searchResult.error);
           }
         } catch (searchErr) {
-          console.error('Exception starting order search:', searchErr);
+          console.error('[create-order] ❌ Exception starting order search:', searchErr);
         }
       } else {
-        console.log('⚠️ Could not determine search point, skipping automatic search');
+        console.log('[create-order] ⚠️ Could not determine search point, skipping automatic search');
       }
     } catch (searchError) {
       // لا نوقف العملية إذا فشل البحث
