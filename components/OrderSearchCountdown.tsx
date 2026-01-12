@@ -21,6 +21,7 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
   const [currentRadius, setCurrentRadius] = useState<number>(5);
   const [searchStatus, setSearchStatus] = useState<string | null>(null);
   const [previousStatus, setPreviousStatus] = useState<string | null>(null);
+  const [isExpanding, setIsExpanding] = useState<boolean>(false); // لتتبع حالة التوسيع
   const [settings, setSettings] = useState<SearchSettings>({
     initialDuration: 30,
     expandedDuration: 30,
@@ -236,26 +237,35 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
         // إذا وصل العداد إلى 0 ولم يتم تحديث الحالة، نفعّل الـ polling السريع ونستدعي expand-order-search
         if (prev === 0 && currentStatus === 'searching' && !fastPollingActiveRef.current) {
           fastPollingActiveRef.current = true;
-          console.log(`[OrderSearchCountdown] Countdown reached 0, starting fast polling and expand trigger for order ${orderId}`);
+          setIsExpanding(true); // تحديث state لإظهار الرسالة
+          console.log(`[OrderSearchCountdown] ⏰ Countdown reached 0 for order ${orderId}, triggering search expansion from 5km to 10km`);
           
-          // انتظار 2 ثانية ثم استدعاء expand-order-search إذا لم تتغير الحالة
-          setTimeout(async () => {
-            // التحقق من الحالة الحالية قبل الاستدعاء
-            const { data: currentOrder } = await supabase
-              .from('orders')
-              .select('search_status')
-              .eq('id', orderId)
-              .maybeSingle();
+          // استدعاء expand-order-search فوراً (بدون انتظار)
+          const expandSearch = async () => {
+            try {
+              // التحقق من الحالة الحالية قبل الاستدعاء
+              const { data: currentOrder } = await supabase
+                .from('orders')
+                .select('search_status, status, driver_id')
+                .eq('id', orderId)
+                .maybeSingle();
 
-            // إذا كانت الحالة لا تزال 'searching'، نستدعي expand-order-search
-            if (currentOrder?.search_status === 'searching') {
-              console.log(`[OrderSearchCountdown] Status still 'searching' after 2s, calling expand-order-search`);
-              try {
+              // إذا تم قبول الطلب أو إلغاؤه، لا نوسع البحث
+              if (currentOrder?.status === 'accepted' || currentOrder?.status === 'cancelled' || currentOrder?.driver_id) {
+                console.log(`[OrderSearchCountdown] ⚠️ Order ${orderId} already accepted/cancelled, skipping expansion`);
+                fastPollingActiveRef.current = false;
+                return;
+              }
+
+              // إذا كانت الحالة لا تزال 'searching'، نستدعي expand-order-search
+              if (currentOrder?.search_status === 'searching') {
+                console.log(`[OrderSearchCountdown] 🔄 Calling expand-order-search for order ${orderId}`);
                 const { data: session } = await supabase.auth.getSession();
-                // استخدام Supabase URL من متغير البيئة
                 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+                
                 if (!supabaseUrl || supabaseUrl.includes('placeholder')) {
-                  console.error(`[OrderSearchCountdown] Invalid Supabase URL: ${supabaseUrl}`);
+                  console.error(`[OrderSearchCountdown] ❌ Invalid Supabase URL: ${supabaseUrl}`);
+                  fastPollingActiveRef.current = false;
                   return;
                 }
                 
@@ -270,7 +280,7 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
 
                 const result = await response.json();
                 if (response.ok && result.success) {
-                  console.log(`[OrderSearchCountdown] Successfully expanded search for order ${orderId}`);
+                  console.log(`[OrderSearchCountdown] ✅ Successfully expanded search for order ${orderId} - ${result.drivers_found || 0} drivers found`);
                   // تحديث الحالة فوراً بعد الاستدعاء
                   const { data: updatedOrder } = await supabase
                     .from('orders')
@@ -281,19 +291,57 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
                   if (updatedOrder) {
                     updateTimeRemaining(updatedOrder, settingsRef.current);
                   }
+                  fastPollingActiveRef.current = false;
+                  setIsExpanding(false); // إخفاء رسالة التوسيع
                 } else {
-                  console.error(`[OrderSearchCountdown] Error expanding search:`, result.error);
+                  console.error(`[OrderSearchCountdown] ❌ Error expanding search:`, result.error || result);
+                  // Retry بعد ثانية واحدة
+                  setTimeout(() => {
+                    if (fastPollingActiveRef.current) {
+                      console.log(`[OrderSearchCountdown] 🔄 Retrying expand-order-search for order ${orderId}`);
+                      expandSearch();
+                    }
+                  }, 1000);
                 }
-              } catch (expandErr) {
-                console.error(`[OrderSearchCountdown] Exception calling expand-order-search:`, expandErr);
+              } else {
+                console.log(`[OrderSearchCountdown] ✅ Status already changed to '${currentOrder?.search_status}', skipping expand call`);
+                fastPollingActiveRef.current = false;
+                setIsExpanding(false); // إخفاء رسالة التوسيع
               }
-            } else {
-              console.log(`[OrderSearchCountdown] Status changed to '${currentOrder?.search_status}', skipping expand call`);
+            } catch (expandErr) {
+              console.error(`[OrderSearchCountdown] ❌ Exception calling expand-order-search:`, expandErr);
+              // Retry بعد ثانية واحدة
+              setTimeout(() => {
+                if (fastPollingActiveRef.current) {
+                  console.log(`[OrderSearchCountdown] 🔄 Retrying expand-order-search after error for order ${orderId}`);
+                  expandSearch();
+                }
+              }, 1000);
             }
-          }, 2000);
+          };
           
-          // بدء الـ polling السريع كل 500ms
+          // استدعاء فوري (بدون انتظار)
+          expandSearch();
+          
+          // بدء الـ polling السريع كل 500ms (لمدة أقصاها 10 ثوان)
+          let pollingAttempts = 0;
+          const maxPollingAttempts = 20; // 20 * 500ms = 10 seconds
+          
           fastPollingIntervalRef.current = setInterval(() => {
+            pollingAttempts++;
+            
+            // إيقاف الـ polling بعد 10 ثوان
+            if (pollingAttempts > maxPollingAttempts) {
+              console.log(`[OrderSearchCountdown] ⚠️ Fast polling timeout after 10 seconds, stopping`);
+              if (fastPollingIntervalRef.current) {
+                clearInterval(fastPollingIntervalRef.current);
+                fastPollingIntervalRef.current = null;
+              }
+              fastPollingActiveRef.current = false;
+              setIsExpanding(false); // إخفاء رسالة التوسيع
+              return;
+            }
+            
             supabase
               .from('orders')
               .select('search_status, search_started_at, search_expanded_at, search_expires_at')
@@ -301,7 +349,7 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
               .maybeSingle()
               .then(({ data, error }) => {
                 if (!error && data) {
-                  console.log(`[OrderSearchCountdown] Fast polling - order status: ${data.search_status}`);
+                  console.log(`[OrderSearchCountdown] 🔄 Fast polling (${pollingAttempts}/${maxPollingAttempts}) - order status: ${data.search_status}`);
                   if (data.search_status === 'expanded') {
                     // تم التحديث إلى expanded، نوقف الـ polling السريع
                     if (fastPollingIntervalRef.current) {
@@ -309,7 +357,9 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
                       fastPollingIntervalRef.current = null;
                     }
                     fastPollingActiveRef.current = false;
-                    console.log(`[OrderSearchCountdown] Status updated to expanded, stopping fast polling`);
+                    setIsExpanding(false); // إخفاء رسالة التوسيع
+                    console.log(`[OrderSearchCountdown] ✅ Status updated to expanded, stopping fast polling`);
+                    updateTimeRemaining(data, settingsRef.current);
                     updateTimeRemaining(data, settingsRef.current);
                   } else if (data.search_status === 'stopped' || data.search_status === 'found') {
                     // إذا توقف البحث أو تم العثور على سائق، نوقف الـ polling
@@ -632,6 +682,7 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
     const isWarning = timeRemaining !== null && timeRemaining <= 5 && timeRemaining > 0;
     const isZero = timeRemaining === 0 && searchStatus === 'searching';
     const isJustExpanded = previousStatus === 'searching' && searchStatus === 'expanded';
+    const isCurrentlyExpanding = isExpanding || (isZero && searchStatus === 'searching');
     
     return (
       <View style={styles.container}>
@@ -639,19 +690,19 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
           <View style={styles.expansionNotice}>
             <Ionicons name="expand" size={16} color="#FF9500" />
             <Text style={styles.expansionNoticeText}>
-              تم توسيع البحث إلى نطاق أوسع
+              تم توسيع البحث إلى نطاق أوسع (10 كم)
             </Text>
           </View>
         )}
-        <View style={[styles.countdownBar, { borderLeftColor: isZero ? '#FF9500' : statusColor }]}>
+        <View style={[styles.countdownBar, { borderLeftColor: isCurrentlyExpanding ? '#FF9500' : statusColor }]}>
           <Ionicons 
-            name={isWarning ? "warning" : isZero ? "hourglass" : "search"} 
+            name={isWarning ? "warning" : isCurrentlyExpanding ? "hourglass" : "search"} 
             size={20} 
-            color={isZero ? '#FF9500' : statusColor} 
+            color={isCurrentlyExpanding ? '#FF9500' : statusColor} 
           />
           <View style={styles.content}>
             <Text style={styles.statusText}>
-              {isZero ? 'جاري توسيع البحث...' : getStatusText()}
+              {isCurrentlyExpanding ? 'جاري توسيع البحث من 5 كم إلى 10 كم...' : getStatusText()}
             </Text>
             <View style={styles.timeContainer}>
               <Ionicons 
