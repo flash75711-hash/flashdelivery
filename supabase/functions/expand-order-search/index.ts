@@ -236,44 +236,29 @@ Deno.serve(async (req) => {
 
     console.log(`✅ Search expanded for order ${order_id}`);
 
-    // البحث الموسع: العثور على السائقين في النطاق الموسع
+    // البحث الموسع: العثور على السائقين في النطاق 0-10 كيلو
+    console.log(`[expand-order-search] 🔍 Searching for drivers in expanded radius 0-${expandedRadius} km from point (${searchPoint.lat}, ${searchPoint.lon})`);
     const { data: expandedDrivers, error: expandedError } = await supabase.rpc(
       'find_drivers_in_radius',
       {
         p_latitude: searchPoint.lat,
         p_longitude: searchPoint.lon,
-        p_radius_km: expandedRadius,
+        p_radius_km: expandedRadius, // البحث من 0 إلى expandedRadius كيلو
       }
     );
 
     if (expandedError) {
-      console.error('Error finding drivers in expanded radius:', expandedError);
+      console.error('[expand-order-search] ❌ Error finding drivers in expanded radius:', expandedError);
+    } else {
+      console.log(`[expand-order-search] ✅ Found ${expandedDrivers?.length || 0} drivers in expanded radius (0-${expandedRadius} km)`);
     }
 
-    // جلب السائقين الذين تم إرسال إشعارات لهم في النطاق الأولي
-    let initialDriverIds: string[] = [];
-    try {
-      const { data: notifications } = await supabase
-        .from('notifications')
-        .select('user_id')
-        .eq('order_id', order_id)
-        .eq('type', 'info');
-
-      if (notifications) {
-        initialDriverIds = notifications.map(n => n.user_id).filter((id): id is string => !!id);
-      }
-    } catch (notifErr) {
-      console.error('Error fetching initial notifications:', notifErr);
-    }
-
-    // إرسال إشعارات للسائقين الجدد فقط (الذين لم يتلقوا إشعاراً في النطاق الأولي)
+    // إرسال Push Notifications لجميع السائقين في النطاق 0-10 كيلو
+    // وليس فقط السائقين الجدد، لأن النطاق الموسع يبدأ من 0
+    console.log(`[expand-order-search] 📤 Sending push notifications to ${expandedDrivers?.length || 0} drivers in expanded radius (0-${expandedRadius} km)`);
     let notifiedCount = 0;
     if (expandedDrivers && expandedDrivers.length > 0) {
-      const newDrivers = expandedDrivers.filter(
-        d => !initialDriverIds.includes(d.driver_id)
-      );
-
-      for (const driver of newDrivers) {
+      for (const driver of expandedDrivers) {
         try {
           await supabase.rpc('insert_notification_for_driver', {
             p_user_id: driver.driver_id,

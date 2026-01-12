@@ -251,12 +251,14 @@ serve(async (req) => {
       
       if (orderType === 'outside') {
         // طلب من بره: البحث من أبعد نقطة في items
+        // سيتم إرسال push للسائقين القريبين من 0-5 كيلو من أبعد مكان لمدة 30 ثانية
+        // ثم من 0-10 كيلو لمدة 30 ثانية
         console.log(`[create-order] Order type is 'outside', checking items...`);
         if (items && Array.isArray(items) && items.length > 0) {
           // البحث عن أبعد نقطة (أول نقطة في items هي أبعد نقطة عادة)
           // لأن items مرتبة من الأبعد للأقرب
           const farthestItemAddress = items[0]?.address || pickupAddress;
-          console.log(`[create-order] Using farthest item address: ${farthestItemAddress}`);
+          console.log(`[create-order] 📍 Using farthest item address for search point: ${farthestItemAddress}`);
           
           // استخدام Nominatim للـ forward geocoding (من العنوان إلى إحداثيات)
           try {
@@ -290,7 +292,9 @@ serve(async (req) => {
         }
       } else if (orderType === 'package') {
         // توصيل طرد: البحث من نقطة الانطلاق (pickupAddress)
-        console.log(`[create-order] Order type is 'package', using pickup address: ${pickupAddress}`);
+        // سيتم إرسال push لأقرب السائقين لنقطة البداية/الانطلاق
+        // من 0-5 كيلو لمدة 30 ثانية، ثم من 0-10 كيلو لمدة 30 ثانية
+        console.log(`[create-order] Order type is 'package', using pickup address for search point: ${pickupAddress}`);
         try {
           const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(pickupAddress)}&limit=1&accept-language=ar`;
           console.log(`[create-order] Geocoding pickup address: ${nominatimUrl}`);

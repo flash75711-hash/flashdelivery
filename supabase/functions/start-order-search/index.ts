@@ -117,25 +117,25 @@ Deno.serve(async (req) => {
       .update(updateData)
       .eq('id', order_id);
 
-    // البحث الأولي: العثور على السائقين في النطاق الأولي
-    console.log(`[start-order-search] Searching for drivers in radius ${initialRadius} km from point (${search_point.lat}, ${search_point.lon})`);
+    // البحث الأولي: العثور على السائقين في النطاق 0-5 كيلو
+    console.log(`[start-order-search] 🔍 Searching for drivers in radius 0-${initialRadius} km from point (${search_point.lat}, ${search_point.lon})`);
     const { data: initialDrivers, error: initialError } = await supabase.rpc(
       'find_drivers_in_radius',
       {
         p_latitude: search_point.lat,
         p_longitude: search_point.lon,
-        p_radius_km: initialRadius,
+        p_radius_km: initialRadius, // البحث من 0 إلى initialRadius كيلو
       }
     );
 
     if (initialError) {
       console.error('[start-order-search] ❌ Error finding drivers in initial radius:', initialError);
     } else {
-      console.log(`[start-order-search] ✅ Found ${initialDrivers?.length || 0} drivers in initial radius (${initialRadius} km)`);
+      console.log(`[start-order-search] ✅ Found ${initialDrivers?.length || 0} drivers in initial radius (0-${initialRadius} km)`);
     }
 
-    // إرسال إشعارات للسائقين في النطاق الأولي
-    console.log(`[start-order-search] Found ${initialDrivers?.length || 0} drivers in initial radius (${initialRadius} km)`);
+    // إرسال Push Notifications للسائقين في النطاق 0-5 كيلو
+    console.log(`[start-order-search] 📤 Sending push notifications to ${initialDrivers?.length || 0} drivers in radius 0-${initialRadius} km`);
     if (initialDrivers && initialDrivers.length > 0) {
       for (const driver of initialDrivers) {
         try {
@@ -221,23 +221,26 @@ Deno.serve(async (req) => {
       
       console.log(`[start-order-search] Expanded search for order ${order_id} - expires at: ${expandedExpiresAt.toISOString()} (${expandedDuration}s from expanded start)`);
 
-      // البحث الموسع: العثور على السائقين في النطاق الموسع (0-10 كيلو)
+      // البحث الموسع: العثور على السائقين في النطاق 0-10 كيلو
+      console.log(`[start-order-search] 🔍 Searching for drivers in expanded radius 0-${expandedRadius} km from point (${search_point.lat}, ${search_point.lon})`);
       const { data: expandedDrivers, error: expandedError } = await supabase.rpc(
         'find_drivers_in_radius',
         {
           p_latitude: search_point.lat,
           p_longitude: search_point.lon,
-          p_radius_km: expandedRadius,
+          p_radius_km: expandedRadius, // البحث من 0 إلى expandedRadius كيلو
         }
       );
 
       if (expandedError) {
-        console.error('Error finding drivers in expanded radius:', expandedError);
+        console.error('[start-order-search] ❌ Error finding drivers in expanded radius:', expandedError);
+      } else {
+        console.log(`[start-order-search] ✅ Found ${expandedDrivers?.length || 0} drivers in expanded radius (0-${expandedRadius} km)`);
       }
 
-      // إرسال إشعارات لجميع السائقين في النطاق الموسع (0-10 كيلو)
+      // إرسال Push Notifications لجميع السائقين في النطاق 0-10 كيلو
       // وليس فقط السائقين الجدد، لأن النطاق الموسع يبدأ من 0
-      console.log(`[start-order-search] Found ${expandedDrivers?.length || 0} drivers in expanded radius (${expandedRadius} km)`);
+      console.log(`[start-order-search] 📤 Sending push notifications to ${expandedDrivers?.length || 0} drivers in expanded radius (0-${expandedRadius} km)`);
       if (expandedDrivers && expandedDrivers.length > 0) {
         for (const driver of expandedDrivers) {
           try {
