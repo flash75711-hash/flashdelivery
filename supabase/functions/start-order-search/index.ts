@@ -117,8 +117,9 @@ Deno.serve(async (req) => {
       .update(updateData)
       .eq('id', order_id);
 
-    // البحث الأولي: العثور على السائقين في النطاق 0-5 كيلو
-    console.log(`[start-order-search] 🔍 Searching for drivers in radius 0-${initialRadius} km from point (${search_point.lat}, ${search_point.lon})`);
+    // البحث الأولي: العثور على السائقين في النطاق 0-5 كيلو (المرحلة الأولى)
+    console.log(`[start-order-search] 🔍 [PHASE 1] Starting initial search in radius 0-${initialRadius} km from point (${search_point.lat}, ${search_point.lon})`);
+    console.log(`[start-order-search] ⏱️ [PHASE 1] Initial search duration: ${initialDuration} seconds`);
     const { data: initialDrivers, error: initialError } = await supabase.rpc(
       'find_drivers_in_radius',
       {
@@ -181,8 +182,11 @@ Deno.serve(async (req) => {
       }
     }
 
-    // بدء البحث الموسع بعد انتهاء المدة الأولية
+    // بدء البحث الموسع بعد انتهاء المدة الأولية (30 ثانية)
+    console.log(`[start-order-search] ⏰ Scheduling expanded search for order ${order_id} after ${initialDuration} seconds (${initialDuration * 1000}ms)`);
     setTimeout(async () => {
+      console.log(`[start-order-search] ⏰ Timeout triggered - expanding search for order ${order_id} from 5km to 10km`);
+      
       // التحقق من أن الطلب لم يُقبل بعد
       const { data: order, error: orderError } = await supabase
         .from('orders')
@@ -191,26 +195,29 @@ Deno.serve(async (req) => {
         .single();
 
       if (orderError || !order) {
-        console.log('Order not found or error:', orderError);
+        console.log(`[start-order-search] ❌ Order not found or error:`, orderError);
         return;
       }
 
       // إذا تم قبول الطلب أو تم إلغاؤه، لا نوسع البحث
       if (order.status === 'accepted' || order.status === 'cancelled' || order.driver_id) {
-        console.log('Order already accepted or cancelled, stopping search');
+        console.log(`[start-order-search] ⚠️ Order ${order_id} already accepted/cancelled, stopping search expansion`);
         await supabase
           .from('orders')
           .update({ search_status: 'stopped' })
           .eq('id', order_id);
         return;
       }
+      
+      console.log(`[start-order-search] ✅ Order ${order_id} is still pending, proceeding with search expansion to 10km`);
 
-      // تحديث حالة البحث إلى expanded
+      // تحديث حالة البحث إلى expanded (من 5 كيلو إلى 10 كيلو)
       const expandedAt = new Date();
       const expandedExpiresAt = new Date(expandedAt);
       expandedExpiresAt.setSeconds(expandedExpiresAt.getSeconds() + expandedDuration);
       
-      await supabase
+      console.log(`[start-order-search] 🔄 Transitioning search from 5km to 10km for order ${order_id}`);
+      const { error: updateError } = await supabase
         .from('orders')
         .update({
           search_status: 'expanded',
@@ -219,10 +226,16 @@ Deno.serve(async (req) => {
         })
         .eq('id', order_id);
       
-      console.log(`[start-order-search] Expanded search for order ${order_id} - expires at: ${expandedExpiresAt.toISOString()} (${expandedDuration}s from expanded start)`);
+      if (updateError) {
+        console.error(`[start-order-search] ❌ Error updating search status to expanded:`, updateError);
+        return;
+      }
+      
+      console.log(`[start-order-search] ✅ Search expanded for order ${order_id} - status: expanded, expires at: ${expandedExpiresAt.toISOString()} (${expandedDuration}s from expanded start)`);
 
-      // البحث الموسع: العثور على السائقين في النطاق 0-10 كيلو
-      console.log(`[start-order-search] 🔍 Searching for drivers in expanded radius 0-${expandedRadius} km from point (${search_point.lat}, ${search_point.lon})`);
+      // البحث الموسع: العثور على السائقين في النطاق 0-10 كيلو (المرحلة الثانية)
+      console.log(`[start-order-search] 🔍 [PHASE 2] Starting expanded search in radius 0-${expandedRadius} km from point (${search_point.lat}, ${search_point.lon})`);
+      console.log(`[start-order-search] ⏱️ [PHASE 2] Expanded search duration: ${expandedDuration} seconds`);
       const { data: expandedDrivers, error: expandedError } = await supabase.rpc(
         'find_drivers_in_radius',
         {
