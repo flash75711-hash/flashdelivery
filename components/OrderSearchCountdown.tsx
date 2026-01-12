@@ -33,6 +33,9 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
   const fastPollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastDbCheckRef = useRef<number>(0); // لتتبع آخر وقت fetch من قاعدة البيانات
   const dbCheckThrottle = 5000; // 5 ثوان - throttle للـ database checks
+  const orderStatusRef = useRef<string | null>(null); // لتتبع حالة الطلب (pending, accepted, etc.)
+  const intervalRef = useRef<NodeJS.Timeout | null>(null); // لتخزين interval الرئيسي
+  const subscriptionRef = useRef<any>(null); // لتخزين subscription
 
   useEffect(() => {
     // جلب الإعدادات
@@ -85,8 +88,20 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
             search_started_at: data.search_started_at,
             search_expanded_at: data.search_expanded_at,
           });
+          // إذا كان status ليس pending، لا نبدأ العداد
+          if (data.status !== 'pending') {
+            console.log(`[OrderSearchCountdown] Order ${orderId} is not pending (status: ${data.status}), not starting countdown`);
+            orderStatusRef.current = data.status;
+            return;
+          }
+          orderStatusRef.current = data.status;
           updateTimeRemaining(data, settingsRef.current);
         } else if (error) {
+          // إذا كان الخطأ بسبب عدم وجود الطلب أو RLS، نتوقف
+          if (error.code === 'PGRST116' || error.message?.includes('0 rows')) {
+            console.log(`[OrderSearchCountdown] Order ${orderId} not found or access denied, not starting countdown`);
+            return;
+          }
           console.error('[OrderSearchCountdown] Error loading search status:', error);
         }
       } catch (error) {
@@ -97,7 +112,7 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
     loadSearchStatus();
 
     // الاشتراك في تحديثات البحث
-    const subscription = supabase
+    subscriptionRef.current = supabase
       .channel(`order_search_${orderId}`)
       .on(
         'postgres_changes',
@@ -109,13 +124,50 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
         },
         (payload) => {
           const order = payload.new as any;
+          // إذا تغير status من pending إلى accepted أو أي حالة أخرى، نتوقف فوراً
+          if (order.status !== 'pending') {
+            console.log(`[OrderSearchCountdown] Order ${orderId} status changed to ${order.status}, stopping countdown`);
+            setTimeRemaining(null);
+            setSearchStatus(null);
+            searchStatusRef.current = null;
+            orderStatusRef.current = order.status;
+            // إيقاف جميع الـ intervals
+            if (intervalRef.current) {
+              clearInterval(intervalRef.current);
+              intervalRef.current = null;
+            }
+            if (fastPollingIntervalRef.current) {
+              clearInterval(fastPollingIntervalRef.current);
+              fastPollingIntervalRef.current = null;
+            }
+            fastPollingActiveRef.current = false;
+            return;
+          }
+          orderStatusRef.current = order.status;
           updateTimeRemaining(order, settingsRef.current);
         }
       )
       .subscribe();
 
     // تحديث العداد كل ثانية
-    const interval = setInterval(() => {
+    intervalRef.current = setInterval(() => {
+      // التحقق من أن الطلب لا يزال pending قبل المتابعة
+      if (orderStatusRef.current && orderStatusRef.current !== 'pending') {
+        console.log(`[OrderSearchCountdown] Order ${orderId} is no longer pending, stopping countdown`);
+        setTimeRemaining(null);
+        setSearchStatus(null);
+        searchStatusRef.current = null;
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+        if (fastPollingIntervalRef.current) {
+          clearInterval(fastPollingIntervalRef.current);
+          fastPollingIntervalRef.current = null;
+        }
+        fastPollingActiveRef.current = false;
+        return;
+      }
       // تحديث محلي للعداد أولاً (للعداد التنازلي السلس)
       setTimeRemaining(prev => {
         const currentStatus = searchStatusRef.current;
@@ -295,22 +347,64 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
         lastDbCheckRef.current = now;
         supabase
           .from('orders')
-          .select('search_status, search_started_at, search_expanded_at')
+          .select('search_status, search_started_at, search_expanded_at, status')
           .eq('id', orderId)
           .maybeSingle()
           .then(({ data, error }) => {
             if (!error && data) {
+              // إذا تغير status من pending، نتوقف فوراً
+              if (data.status !== 'pending') {
+                console.log(`[OrderSearchCountdown] Order ${orderId} status changed to ${data.status}, stopping countdown`);
+                setTimeRemaining(null);
+                setSearchStatus(null);
+                searchStatusRef.current = null;
+                orderStatusRef.current = data.status;
+                if (intervalRef.current) {
+                  clearInterval(intervalRef.current);
+                  intervalRef.current = null;
+                }
+                if (fastPollingIntervalRef.current) {
+                  clearInterval(fastPollingIntervalRef.current);
+                  fastPollingIntervalRef.current = null;
+                }
+                fastPollingActiveRef.current = false;
+                return;
+              }
+              orderStatusRef.current = data.status;
               updateTimeRemaining(data, settingsRef.current);
             } else if (error) {
-              console.error(`[OrderSearchCountdown] Error fetching order status:`, error);
+              // إذا كان الخطأ بسبب عدم وجود الطلب أو RLS، نتوقف
+              if (error.code === 'PGRST116' || error.message?.includes('0 rows')) {
+                console.log(`[OrderSearchCountdown] Order ${orderId} not found or access denied, stopping countdown`);
+                setTimeRemaining(null);
+                setSearchStatus(null);
+                searchStatusRef.current = null;
+                if (intervalRef.current) {
+                  clearInterval(intervalRef.current);
+                  intervalRef.current = null;
+                }
+                if (fastPollingIntervalRef.current) {
+                  clearInterval(fastPollingIntervalRef.current);
+                  fastPollingIntervalRef.current = null;
+                }
+                fastPollingActiveRef.current = false;
+              } else {
+                console.error(`[OrderSearchCountdown] Error fetching order status:`, error);
+              }
             }
           });
       }
     }, 1000);
 
     return () => {
-      subscription.unsubscribe();
-      clearInterval(interval);
+      if (subscriptionRef.current) {
+        subscriptionRef.current.unsubscribe();
+        subscriptionRef.current = null;
+      }
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
       if (fastPollingIntervalRef.current) {
         clearInterval(fastPollingIntervalRef.current);
         fastPollingIntervalRef.current = null;
@@ -320,6 +414,17 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
   }, [orderId]);
 
   const updateTimeRemaining = (order: any, currentSettings: SearchSettings) => {
+    // إذا تغير status من pending، نتوقف فوراً
+    if (order.status && order.status !== 'pending') {
+      console.log(`[OrderSearchCountdown] Order ${orderId} status is ${order.status}, stopping countdown`);
+      setTimeRemaining(null);
+      setSearchStatus(null);
+      searchStatusRef.current = null;
+      orderStatusRef.current = order.status;
+      localStartTimeRef.current = null;
+      return;
+    }
+    
     // تحديث searchStatus دائماً
     const newSearchStatus = order.search_status || null;
     setSearchStatus(newSearchStatus);
@@ -327,6 +432,7 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
     
     console.log(`[OrderSearchCountdown] updateTimeRemaining for order ${orderId}:`, {
       search_status: newSearchStatus,
+      status: order.status,
       search_started_at: order.search_started_at,
       search_expanded_at: order.search_expanded_at,
     });
