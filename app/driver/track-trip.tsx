@@ -1747,23 +1747,31 @@ export default function TrackTripScreen() {
                   // المبالغ التي دفعها السائق (استثناء آخر عنصر لأنه عنوان التوصيل)
                   const pickupItems = orderItems.slice(0, -1);
                   
-                  // حساب المبالغ من orderItems (المحفوظة) + itemStates (المدخلة حديثاً)
+                  // حساب المبالغ المدفوعة للمحل فقط (العناصر التي isPrepaid = true)
                   const totalItemsFee = pickupItems.reduce((sum, item) => {
-                    // أولاً: استخدام المبلغ من itemStates إذا كان موجوداً وصحيحاً
                     const itemState = itemStates[item.id];
-                    if (itemState?.fee && !isNaN(parseFloat(itemState.fee))) {
-                      return sum + parseFloat(itemState.fee);
-                    }
-                    // ثانياً: استخدام المبلغ من orderItems إذا كان موجوداً
-                    if (item.item_fee !== null && item.item_fee !== undefined) {
-                      return sum + (item.item_fee || 0);
+                    // التحقق من أن toggle "دفع للمحل؟" مفعّل (isPrepaid = true)
+                    const isPrepaid = itemState?.isPrepaid === true;
+                    
+                    if (isPrepaid) {
+                      // أولاً: استخدام المبلغ من itemStates إذا كان موجوداً وصحيحاً
+                      if (itemState?.fee && !isNaN(parseFloat(itemState.fee))) {
+                        return sum + parseFloat(itemState.fee);
+                      }
+                      // ثانياً: استخدام المبلغ من orderItems إذا كان موجوداً
+                      if (item.item_fee !== null && item.item_fee !== undefined) {
+                        return sum + (item.item_fee || 0);
+                      }
                     }
                     return sum;
                   }, 0);
                   
-                  // عدد العناصر التي لها مبلغ (من orderItems أو itemStates)
+                  // عدد العناصر التي تم دفعها للمحل (isPrepaid = true)
                   const itemsWithFee = pickupItems.filter(item => {
                     const itemState = itemStates[item.id];
+                    const isPrepaid = itemState?.isPrepaid === true;
+                    if (!isPrepaid) return false;
+                    
                     const hasStateFee = itemState?.fee && !isNaN(parseFloat(itemState.fee));
                     const hasItemFee = item.item_fee !== null && item.item_fee !== undefined;
                     return hasStateFee || hasItemFee;
