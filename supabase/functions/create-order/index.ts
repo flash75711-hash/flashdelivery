@@ -367,7 +367,7 @@ serve(async (req) => {
             console.warn(`[create-order] ⚠️ No address found in first item`);
           }
           
-          // إذا فشل، نجرب pickup_address كبديل (وليس delivery_address)
+          // إذا فشل، نجرب pickup_address كبديل
           if (!searchPoint && pickupAddress) {
             console.log(`[create-order] ⚠️ Falling back to pickup_address: ${pickupAddress}`);
             try {
@@ -386,14 +386,48 @@ serve(async (req) => {
                     lon: parseFloat(geocodeData[0].lon),
                   };
                   console.log(`[create-order] ✅ Using pickup_address as fallback: ${pickupAddress} -> (${searchPoint.lat}, ${searchPoint.lon})`);
+                } else {
+                  console.warn(`[create-order] ⚠️ No geocoding results for pickup_address: ${pickupAddress}`);
                 }
+              } else {
+                console.error(`[create-order] ❌ Geocoding pickup_address failed with status: ${geocodeResponse.status}`);
               }
             } catch (geocodeErr) {
               console.error('[create-order] ❌ Error geocoding pickup_address:', geocodeErr);
             }
           }
+          
+          // إذا فشل كل شيء، نجرب delivery_address كـ fallback أخير
+          if (!searchPoint && deliveryAddress) {
+            console.log(`[create-order] ⚠️ Last resort: trying delivery_address: ${deliveryAddress}`);
+            try {
+              const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(deliveryAddress)}&limit=1&accept-language=ar`;
+              const geocodeResponse = await fetch(nominatimUrl, {
+                headers: {
+                  'User-Agent': 'FlashDelivery/1.0',
+                },
+              });
+              
+              if (geocodeResponse.ok) {
+                const geocodeData = await geocodeResponse.json();
+                if (geocodeData && geocodeData.length > 0) {
+                  searchPoint = {
+                    lat: parseFloat(geocodeData[0].lat),
+                    lon: parseFloat(geocodeData[0].lon),
+                  };
+                  console.log(`[create-order] ✅ Using delivery_address as last resort: ${deliveryAddress} -> (${searchPoint.lat}, ${searchPoint.lon})`);
+                } else {
+                  console.warn(`[create-order] ⚠️ No geocoding results for delivery_address: ${deliveryAddress}`);
+                }
+              } else {
+                console.error(`[create-order] ❌ Geocoding delivery_address failed with status: ${geocodeResponse.status}`);
+              }
+            } catch (geocodeErr) {
+              console.error('[create-order] ❌ Error geocoding delivery_address:', geocodeErr);
+            }
+          }
         } else {
-          // إذا لم يكن هناك items، نستخدم pickup_address (وليس delivery_address)
+          // إذا لم يكن هناك items، نستخدم pickup_address
           console.warn(`[create-order] ⚠️ No items found for 'outside' order type, using pickup_address`);
           if (pickupAddress) {
             try {
@@ -412,10 +446,44 @@ serve(async (req) => {
                     lon: parseFloat(geocodeData[0].lon),
                   };
                   console.log(`[create-order] ✅ Using pickup_address: ${pickupAddress} -> (${searchPoint.lat}, ${searchPoint.lon})`);
+                } else {
+                  console.warn(`[create-order] ⚠️ No geocoding results for pickup_address: ${pickupAddress}`);
                 }
+              } else {
+                console.error(`[create-order] ❌ Geocoding pickup_address failed with status: ${geocodeResponse.status}`);
               }
             } catch (geocodeErr) {
               console.error('[create-order] ❌ Error geocoding pickup_address:', geocodeErr);
+            }
+          }
+          
+          // إذا فشل pickup_address، نجرب delivery_address
+          if (!searchPoint && deliveryAddress) {
+            console.log(`[create-order] ⚠️ Falling back to delivery_address: ${deliveryAddress}`);
+            try {
+              const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(deliveryAddress)}&limit=1&accept-language=ar`;
+              const geocodeResponse = await fetch(nominatimUrl, {
+                headers: {
+                  'User-Agent': 'FlashDelivery/1.0',
+                },
+              });
+              
+              if (geocodeResponse.ok) {
+                const geocodeData = await geocodeResponse.json();
+                if (geocodeData && geocodeData.length > 0) {
+                  searchPoint = {
+                    lat: parseFloat(geocodeData[0].lat),
+                    lon: parseFloat(geocodeData[0].lon),
+                  };
+                  console.log(`[create-order] ✅ Using delivery_address as fallback: ${deliveryAddress} -> (${searchPoint.lat}, ${searchPoint.lon})`);
+                } else {
+                  console.warn(`[create-order] ⚠️ No geocoding results for delivery_address: ${deliveryAddress}`);
+                }
+              } else {
+                console.error(`[create-order] ❌ Geocoding delivery_address failed with status: ${geocodeResponse.status}`);
+              }
+            } catch (geocodeErr) {
+              console.error('[create-order] ❌ Error geocoding delivery_address:', geocodeErr);
             }
           }
         }
@@ -485,7 +553,7 @@ serve(async (req) => {
       // إذا تم تحديد نقطة البحث، ابدأ البحث التلقائي
       if (searchPoint) {
         try {
-          console.log(`[create-order] Starting search for order ${newOrder.id} from point (${searchPoint.lat}, ${searchPoint.lon})`);
+          console.log(`[create-order] 🚀 Starting search for order ${newOrder.id} from point (${searchPoint.lat}, ${searchPoint.lon})`);
           const searchResponse = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/start-order-search`, {
             method: 'POST',
             headers: {
@@ -504,12 +572,24 @@ serve(async (req) => {
             console.log(`[create-order] Search result:`, searchResult);
           } else {
             console.error('[create-order] ❌ Error starting order search:', searchResult.error);
+            console.error('[create-order] Full search response:', searchResult);
           }
         } catch (searchErr) {
           console.error('[create-order] ❌ Exception starting order search:', searchErr);
+          console.error('[create-order] Exception details:', JSON.stringify(searchErr, null, 2));
         }
       } else {
-        console.log('[create-order] ⚠️ Could not determine search point, skipping automatic search');
+        console.error(`[create-order] ❌❌❌ CRITICAL: Could not determine search point for order ${newOrder.id} (type: ${orderType})`);
+        console.error(`[create-order] Order details:`, {
+          order_id: newOrder.id,
+          order_type: orderType,
+          has_items: !!(items && Array.isArray(items) && items.length > 0),
+          items_count: items && Array.isArray(items) ? items.length : 0,
+          first_item_address: items && Array.isArray(items) && items.length > 0 ? items[0]?.address : null,
+          pickup_address: pickupAddress,
+          delivery_address: deliveryAddress,
+        });
+        console.error('[create-order] ⚠️ Skipping automatic search - NO PUSH NOTIFICATIONS WILL BE SENT!');
       }
     } catch (searchError) {
       // لا نوقف العملية إذا فشل البحث
