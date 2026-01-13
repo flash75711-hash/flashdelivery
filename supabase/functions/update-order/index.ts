@@ -150,6 +150,12 @@ Deno.serve(async (req) => {
     if (cancelledAt !== undefined) updateData.cancelled_at = cancelledAt;
     if (is_prepaid !== undefined) updateData.is_prepaid = is_prepaid;
     if (prepaid_amount !== undefined) updateData.prepaid_amount = prepaid_amount;
+    
+    // عند قبول الطلب، تحديث search_status إلى 'found' لإيقاف البحث
+    if (isAcceptingOrder) {
+      updateData.search_status = 'found';
+      console.log('[update-order] تحديث search_status إلى "found" عند قبول الطلب');
+    }
 
     // Update order
     const { data: updatedOrder, error: updateError } = await supabase
