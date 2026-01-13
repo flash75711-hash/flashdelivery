@@ -948,7 +948,7 @@ export default function DriverDashboardScreen() {
                 <View style={styles.orderTypeTextContainer}>
                   <Text style={styles.orderTypeOptionTitle}>{t('customer.deliverPackage')}</Text>
                   <Text style={styles.orderTypeOptionDescription}>
-                    توصيل طرد من موقع إلى آخر
+                    توصيل طلب من موقع إلى آخر
                   </Text>
                 </View>
                 <Ionicons name="chevron-forward" size={24} color="#999" />

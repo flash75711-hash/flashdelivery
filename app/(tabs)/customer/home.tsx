@@ -156,7 +156,7 @@ export default function CustomerHomeScreen() {
           </View>
           <Text style={styles.cardTitle}>{t('customer.deliverPackage')}</Text>
           <Text style={styles.cardDescription}>
-            توصيل طرد من موقع إلى آخر
+            توصيل طلب من موقع إلى آخر
           </Text>
         </TouchableOpacity>
 

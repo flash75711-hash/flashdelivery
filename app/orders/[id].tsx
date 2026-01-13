@@ -399,7 +399,7 @@ export default function OrderDetailScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Text style={styles.orderType}>
-              {order.order_type === 'package' ? 'توصيل طرد' : 'طلب شراء'}
+              {order.order_type === 'package' ? 'توصيل طلب' : 'طلب شراء'}
             </Text>
             <View style={[styles.statusBadge, { backgroundColor: getStatusColor(order.status) + '20' }]}>
               <Text style={[styles.statusText, { color: getStatusColor(order.status) }]}>

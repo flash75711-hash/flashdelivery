@@ -19,7 +19,7 @@ export default function OrderTypeCards() {
           <Ionicons name="cube" size={48} color="#007AFF" />
         </View>
         <Text style={styles.title}>{t('customer.deliverPackage')}</Text>
-        <Text style={styles.description}>توصيل طرد من موقع إلى آخر</Text>
+        <Text style={styles.description}>توصيل طلب من موقع إلى آخر</Text>
       </TouchableOpacity>
 
       <TouchableOpacity

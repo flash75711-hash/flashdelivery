@@ -56,6 +56,7 @@ export default function DeliverPackageScreen() {
   const [loading, setLoading] = useState(false);
   const [gettingLocation, setGettingLocation] = useState<string | null>(null); // 'pickup' | 'delivery' | pointId
   const [selectedTarget, setSelectedTarget] = useState<string | null>(null); // لتتبع أي حقل مفتوح في الدليل
+  const [suggestedDescriptions, setSuggestedDescriptions] = useState<string[]>([]); // الأوصاف المقترحة
 
   const addDeliveryPoint = () => {
     setDeliveryPoints([
@@ -127,6 +128,53 @@ export default function DeliverPackageScreen() {
         returnPath: '/orders/deliver-package',
       },
     });
+  };
+
+  // تحميل الأوصاف المقترحة من localStorage
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const saved = localStorage.getItem('package_descriptions');
+        if (saved) {
+          const descriptions = JSON.parse(saved);
+          // عرض آخر 5 أوصاف فقط
+          setSuggestedDescriptions(descriptions.slice(0, 5));
+        }
+      }
+    } catch (error) {
+      console.error('Error loading suggested descriptions:', error);
+    }
+  }, []);
+
+  // حفظ وصف جديد عند إرسال الطلب
+  const saveDescription = (description: string) => {
+    if (!description || !description.trim()) return;
+    
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const saved = localStorage.getItem('package_descriptions');
+        let descriptions: string[] = saved ? JSON.parse(saved) : [];
+        
+        // إزالة الوصف إذا كان موجوداً مسبقاً
+        descriptions = descriptions.filter(d => d !== description);
+        
+        // إضافة الوصف في البداية
+        descriptions.unshift(description);
+        
+        // الاحتفاظ بآخر 10 أوصاف فقط
+        descriptions = descriptions.slice(0, 10);
+        
+        localStorage.setItem('package_descriptions', JSON.stringify(descriptions));
+        setSuggestedDescriptions(descriptions.slice(0, 5));
+      }
+    } catch (error) {
+      console.error('Error saving description:', error);
+    }
+  };
+
+  // اختيار وصف من المقترحات
+  const selectDescription = (description: string) => {
+    setPackageDescription(description);
   };
 
   // التحقق من اختيار مكان عند العودة من الدليل
@@ -316,6 +364,11 @@ export default function DeliverPackageScreen() {
       }
 
       console.log('✅ Order created successfully:', edgeFunctionData.order?.id);
+      
+      // حفظ الوصف في المقترحات
+      if (packageDescription && packageDescription.trim()) {
+        saveDescription(packageDescription.trim());
+      }
       
       const message = 'تم إرسال طلبك بنجاح! سيظهر الطلب للسائقين قريباً.';
 
@@ -597,6 +650,19 @@ export default function DeliverPackageScreen() {
             placeholderTextColor="#999"
             textAlign="right"
           />
+          {suggestedDescriptions.length > 0 && (
+            <View style={styles.chipsContainer}>
+              {suggestedDescriptions.map((desc, index) => (
+                <TouchableOpacity
+                  key={index}
+                  style={styles.chip}
+                  onPress={() => selectDescription(desc)}
+                >
+                  <Text style={styles.chipText}>{desc}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
         </View>
 
         <TouchableOpacity
@@ -812,6 +878,25 @@ const styles = StyleSheet.create({
   arrowText: {
     color: '#007AFF',
     fontSize: 14,
+    fontWeight: '500',
+  },
+  chipsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  chip: {
+    backgroundColor: '#E3F2FD',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#BBDEFB',
+  },
+  chipText: {
+    color: '#1976D2',
+    fontSize: 12,
     fontWeight: '500',
   },
 });

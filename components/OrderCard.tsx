@@ -467,7 +467,7 @@ function OrderCard({
           />
           <View style={styles.info}>
             <Text style={styles.orderType}>
-              {order.order_type === 'package' ? 'توصيل طرد' : 'طلب شراء'}
+              {order.order_type === 'package' ? 'توصيل طلب' : 'طلب شراء'}
             </Text>
             <Text style={styles.date}>
               {new Date(order.created_at).toLocaleDateString('ar-EG', {

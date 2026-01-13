@@ -700,7 +700,7 @@ export default function DriverTripsScreen() {
                 <View style={styles.orderHeader}>
                   <View>
                     <Text style={styles.orderType}>
-                      {order.order_type === 'package' ? 'توصيل طرد' : 'طلب شراء'}
+                      {order.order_type === 'package' ? 'توصيل طلب' : 'طلب شراء'}
                     </Text>
                     <Text style={styles.orderDate}>
                       {new Date(order.created_at).toLocaleDateString('ar-EG', {
@@ -779,7 +779,7 @@ export default function DriverTripsScreen() {
                   <View style={styles.orderHeader}>
                     <View>
                       <Text style={styles.orderType}>
-                        {order.order_type === 'package' ? 'توصيل طرد' : 'طلب شراء'}
+                        {order.order_type === 'package' ? 'توصيل طلب' : 'طلب شراء'}
                       </Text>
                       <Text style={styles.orderDate}>
                         {new Date(order.created_at).toLocaleDateString('ar-EG', {
@@ -801,6 +801,7 @@ export default function DriverTripsScreen() {
                   {/* شريط العداد التنازلي للبحث عن السائقين */}
                   {order.status === 'pending' && (
                     <OrderSearchCountdown 
+                      key={order.id}
                       orderId={order.id} 
                       onRestartSearch={undefined}
                     />
