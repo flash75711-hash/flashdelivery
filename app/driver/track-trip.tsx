@@ -1052,8 +1052,9 @@ export default function TrackTripScreen() {
         customerId: order.customer_id,
       });
 
-      // إغلاق modal
+      // إغلاق modal وتصفير المبلغ المدفوع
       setShowPaymentModal(false);
+      setPaidAmount('');
 
       // تحديث حالة الطلب إلى completed
       const { data: updateData, error: updateError } = await supabase.functions.invoke('update-order', {
@@ -1842,7 +1843,10 @@ export default function TrackTripScreen() {
         visible={showPaymentModal}
         transparent={true}
         animationType="slide"
-        onRequestClose={() => setShowPaymentModal(false)}
+        onRequestClose={() => {
+          setShowPaymentModal(false);
+          setPaidAmount('');
+        }}
       >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
