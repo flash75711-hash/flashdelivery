@@ -635,38 +635,84 @@ export default function TrackTripScreen() {
         }
       }
 
-      // إذا لم تكن هناك orderItems وكان الطلب يحتوي على items، نحاول إنشاء orderItems
-      if ((!data || data.length === 0) && order?.items && Array.isArray(order.items) && order.items.length > 0) {
-        console.log('⚠️ [loadOrderItems] No order_items found, but order has items. Creating order_items...');
-        // محاولة إنشاء order_items من items
-        try {
-          const itemsToCreate = order.items.map((item: any, index: number) => ({
-            order_id: orderId,
-            item_index: index,
-            address: item.address || item.description || item.pickup_address || '',
-            description: item.description || null,
-            latitude: item.latitude || item.pickup_latitude || null,
-            longitude: item.longitude || item.pickup_longitude || null,
-            is_picked_up: false,
-          }));
+      // إذا لم تكن هناك orderItems، نحاول إنشاءها
+      if (!data || data.length === 0) {
+        // الحالة 1: إذا كان الطلب يحتوي على items (JSON array)
+        if (order?.items && Array.isArray(order.items) && order.items.length > 0) {
+          console.log('⚠️ [loadOrderItems] No order_items found, but order has items. Creating order_items...');
+          try {
+            const itemsToCreate = order.items.map((item: any, index: number) => ({
+              order_id: orderId,
+              item_index: index,
+              address: item.address || item.description || item.pickup_address || '',
+              description: item.description || null,
+              latitude: item.latitude || item.pickup_latitude || null,
+              longitude: item.longitude || item.pickup_longitude || null,
+              is_picked_up: false,
+            }));
 
-          const { data: insertedData, error: insertError } = await supabase
-            .from('order_items')
-            .insert(itemsToCreate)
-            .select();
+            const { data: insertedData, error: insertError } = await supabase
+              .from('order_items')
+              .insert(itemsToCreate)
+              .select();
 
-          if (insertError) {
-            console.error('❌ [loadOrderItems] Error creating order_items:', insertError);
-          } else {
-            console.log('✅ [loadOrderItems] Created order_items:', insertedData?.length || 0);
-            setOrderItems(insertedData || []);
-            if (driverLocation) {
-              updateMap();
+            if (insertError) {
+              console.error('❌ [loadOrderItems] Error creating order_items:', insertError);
+            } else {
+              console.log('✅ [loadOrderItems] Created order_items:', insertedData?.length || 0);
+              setOrderItems(insertedData || []);
+              if (driverLocation) {
+                updateMap();
+              }
+              return;
             }
-            return;
+          } catch (createError) {
+            console.error('❌ [loadOrderItems] Exception creating order_items:', createError);
           }
-        } catch (createError) {
-          console.error('❌ [loadOrderItems] Exception creating order_items:', createError);
+        }
+        // الحالة 2: إذا كان طلب package بسيط (pickup_address و delivery_address فقط)
+        else if (order?.order_type === 'package' && order?.pickup_address && order?.delivery_address) {
+          console.log('⚠️ [loadOrderItems] No order_items found for simple package order. Creating from pickup/delivery addresses...');
+          try {
+            const itemsToCreate = [
+              {
+                order_id: orderId,
+                item_index: 0,
+                address: order.pickup_address,
+                description: order.package_description || null,
+                latitude: null,
+                longitude: null,
+                is_picked_up: false,
+              },
+              {
+                order_id: orderId,
+                item_index: 1,
+                address: order.delivery_address,
+                description: null,
+                latitude: null,
+                longitude: null,
+                is_picked_up: false,
+              },
+            ];
+
+            const { data: insertedData, error: insertError } = await supabase
+              .from('order_items')
+              .insert(itemsToCreate)
+              .select();
+
+            if (insertError) {
+              console.error('❌ [loadOrderItems] Error creating order_items for simple package:', insertError);
+            } else {
+              console.log('✅ [loadOrderItems] Created order_items for simple package:', insertedData?.length || 0);
+              setOrderItems(insertedData || []);
+              if (driverLocation) {
+                updateMap();
+              }
+              return;
+            }
+          } catch (createError) {
+            console.error('❌ [loadOrderItems] Exception creating order_items for simple package:', createError);
+          }
         }
       }
 

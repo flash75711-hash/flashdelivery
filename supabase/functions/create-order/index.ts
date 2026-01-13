@@ -275,6 +275,49 @@ serve(async (req) => {
       );
     }
 
+    // إنشاء order_items تلقائياً لطلبات package في الوضع البسيط
+    // إذا لم يكن هناك items أو كان items فارغاً
+    if (orderType === 'package' && (!items || !Array.isArray(items) || items.length === 0)) {
+      console.log('[create-order] Creating order_items for simple package order...');
+      try {
+        const orderItemsToCreate = [
+          {
+            order_id: newOrder.id,
+            item_index: 0,
+            address: pickupAddress,
+            description: packageDescription || null,
+            latitude: null,
+            longitude: null,
+            is_picked_up: false,
+          },
+          {
+            order_id: newOrder.id,
+            item_index: 1,
+            address: deliveryAddress,
+            description: null,
+            latitude: null,
+            longitude: null,
+            is_picked_up: false,
+          },
+        ];
+
+        const { data: insertedItems, error: itemsError } = await supabase
+          .from('order_items')
+          .insert(orderItemsToCreate)
+          .select();
+
+        if (itemsError) {
+          console.error('[create-order] Error creating order_items:', itemsError);
+          // لا نوقف العملية إذا فشل إنشاء order_items
+        } else {
+          console.log('[create-order] ✅ Created order_items for simple package order:', insertedItems?.length || 0);
+        }
+      } catch (itemsException) {
+        console.error('[create-order] Exception creating order_items:', itemsException);
+        // لا نوقف العملية إذا فشل إنشاء order_items
+      }
+    }
+
     // بدء البحث التلقائي عن السائقين
     try {
       console.log(`[create-order] 🔍 Determining search point for order type: ${orderType}`);
