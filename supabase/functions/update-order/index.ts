@@ -158,12 +158,38 @@ Deno.serve(async (req) => {
     }
 
     // Update order
+    console.log('[update-order] Updating order with data:', {
+      orderId,
+      updateData,
+      isAcceptingOrder,
+    });
+    
     const { data: updatedOrder, error: updateError } = await supabase
       .from('orders')
       .update(updateData)
       .eq('id', orderId)
       .select()
       .single();
+
+    // التحقق من التحديث الناجح
+    if (updatedOrder) {
+      console.log('[update-order] ✅ Order updated successfully:', {
+        orderId,
+        status: updatedOrder.status,
+        search_status: updatedOrder.search_status,
+        driver_id: updatedOrder.driver_id,
+      });
+      
+      // التحقق من أن search_status تم تحديثه بشكل صحيح
+      if (isAcceptingOrder && updatedOrder.search_status !== 'found') {
+        console.error('[update-order] ⚠️ WARNING: search_status was not set to "found"!', {
+          expected: 'found',
+          actual: updatedOrder.search_status,
+        });
+      }
+    } else {
+      console.error('[update-order] ❌ Order update returned no data');
+    }
 
     // إرسال إشعار للعميل فوراً عند قبول الطلب (قبل معالجة الأخطاء)
     if (isAcceptingOrder && existingOrder?.customer_id) {

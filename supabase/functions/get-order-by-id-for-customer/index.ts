@@ -84,6 +84,7 @@ Deno.serve(async (req) => {
         search_status,
         search_started_at,
         search_expanded_at,
+        search_expires_at,
         cancelled_by,
         cancelled_at,
         driver_response_deadline

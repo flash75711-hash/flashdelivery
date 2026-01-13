@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -43,8 +43,16 @@ export function useMyOrders() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const ordersRef = useRef<Order[]>([]);
+  
+  console.log(`[useMyOrders] 🎯 Hook called for user: ${user?.id} (${user?.role})`);
+  
+  // تحديث ref عند تغيير orders
+  useEffect(() => {
+    ordersRef.current = orders;
+  }, [orders]);
 
-  const loadOrders = async () => {
+  const loadOrders = useCallback(async () => {
     if (!user) {
       setLoading(false);
       setRefreshing(false);
@@ -131,11 +139,16 @@ export function useMyOrders() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [user]);
 
   useEffect(() => {
-    if (!user) return;
+    console.log(`[useMyOrders] 🎯 useEffect triggered for user: ${user?.id} (${user?.role})`);
+    if (!user) {
+      console.log(`[useMyOrders] ⚠️ No user, skipping setup`);
+      return;
+    }
     
+    console.log(`[useMyOrders] 🚀 Starting loadOrders for ${user.role} ${user.id}`);
     loadOrders();
 
     // Realtime subscription للتحديثات الفورية
@@ -154,6 +167,8 @@ export function useMyOrders() {
         subscription.unsubscribe();
       }
       
+      // ملاحظة: نزيل filter ونعتمد على RLS فقط
+      // هذا يضمن استقبال جميع التحديثات التي يسمح بها RLS
       subscription = supabase
         .channel(channelName)
         .on(
@@ -162,17 +177,46 @@ export function useMyOrders() {
             event: '*', // INSERT, UPDATE, DELETE
             schema: 'public',
             table: 'orders',
-            ...(user.role === 'customer' && { filter: `customer_id=eq.${user.id}` }),
-            ...(user.role === 'driver' && { filter: `driver_id=eq.${user.id}` }),
-            // المدير يتابع جميع الطلبات (لا filter)
+            // لا نستخدم filter هنا - نعتمد على RLS policies
+            // RLS سيمنع استقبال التحديثات التي لا يجب على المستخدم رؤيتها
           },
           (payload) => {
+            console.log(`[useMyOrders] 🔔🔔🔔 SUBSCRIPTION CALLBACK TRIGGERED 🔔🔔🔔`, {
+              eventType: payload.eventType,
+              table: payload.table,
+              schema: payload.schema,
+              timestamp: Date.now(),
+              userRole: user.role,
+              userId: user.id,
+            });
+            
             lastUpdateTime = Date.now();
             
               // تحديث فوري للـ state إذا كان التحديث متعلقاً بحالة الطلب
             if (payload.eventType === 'UPDATE' && payload.new) {
               const updatedOrder = payload.new as Order;
               const oldOrder = payload.old as Order;
+              
+              console.log(`[useMyOrders] 🔔 UPDATE event received:`, {
+                orderId: updatedOrder.id,
+                oldStatus: oldOrder?.status,
+                newStatus: updatedOrder.status,
+                oldDriverId: oldOrder?.driver_id,
+                newDriverId: updatedOrder.driver_id,
+                customerId: updatedOrder.customer_id,
+                searchStatus: updatedOrder.search_status,
+              });
+              
+              // التحقق من أن التحديث متعلق بالمستخدم الحالي
+              const isRelevantToUser = 
+                (user.role === 'customer' && updatedOrder.customer_id === user.id) ||
+                (user.role === 'driver' && (updatedOrder.driver_id === user.id || updatedOrder.status === 'pending')) ||
+                (user.role === 'admin');
+              
+              if (!isRelevantToUser) {
+                console.log(`[useMyOrders] ⏭️ Skipping update for order ${updatedOrder.id} - not relevant to current user`);
+                return;
+              }
               
               // تحديد ما إذا كان هذا قبول طلب (status تغير من pending إلى accepted)
               const isOrderAccepted = oldOrder?.status === 'pending' && updatedOrder.status === 'accepted' && updatedOrder.driver_id;
@@ -191,6 +235,12 @@ export function useMyOrders() {
                     pickup_address: updatedOrder.pickup_address || newOrders[index].pickup_address,
                     delivery_address: updatedOrder.delivery_address || newOrders[index].delivery_address,
                   };
+                  console.log(`[useMyOrders] 🔄 Updated order ${updatedOrder.id} in state:`, {
+                    status: updatedOrder.status,
+                    search_status: updatedOrder.search_status,
+                    driver_id: updatedOrder.driver_id,
+                    isOrderAccepted,
+                  });
                   return newOrders;
                 } else if (user.role === 'customer' && updatedOrder.customer_id === user.id) {
                   // إضافة طلب جديد للعميل
@@ -204,6 +254,7 @@ export function useMyOrders() {
               
               // عند قبول الطلب، نعيد التحميل فوراً (بدون تأخير) للعميل
               if (isOrderAccepted && user.role === 'customer') {
+                console.log(`[useMyOrders] 🛑 Order ${updatedOrder.id} accepted by driver ${updatedOrder.driver_id}, reloading orders immediately for customer`);
                 // تحديث فوري بدون تأخير
                 loadOrders();
               } else {
@@ -250,11 +301,19 @@ export function useMyOrders() {
         )
         .subscribe((status) => {
           subscriptionStatus = status;
+          console.log(`[useMyOrders] 📡 Subscription status changed: ${status}`, {
+            channelName,
+            userRole: user.role,
+            userId: user.id,
+            timestamp: Date.now(),
+          });
           
           if (status === 'SUBSCRIBED') {
             lastUpdateTime = Date.now();
             retryCount = 0;
+            console.log(`[useMyOrders] ✅ Subscription active for ${user.role} ${user.id}`);
           } else if (status === 'CHANNEL_ERROR') {
+            console.error(`[useMyOrders] ❌ Channel error, retrying... (${retryCount + 1}/${MAX_RETRIES})`);
             retryCount++;
             if (retryCount < MAX_RETRIES) {
               setTimeout(() => {
@@ -262,6 +321,7 @@ export function useMyOrders() {
               }, 2000);
             }
           } else if (status === 'TIMED_OUT') {
+            console.warn(`[useMyOrders] ⚠️ Subscription timed out, retrying... (${retryCount + 1}/${MAX_RETRIES})`);
             retryCount++;
             if (retryCount < MAX_RETRIES) {
               setTimeout(() => {
@@ -274,6 +334,21 @@ export function useMyOrders() {
     
     // إعداد الاشتراك
     setupSubscription();
+
+    // Polling أكثر تكراراً للطلبات المعلقة (pending) لضمان اكتشاف قبول السائق فوراً
+    // نتحقق كل 2 ثانية من الطلبات المعلقة للتأكد من تحديث driver_id
+    const aggressivePollingInterval = setInterval(() => {
+      // التحقق من وجود طلبات معلقة (pending) للعميل
+      if (user.role === 'customer') {
+        const currentOrders = ordersRef.current;
+        const hasPendingOrders = currentOrders.some(o => o.status === 'pending' && o.customer_id === user.id);
+        if (hasPendingOrders) {
+          console.log(`[useMyOrders] 🔄 Aggressive polling: Checking for driver acceptance on pending orders...`);
+          // إعادة تحميل الطلبات المعلقة فقط
+          loadOrders();
+        }
+      }
+    }, 2000); // كل 2 ثانية للطلبات المعلقة
 
     // Polling كل 30 ثانية كـ fallback للتأكد من التحديثات (تقليل من 5 ثوان)
     // حتى لو كان الاشتراك يعمل، نستخدم polling كـ backup
@@ -291,6 +366,7 @@ export function useMyOrders() {
         subscription.unsubscribe();
       }
       clearInterval(pollingInterval);
+      clearInterval(aggressivePollingInterval);
     };
   }, [user]);
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, TextInput, ActivityIndicator, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -21,7 +21,7 @@ interface OrderCardProps {
   showActions?: boolean; // إظهار أزرار الإجراءات
 }
 
-export default function OrderCard({ 
+function OrderCard({ 
   order, 
   onPress, 
   onCancel, 
@@ -63,15 +63,22 @@ export default function OrderCard({
     }
   }, [isDriverInNegotiation, order.negotiated_price, order.total_fee]);
   
+  // حفظ order في ref لتجنب إعادة إنشاء callback عند تغيير order object reference
+  const orderRef = useRef(order);
+  useEffect(() => {
+    orderRef.current = order;
+  }, [order]);
+  
   // Wrapper function لـ onRestartSearch لتتوافق مع OrderSearchCountdown
+  // استخدام ref لتجنب إعادة إنشاء callback عند تغيير order object reference
   const handleRestartSearch = useCallback((e?: any) => {
     if (e) {
       e.stopPropagation();
     }
     if (onRestartSearch) {
-      onRestartSearch(order);
+      onRestartSearch(orderRef.current);
     }
-  }, [onRestartSearch, order]);
+  }, [onRestartSearch]); // الاعتماد على onRestartSearch فقط
   
   // تحديد الأزرار المتاحة حسب الدور وحالة الطلب
   const canCancel = isActive && (isCustomer || (isDriver && order.status === 'pending'));
@@ -486,8 +493,13 @@ export default function OrderCard({
       </View>
 
       {/* شريط العداد التنازلي للبحث عن السائقين */}
-      {order.status === 'pending' && (
+      {/* نعرض العدّاد للطلبات pending أو accepted حديثاً (للاكتشاف الفوري للتغييرات) */}
+      {/* نسمح للمكوّن بالبقاء قيد التشغيل حتى يكتشف التغيير من polling أو realtime */}
+      {/* الشرط: pending أو (accepted بدون driver_id) - للسماح باكتشاف التغيير حتى بعد قبول السائق */}
+      {/* المكوّن نفسه سيتوقف تلقائياً عند اكتشاف driver_id */}
+      {(order.status === 'pending' || (order.status === 'accepted' && !order.driver_id)) && (
         <OrderSearchCountdown 
+          key={order.id}
           orderId={order.id} 
           onRestartSearch={onRestartSearch ? handleRestartSearch : undefined}
         />
@@ -1372,5 +1384,41 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     fontStyle: 'italic',
   },
+});
+
+// استخدام React.memo لمنع إعادة التحميل غير الضرورية
+// إعادة التحميل فقط إذا تغير order.id أو callbacks أو حقول مهمة في order
+export default memo(OrderCard, (prevProps, nextProps) => {
+  // إعادة التحميل إذا تغير order.id
+  const orderIdChanged = prevProps.order?.id !== nextProps.order?.id;
+  
+  // إعادة التحميل إذا تغيرت حقول مهمة في order (لكن بدون مقارنة كاملة للكائن)
+  const orderChanged = 
+    prevProps.order?.status !== nextProps.order?.status ||
+    prevProps.order?.search_status !== nextProps.order?.search_status ||
+    prevProps.order?.driver_id !== nextProps.order?.driver_id ||
+    prevProps.order?.negotiation_status !== nextProps.order?.negotiation_status ||
+    prevProps.order?.driver_proposed_price !== nextProps.order?.driver_proposed_price ||
+    prevProps.order?.customer_proposed_price !== nextProps.order?.customer_proposed_price;
+  
+  // إعادة التحميل إذا تغيرت callbacks
+  const callbacksChanged = 
+    prevProps.onPress !== nextProps.onPress ||
+    prevProps.onCancel !== nextProps.onCancel ||
+    prevProps.onAccept !== nextProps.onAccept ||
+    prevProps.onNegotiate !== nextProps.onNegotiate ||
+    prevProps.onRestartSearch !== nextProps.onRestartSearch ||
+    prevProps.onOrderUpdated !== nextProps.onOrderUpdated;
+  
+  const shouldUpdate = orderIdChanged || orderChanged || callbacksChanged;
+  
+  if (shouldUpdate && orderIdChanged) {
+    console.log(`[OrderCard] 🔄 React.memo: order.id changed from ${prevProps.order?.id} to ${nextProps.order?.id}`);
+  } else if (shouldUpdate && orderChanged) {
+    console.log(`[OrderCard] 🔄 React.memo: order fields changed for order ${nextProps.order?.id}`);
+  }
+  
+  // return true = skip re-render, return false = re-render
+  return !shouldUpdate;
 });
 
