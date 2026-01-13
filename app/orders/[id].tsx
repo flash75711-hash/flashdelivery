@@ -150,12 +150,30 @@ export default function OrderDetailScreen() {
 
     setIsRestarting(true);
     try {
+      // جلب إعدادات البحث لحساب search_expires_at
+      const { data: settings } = await supabase
+        .from('order_search_settings')
+        .select('setting_key, setting_value');
+      
+      const searchDuration = parseFloat(
+        settings?.find(s => s.setting_key === 'search_duration_seconds')?.setting_value || 
+        settings?.find(s => s.setting_key === 'initial_search_duration_seconds')?.setting_value || 
+        '60'
+      );
+      
+      // حساب search_expires_at = search_started_at + searchDuration
+      const searchStartedAt = new Date().toISOString();
+      const expiresDate = new Date(searchStartedAt);
+      expiresDate.setSeconds(expiresDate.getSeconds() + searchDuration);
+      const searchExpiresAt = expiresDate.toISOString();
+      
       // تحديث حالة البحث لإعادة التشغيل
       const { error: updateError } = await supabase
         .from('orders')
         .update({
           search_status: 'searching',
-          search_started_at: new Date().toISOString(),
+          search_started_at: searchStartedAt,
+          search_expires_at: searchExpiresAt, // تحديث search_expires_at للعداد الموحد
           search_expanded_at: null,
           driver_id: null,
         })
