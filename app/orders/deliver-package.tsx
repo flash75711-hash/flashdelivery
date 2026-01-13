@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,14 +9,13 @@ import {
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { calculateDistance, getLocationWithAddress } from '@/lib/webLocationUtils';
 import { geocodeAddress } from '@/lib/supabase';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
-import { openURL, getCurrentLocation } from '@/lib/webUtils';
 import { createNotification, notifyAllActiveDrivers } from '@/lib/notifications';
 import { calculateDeliveryPrice } from '@/lib/priceCalculation';
 import { showSimpleAlert } from '@/lib/alert';
@@ -53,8 +52,10 @@ export default function DeliverPackageScreen() {
   });
   
   const [packageDescription, setPackageDescription] = useState('');
+  const [recipientPhone, setRecipientPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [gettingLocation, setGettingLocation] = useState<string | null>(null); // 'pickup' | 'delivery' | pointId
+  const [selectedTarget, setSelectedTarget] = useState<string | null>(null); // لتتبع أي حقل مفتوح في الدليل
 
   const addDeliveryPoint = () => {
     setDeliveryPoints([
@@ -114,35 +115,64 @@ export default function DeliverPackageScreen() {
     }
   };
 
-  // فتح الخريطة لاختيار الموقع
-  const openMapForLocation = async (target: 'pickup' | 'delivery' | string) => {
-    try {
-      // محاولة فتح Google Maps في التطبيق أولاً
-      const mapsUrl = 'https://www.google.com/maps';
-      const canOpen = true; // على الويب، يمكن فتح أي URL
-      
-      if (canOpen) {
-        openURL(mapsUrl);
-        showSimpleAlert(
-          'اختيار الموقع',
-          'بعد اختيار الموقع من الخريطة:\n1. اضغط على الموقع\n2. انسخ العنوان\n3. الصقه في الحقل',
-          'info'
-        );
-      } else {
-        // إذا لم يكن Google Maps متاحاً، افتح في المتصفح
-        const webUrl = 'https://www.google.com/maps';
-        openURL(webUrl);
-        showSimpleAlert(
-          'اختيار الموقع',
-          'تم فتح الخريطة في المتصفح. بعد اختيار الموقع، انسخ العنوان والصقه في الحقل',
-          'info'
-        );
-      }
-    } catch (error: any) {
-      console.error('Error opening map:', error);
-      showSimpleAlert('خطأ', 'فشل فتح الخريطة. يمكنك إدخال العنوان يدوياً', 'error');
-    }
+  // فتح دليل الأماكن لاختيار موقع
+  const openPlacesDirectory = (target: 'pickup' | 'delivery' | string) => {
+    setSelectedTarget(target);
+    const targetId = typeof target === 'string' ? target : `deliver-package-${target}`;
+    router.push({
+      pathname: '/customer/places-directory',
+      params: {
+        placeId: targetId,
+        itemId: targetId,
+        returnPath: '/orders/deliver-package',
+      },
+    });
   };
+
+  // التحقق من اختيار مكان عند العودة من الدليل
+  useFocusEffect(
+    useCallback(() => {
+      if (!selectedTarget) return;
+
+      const targetId = typeof selectedTarget === 'string' 
+        ? selectedTarget 
+        : `deliver-package-${selectedTarget}`;
+      
+      const checkForSelectedPlace = () => {
+        try {
+          if (typeof window === 'undefined' || !window.localStorage) return;
+          
+          const storedPlace = localStorage.getItem(`selected_place_${targetId}`);
+          if (storedPlace) {
+            const place = JSON.parse(storedPlace);
+            const address = place.address || place.name || '';
+            
+            if (address) {
+              if (selectedTarget === 'pickup') {
+                setPickupAddress(address);
+              } else if (selectedTarget === 'delivery') {
+                setDeliveryAddress(address);
+              } else {
+                // نقطة في الوضع المتعدد
+                updateDeliveryPoint(selectedTarget, 'address', address);
+              }
+              
+              showSimpleAlert('نجح', 'تم اختيار العنوان من الدليل', 'success');
+              localStorage.removeItem(`selected_place_${targetId}`);
+              setSelectedTarget(null); // إعادة تعيين بعد الاستخدام
+            }
+          }
+        } catch (error) {
+          console.error('Error reading selected place:', error);
+        }
+      };
+
+      // التحقق بعد تأخير بسيط للسماح للصفحة بالتحميل
+      const timer = setTimeout(checkForSelectedPlace, 100);
+      
+      return () => clearTimeout(timer);
+    }, [selectedTarget])
+  );
 
   const handleSubmit = async () => {
     if (deliveryMode === 'simple') {
@@ -262,6 +292,7 @@ export default function DeliverPackageScreen() {
           pickupAddress: deliveryPoints[0].address, // أول نقطة
           deliveryAddress: deliveryPoints[deliveryPoints.length - 1].address, // آخر نقطة
           packageDescription: packageDescription,
+          recipientPhone: recipientPhone || null,
           status: 'pending',
           totalFee: estimatedFee,
           orderType: 'package',
@@ -391,8 +422,18 @@ export default function DeliverPackageScreen() {
         {deliveryMode === 'simple' ? (
           <>
             <View style={styles.section}>
-              <View style={styles.labelRow}>
-                <Text style={styles.label}>عنوان الاستلام</Text>
+              <Text style={styles.label}>عنوان الاستلام</Text>
+              <View style={styles.inputWithButtons}>
+                <TextInput
+                  style={[styles.input, styles.textArea, styles.inputField]}
+                  placeholder="أدخل عنوان الاستلام"
+                  value={pickupAddress}
+                  onChangeText={setPickupAddress}
+                  multiline
+                  numberOfLines={2}
+                  placeholderTextColor="#999"
+                  textAlign="right"
+                />
                 <View style={styles.locationButtons}>
                   <TouchableOpacity
                     style={styles.locationButton}
@@ -407,27 +448,27 @@ export default function DeliverPackageScreen() {
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.locationButton}
-                    onPress={() => openMapForLocation('pickup')}
+                    onPress={() => openPlacesDirectory('pickup')}
                   >
-                    <Ionicons name="map" size={20} color="#34C759" />
+                    <Ionicons name="list" size={20} color="#34C759" />
                   </TouchableOpacity>
                 </View>
               </View>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                placeholder="أدخل عنوان الاستلام"
-                value={pickupAddress}
-                onChangeText={setPickupAddress}
-                multiline
-                numberOfLines={3}
-                placeholderTextColor="#999"
-                textAlign="right"
-              />
             </View>
 
             <View style={styles.section}>
-              <View style={styles.labelRow}>
-                <Text style={styles.label}>عنوان التوصيل</Text>
+              <Text style={styles.label}>عنوان التوصيل</Text>
+              <View style={styles.inputWithButtons}>
+                <TextInput
+                  style={[styles.input, styles.textArea, styles.inputField]}
+                  placeholder="أدخل عنوان التسليم"
+                  value={deliveryAddress}
+                  onChangeText={setDeliveryAddress}
+                  multiline
+                  numberOfLines={2}
+                  placeholderTextColor="#999"
+                  textAlign="right"
+                />
                 <View style={styles.locationButtons}>
                   <TouchableOpacity
                     style={styles.locationButton}
@@ -442,22 +483,12 @@ export default function DeliverPackageScreen() {
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.locationButton}
-                    onPress={() => openMapForLocation('delivery')}
+                    onPress={() => openPlacesDirectory('delivery')}
                   >
-                    <Ionicons name="map" size={20} color="#34C759" />
+                    <Ionicons name="list" size={20} color="#34C759" />
                   </TouchableOpacity>
                 </View>
               </View>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                placeholder="أدخل عنوان التسليم"
-                value={deliveryAddress}
-                onChangeText={setDeliveryAddress}
-                multiline
-                numberOfLines={3}
-                placeholderTextColor="#999"
-                textAlign="right"
-              />
             </View>
           </>
         ) : (
@@ -504,7 +535,7 @@ export default function DeliverPackageScreen() {
                       updateDeliveryPoint(point.id, 'address', value)
                     }
                     multiline
-                    numberOfLines={3}
+                    numberOfLines={2}
                     placeholderTextColor="#999"
                     textAlign="right"
                   />
@@ -522,9 +553,9 @@ export default function DeliverPackageScreen() {
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.locationButton}
-                      onPress={() => openMapForLocation(point.id)}
+                      onPress={() => openPlacesDirectory(point.id)}
                     >
-                      <Ionicons name="map" size={20} color="#34C759" />
+                      <Ionicons name="list" size={20} color="#34C759" />
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -542,6 +573,19 @@ export default function DeliverPackageScreen() {
         )}
 
         <View style={styles.section}>
+          <Text style={styles.label}>رقم المستلم</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="أدخل رقم المستلم (مثال: 01234567890)"
+            value={recipientPhone}
+            onChangeText={setRecipientPhone}
+            keyboardType="phone-pad"
+            placeholderTextColor="#999"
+            textAlign="right"
+          />
+        </View>
+
+        <View style={styles.section}>
           <Text style={styles.label}>وصف الطرد (اختياري)</Text>
           <TextInput
             style={[styles.input, styles.textArea]}
@@ -549,7 +593,7 @@ export default function DeliverPackageScreen() {
             value={packageDescription}
             onChangeText={setPackageDescription}
             multiline
-            numberOfLines={3}
+            numberOfLines={2}
             placeholderTextColor="#999"
             textAlign="right"
           />
@@ -592,16 +636,16 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    padding: 20,
+    padding: 16,
   },
   section: {
-    marginBottom: 24,
+    marginBottom: 16,
   },
   label: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: '#1a1a1a',
-    marginBottom: 8,
+    marginBottom: 6,
     textAlign: 'right',
   },
   labelRow: {
@@ -615,9 +659,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   locationButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: '#f5f5f5',
     alignItems: 'center',
     justifyContent: 'center',
@@ -633,16 +677,26 @@ const styles = StyleSheet.create({
     flex: 1,
     marginBottom: 0,
   },
+  inputWithButtons: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  inputField: {
+    flex: 1,
+    marginBottom: 0,
+  },
   input: {
     backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
+    borderRadius: 8,
+    padding: 10,
+    fontSize: 14,
     borderWidth: 1,
     borderColor: '#e0e0e0',
   },
   textArea: {
-    height: 100,
+    minHeight: 50,
+    maxHeight: 80,
     textAlignVertical: 'top',
   },
   submitButton: {
@@ -663,17 +717,17 @@ const styles = StyleSheet.create({
   },
   modeSelector: {
     flexDirection: 'row',
-    gap: 12,
-    marginBottom: 24,
+    gap: 10,
+    marginBottom: 16,
   },
   modeButton: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    padding: 16,
-    borderRadius: 12,
+    gap: 6,
+    padding: 12,
+    borderRadius: 8,
     borderWidth: 2,
     borderColor: '#e0e0e0',
     backgroundColor: '#fff',
@@ -694,7 +748,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   addPointButton: {
     flexDirection: 'row',
@@ -712,17 +766,17 @@ const styles = StyleSheet.create({
   },
   pointCard: {
     backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: '#e0e0e0',
   },
   pointHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 12,
+    gap: 10,
+    marginBottom: 8,
   },
   pointNumber: {
     width: 32,

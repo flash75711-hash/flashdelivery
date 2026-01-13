@@ -40,6 +40,7 @@ interface CreateOrderRequest {
   images?: string[] | null;
   orderType: 'package' | 'outside';
   packageDescription?: string | null;
+  recipientPhone?: string | null; // رقم المستلم
   createdByRole?: 'customer' | 'driver' | 'admin'; // من أنشأ الطلب
   expiresAt?: string; // تاريخ انتهاء الصلاحية (ISO string)
 }
@@ -80,6 +81,7 @@ serve(async (req) => {
       images,
       orderType,
       packageDescription,
+      recipientPhone,
       createdByRole = 'customer',
       expiresAt,
     } = body;
@@ -237,6 +239,9 @@ serve(async (req) => {
     }
     if (packageDescription !== undefined && packageDescription !== null) {
       orderData.package_description = packageDescription;
+    }
+    if (recipientPhone !== undefined && recipientPhone !== null) {
+      orderData.recipient_phone = recipientPhone;
     }
     
     // Set expires_at (30 minutes from now by default, or use provided value)
