@@ -128,6 +128,8 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
         },
         (payload) => {
           const order = payload.new as any;
+          
+          // التحقق من حالة الطلب أولاً
           if (order.status !== 'pending') {
             console.log(`[OrderSearchCountdown] Order ${orderId} status changed to ${order.status}, stopping countdown`);
             setTimeRemaining(null);
@@ -135,6 +137,20 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
             searchStatusRef.current = null;
             searchExpiresAtRef.current = null;
             orderStatusRef.current = order.status;
+            if (intervalRef.current) {
+              clearInterval(intervalRef.current);
+              intervalRef.current = null;
+            }
+            return;
+          }
+          
+          // التحقق من search_status فوراً - إذا كان 'found' أو 'stopped'، إيقاف العداد فوراً
+          if (order.search_status === 'found' || order.search_status === 'stopped') {
+            console.log(`[OrderSearchCountdown] Order ${orderId} search_status changed to ${order.search_status}, stopping countdown immediately`);
+            setTimeRemaining(null);
+            setSearchStatus(order.search_status);
+            searchStatusRef.current = order.search_status;
+            searchExpiresAtRef.current = null;
             if (intervalRef.current) {
               clearInterval(intervalRef.current);
               intervalRef.current = null;
@@ -175,6 +191,16 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
         return;
       }
 
+      // التحقق الفوري من search_status - إذا تغير إلى 'found' أو 'stopped'، إيقاف العداد فوراً
+      if (searchStatusRef.current === 'found' || searchStatusRef.current === 'stopped') {
+        setTimeRemaining(null);
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+        return;
+      }
+
       // تحديث العداد مباشرة من search_expires_at (إذا كان موجوداً)
       // هذا يضمن تحديث سلس كل ثانية بدون الحاجة لاستدعاء قاعدة البيانات
       if (searchExpiresAtRef.current && searchStatusRef.current === 'searching') {
@@ -201,9 +227,10 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
       }
 
       // تحديد frequency الـ polling بناءً على الوقت المتبقي
+      // تقليل throttle عند تغيير search_status (للتحقق الفوري من 'found')
       const currentTimeRemaining = timeRemaining;
       const shouldPollFaster = (currentTimeRemaining !== null && currentTimeRemaining <= 5) && searchStatusRef.current === 'searching';
-      const currentThrottle = shouldPollFaster ? 1000 : dbCheckThrottle; // 1 ثانية عند اقتراب الانتهاء، 5 ثوان عادة
+      const currentThrottle = shouldPollFaster ? 1000 : 2000; // 1 ثانية عند اقتراب الانتهاء، 2 ثوان عادة (أسرع من 5 ثوان)
       
       // جلب البيانات من قاعدة البيانات (مع throttle) للتحقق من التزامن
       const now = Date.now();
@@ -238,6 +265,20 @@ export default function OrderSearchCountdown({ orderId, onRestartSearch }: Order
               setSearchStatus(null);
               searchStatusRef.current = null;
               orderStatusRef.current = data.status;
+              if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+                intervalRef.current = null;
+              }
+              return;
+            }
+
+            // التحقق الفوري من search_status - إذا تغير إلى 'found' أو 'stopped'، إيقاف العداد فوراً
+            if (data.search_status === 'found' || data.search_status === 'stopped') {
+              console.log(`[OrderSearchCountdown] Order ${orderId} search_status is ${data.search_status}, stopping countdown immediately`);
+              setTimeRemaining(null);
+              setSearchStatus(data.search_status);
+              searchStatusRef.current = data.search_status;
+              searchExpiresAtRef.current = null;
               if (intervalRef.current) {
                 clearInterval(intervalRef.current);
                 intervalRef.current = null;
