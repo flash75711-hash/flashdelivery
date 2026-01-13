@@ -25,6 +25,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
 interface CreateOrderRequest {
@@ -44,9 +45,12 @@ interface CreateOrderRequest {
 }
 
 serve(async (req) => {
-  // Handle CORS
+  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    return new Response('ok', { 
+      headers: corsHeaders,
+      status: 200,
+    });
   }
 
   try {
@@ -184,6 +188,28 @@ serve(async (req) => {
 
     // Build order data
     const now = new Date().toISOString();
+    
+    // جلب إعدادات البحث لحساب search_expires_at
+    let searchExpiresAt: string | null = null;
+    if (status === 'pending') {
+      const { data: settings } = await supabase
+        .from('order_search_settings')
+        .select('setting_key, setting_value');
+      
+      const searchDuration = parseFloat(
+        settings?.find(s => s.setting_key === 'search_duration_seconds')?.setting_value || 
+        settings?.find(s => s.setting_key === 'initial_search_duration_seconds')?.setting_value || 
+        '60'
+      );
+      
+      // حساب search_expires_at = search_started_at + searchDuration
+      const expiresDate = new Date(now);
+      expiresDate.setSeconds(expiresDate.getSeconds() + searchDuration);
+      searchExpiresAt = expiresDate.toISOString();
+      
+      console.log(`[create-order] Setting search_expires_at: ${searchExpiresAt} (${searchDuration}s from start)`);
+    }
+    
     const orderData: any = {
       customer_id: customerId,
       vendor_id: vendorId || null,
@@ -196,8 +222,9 @@ serve(async (req) => {
       created_by_role: createdByRole,
       // إضافة الحقول المطلوبة للعداد التنازلي
       driver_response_deadline: driverResponseDeadline,
-      search_status: 'searching', // بدء البحث تلقائياً
-      search_started_at: now, // تعيين timestamp لضمان دقة العداد التنازلي
+      search_status: status === 'pending' ? 'searching' : null, // بدء البحث تلقائياً للطلبات المعلقة
+      search_started_at: status === 'pending' ? now : null, // تعيين timestamp لضمان دقة العداد التنازلي
+      search_expires_at: searchExpiresAt, // تعيين search_expires_at للعداد الموحد
       search_expanded_at: null, // سيتم تعيينه عند توسيع البحث
     };
 

@@ -2,6 +2,8 @@
  * Edge Function: Start Order Search
  * بدء البحث التلقائي عن السائقين للطلب
  * 
+ * النظام الجديد: البحث مباشرة على 10 كم لمدة 60 ثانية
+ * 
  * Usage:
  * POST /functions/v1/start-order-search
  * Body: { 
@@ -24,6 +26,19 @@ interface StartOrderSearchRequest {
     lat: number;
     lon: number;
   };
+}
+
+// دالة لحساب المسافة بين نقطتين (Haversine formula)
+function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371; // نصف قطر الأرض بالكيلومتر
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 }
 
 Deno.serve(async (req) => {
@@ -61,7 +76,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    // جلب إعدادات البحث
+    // جلب إعدادات البحث (استخدام القيم الافتراضية: 10 كم لمدة 60 ثانية)
     const { data: settings, error: settingsError } = await supabase
       .from('order_search_settings')
       .select('setting_key, setting_value');
@@ -70,18 +85,43 @@ Deno.serve(async (req) => {
       console.error('Error loading search settings:', settingsError);
     }
 
-    const initialRadius = parseFloat(
-      settings?.find(s => s.setting_key === 'initial_search_radius_km')?.setting_value || '5'
+    // القيم الافتراضية: 10 كم لمدة 60 ثانية
+    const searchRadius = parseFloat(
+      settings?.find(s => s.setting_key === 'search_radius_km')?.setting_value || 
+      settings?.find(s => s.setting_key === 'initial_search_radius_km')?.setting_value || 
+      '10'
     );
-    const expandedRadius = parseFloat(
-      settings?.find(s => s.setting_key === 'expanded_search_radius_km')?.setting_value || '10'
+    const searchDuration = parseFloat(
+      settings?.find(s => s.setting_key === 'search_duration_seconds')?.setting_value || 
+      settings?.find(s => s.setting_key === 'initial_search_duration_seconds')?.setting_value || 
+      '60'
     );
-    const initialDuration = parseFloat(
-      settings?.find(s => s.setting_key === 'initial_search_duration_seconds')?.setting_value || '30'
-    );
-    const expandedDuration = parseFloat(
-      settings?.find(s => s.setting_key === 'expanded_search_duration_seconds')?.setting_value || '30'
-    );
+
+    console.log(`[start-order-search] 🔍 Search configuration: ${searchRadius} km radius, ${searchDuration} seconds duration`);
+
+    // جلب أول مكان من order_items (أول مكان سيذهب إليه السائق)
+    let firstPlaceLocation: { lat: number; lon: number } | null = null;
+    const { data: orderItems } = await supabase
+      .from('order_items')
+      .select('latitude, longitude, item_index')
+      .eq('order_id', order_id)
+      .order('item_index', { ascending: true })
+      .limit(1);
+
+    if (orderItems && orderItems.length > 0 && orderItems[0].latitude && orderItems[0].longitude) {
+      firstPlaceLocation = {
+        lat: orderItems[0].latitude,
+        lon: orderItems[0].longitude,
+      };
+      console.log(`[start-order-search] 📍 First place location found: (${firstPlaceLocation.lat}, ${firstPlaceLocation.lon})`);
+    } else {
+      // إذا لم يكن هناك order_items، نستخدم search_point
+      firstPlaceLocation = {
+        lat: search_point.lat,
+        lon: search_point.lon,
+      };
+      console.log(`[start-order-search] 📍 Using search_point as first place: (${firstPlaceLocation.lat}, ${firstPlaceLocation.lon})`);
+    }
 
     // تحديث حالة الطلب (مع الحفاظ على timestamp الأصلي إن وجد)
     const { data: existingOrder } = await supabase
@@ -95,7 +135,6 @@ Deno.serve(async (req) => {
     };
 
     // إذا لم يكن هناك timestamp موجود، نضيفه الآن
-    // إذا كان موجوداً بالفعل، نحافظ عليه لضمان دقة العداد
     let searchStartedAt: Date;
     if (!existingOrder?.search_started_at) {
       searchStartedAt = new Date();
@@ -106,207 +145,90 @@ Deno.serve(async (req) => {
       console.log(`[start-order-search] Preserving existing search_started_at for order ${order_id}: ${existingOrder.search_started_at}`);
     }
 
-    // تحديد search_expires_at بناءً على search_started_at + initialDuration
+    // تحديد search_expires_at بناءً على search_started_at + searchDuration
     const searchExpiresAt = new Date(searchStartedAt);
-    searchExpiresAt.setSeconds(searchExpiresAt.getSeconds() + initialDuration);
+    searchExpiresAt.setSeconds(searchExpiresAt.getSeconds() + searchDuration);
     updateData.search_expires_at = searchExpiresAt.toISOString();
-    console.log(`[start-order-search] Setting search_expires_at for order ${order_id}: ${searchExpiresAt.toISOString()} (${initialDuration}s from start)`);
+    console.log(`[start-order-search] Setting search_expires_at for order ${order_id}: ${searchExpiresAt.toISOString()} (${searchDuration}s from start)`);
 
     await supabase
       .from('orders')
       .update(updateData)
       .eq('id', order_id);
 
-    // البحث الأولي: العثور على السائقين في النطاق 0-5 كيلو (المرحلة الأولى)
-    console.log(`[start-order-search] 🔍 [PHASE 1] Starting initial search in radius 0-${initialRadius} km from point (${search_point.lat}, ${search_point.lon})`);
-    console.log(`[start-order-search] ⏱️ [PHASE 1] Initial search duration: ${initialDuration} seconds`);
-    const { data: initialDrivers, error: initialError } = await supabase.rpc(
+    // البحث عن السائقين في النطاق 0-10 كيلو
+    console.log(`[start-order-search] 🔍 Starting search in radius 0-${searchRadius} km from point (${search_point.lat}, ${search_point.lon})`);
+    console.log(`[start-order-search] ⏱️ Search duration: ${searchDuration} seconds`);
+    
+    const { data: drivers, error: driversError } = await supabase.rpc(
       'find_drivers_in_radius',
       {
         p_latitude: search_point.lat,
         p_longitude: search_point.lon,
-        p_radius_km: initialRadius, // البحث من 0 إلى initialRadius كيلو
+        p_radius_km: searchRadius,
       }
     );
 
-    if (initialError) {
-      console.error('[start-order-search] ❌ Error finding drivers in initial radius:', initialError);
+    if (driversError) {
+      console.error('[start-order-search] ❌ Error finding drivers:', driversError);
     } else {
       // التحقق من أن جميع السائقين في النطاق المحدد
-      const validInitialDrivers = initialDrivers?.filter(driver => {
-        if (driver.distance_km && driver.distance_km > initialRadius) {
-          console.warn(`[start-order-search] ⚠️ Driver ${driver.driver_id} is ${driver.distance_km.toFixed(2)} km away (exceeds ${initialRadius} km limit)`);
+      const validDrivers = drivers?.filter(driver => {
+        if (driver.distance_km && driver.distance_km > searchRadius) {
+          console.warn(`[start-order-search] ⚠️ Driver ${driver.driver_id} is ${driver.distance_km.toFixed(2)} km away (exceeds ${searchRadius} km limit)`);
           return false;
         }
         return true;
       }) || [];
       
-      console.log(`[start-order-search] ✅ Found ${initialDrivers?.length || 0} drivers, ${validInitialDrivers.length} within ${initialRadius} km radius`);
+      console.log(`[start-order-search] ✅ Found ${drivers?.length || 0} drivers, ${validDrivers.length} within ${searchRadius} km radius`);
       
-      // استخدام validInitialDrivers فقط
-      const driversToNotify = validInitialDrivers;
+      // حساب المسافة من موقع كل سائق إلى أول مكان سيذهب إليه
+      const driversWithDistance = validDrivers.map(driver => {
+        let distanceToFirstPlace = driver.distance_km; // المسافة الافتراضية (من موقع السائق إلى نقطة البحث)
+        
+        // إذا كان لدينا موقع أول مكان، نحسب المسافة الفعلية
+        if (firstPlaceLocation && driver.latitude && driver.longitude) {
+          distanceToFirstPlace = calculateDistance(
+            driver.latitude,
+            driver.longitude,
+            firstPlaceLocation.lat,
+            firstPlaceLocation.lon
+          );
+        }
+        
+        return {
+          ...driver,
+          distance_to_first_place_km: distanceToFirstPlace,
+        };
+      });
       
-      // إرسال Push Notifications للسائقين في النطاق 0-5 كيلو
-      console.log(`[start-order-search] 📤 Sending push notifications to ${driversToNotify.length} drivers in radius 0-${initialRadius} km`);
+      // إرسال Push Notifications للسائقين
+      console.log(`[start-order-search] 📤 Sending push notifications to ${driversWithDistance.length} drivers in radius 0-${searchRadius} km`);
       let pushSentCount = 0;
-      if (driversToNotify && driversToNotify.length > 0) {
-        for (const driver of driversToNotify) {
-        try {
-          console.log(`[start-order-search] Notifying driver ${driver.driver_id} (distance: ${driver.distance_km?.toFixed(2) || 'N/A'} km)...`);
-          await supabase.rpc('insert_notification_for_driver', {
-            p_user_id: driver.driver_id,
-            p_title: 'طلب جديد متاح',
-            p_message: `طلب جديد متاح في نطاق ${initialRadius} كم`,
-            p_type: 'info',
-            p_order_id: order_id,
-          });
-          console.log(`[start-order-search] ✅ In-app notification created for driver ${driver.driver_id}`);
-
-          // إرسال Push Notification
+      
+      if (driversWithDistance && driversWithDistance.length > 0) {
+        for (const driver of driversWithDistance) {
           try {
-            console.log(`[start-order-search] 📤 Attempting to send push notification to driver ${driver.driver_id}...`);
-            const pushResponse = await fetch(`${supabaseUrl}/functions/v1/send-push-notification`, {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${supabaseServiceKey}`,
-                'X-Internal-Call': 'true',
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                user_id: driver.driver_id,
-                title: 'طلب جديد متاح',
-                message: `طلب جديد متاح في نطاق ${initialRadius} كم`,
-                data: { order_id: order_id },
-              }),
-            });
+            const distanceText = driver.distance_to_first_place_km 
+              ? `${driver.distance_to_first_place_km.toFixed(1)} كم`
+              : 'غير محدد';
             
-            const pushResult = await pushResponse.json();
-            console.log(`[start-order-search] Push notification response for driver ${driver.driver_id}:`, {
-              status: pushResponse.status,
-              ok: pushResponse.ok,
-              sent: pushResult.sent,
-              result: pushResult,
-            });
+            console.log(`[start-order-search] Notifying driver ${driver.driver_id} (distance to first place: ${distanceText})...`);
             
-            if (pushResponse.ok && pushResult.sent && pushResult.sent > 0) {
-              pushSentCount++;
-              console.log(`✅ [start-order-search] Push notification sent successfully to driver ${driver.driver_id}`);
-            } else {
-              console.warn(`⚠️ [start-order-search] Push notification not sent to driver ${driver.driver_id}:`, pushResult);
-            }
-          } catch (pushErr) {
-            console.error(`❌ [start-order-search] Error sending push notification to driver ${driver.driver_id}:`, pushErr);
-          }
-        } catch (notifErr) {
-          console.error(`Error notifying driver ${driver.driver_id}:`, notifErr);
-        }
-      }
-      
-      console.log(`[start-order-search] 📊 Summary: ${driversToNotify.length} drivers notified, ${pushSentCount} push notifications sent`);
-    } else {
-      console.log(`[start-order-search] ⚠️ No drivers found in initial radius (0-${initialRadius} km)`);
-    }
-
-    // بدء البحث الموسع بعد انتهاء المدة الأولية (30 ثانية)
-    console.log(`[start-order-search] ⏰ Scheduling expanded search for order ${order_id} after ${initialDuration} seconds (${initialDuration * 1000}ms)`);
-    setTimeout(async () => {
-      console.log(`[start-order-search] ⏰ Timeout triggered - expanding search for order ${order_id} from 5km to 10km`);
-      
-      // التحقق من أن الطلب لم يُقبل بعد
-      const { data: order, error: orderError } = await supabase
-        .from('orders')
-        .select('status, driver_id, search_status')
-        .eq('id', order_id)
-        .single();
-
-      if (orderError || !order) {
-        console.log(`[start-order-search] ❌ Order not found or error:`, orderError);
-        return;
-      }
-
-      // إذا تم قبول الطلب أو تم إلغاؤه، لا نوسع البحث
-      if (order.status === 'accepted' || order.status === 'cancelled' || order.driver_id) {
-        console.log(`[start-order-search] ⚠️ Order ${order_id} already accepted/cancelled, stopping search expansion`);
-        await supabase
-          .from('orders')
-          .update({ search_status: 'stopped' })
-          .eq('id', order_id);
-        return;
-      }
-      
-      console.log(`[start-order-search] ✅ Order ${order_id} is still pending, proceeding with search expansion to 10km`);
-
-      // تحديث حالة البحث إلى expanded (من 5 كيلو إلى 10 كيلو)
-      const expandedAt = new Date();
-      const expandedExpiresAt = new Date(expandedAt);
-      expandedExpiresAt.setSeconds(expandedExpiresAt.getSeconds() + expandedDuration);
-      
-      console.log(`[start-order-search] 🔄 Transitioning search from 5km to 10km for order ${order_id}`);
-      const { error: updateError } = await supabase
-        .from('orders')
-        .update({
-          search_status: 'expanded',
-          search_expanded_at: expandedAt.toISOString(),
-          search_expires_at: expandedExpiresAt.toISOString(),
-        })
-        .eq('id', order_id);
-      
-      if (updateError) {
-        console.error(`[start-order-search] ❌ Error updating search status to expanded:`, updateError);
-        return;
-      }
-      
-      console.log(`[start-order-search] ✅ Search expanded for order ${order_id} - status: expanded, expires at: ${expandedExpiresAt.toISOString()} (${expandedDuration}s from expanded start)`);
-
-      // البحث الموسع: العثور على السائقين في النطاق 0-10 كيلو (المرحلة الثانية)
-      console.log(`[start-order-search] 🔍 [PHASE 2] Starting expanded search in radius 0-${expandedRadius} km from point (${search_point.lat}, ${search_point.lon})`);
-      console.log(`[start-order-search] ⏱️ [PHASE 2] Expanded search duration: ${expandedDuration} seconds`);
-      const { data: expandedDrivers, error: expandedError } = await supabase.rpc(
-        'find_drivers_in_radius',
-        {
-          p_latitude: search_point.lat,
-          p_longitude: search_point.lon,
-          p_radius_km: expandedRadius, // البحث من 0 إلى expandedRadius كيلو
-        }
-      );
-
-      if (expandedError) {
-        console.error('[start-order-search] ❌ Error finding drivers in expanded radius:', expandedError);
-      } else {
-        // التحقق من أن جميع السائقين في النطاق المحدد
-        const validExpandedDrivers = expandedDrivers?.filter(driver => {
-          if (driver.distance_km && driver.distance_km > expandedRadius) {
-            console.warn(`[start-order-search] ⚠️ Driver ${driver.driver_id} is ${driver.distance_km.toFixed(2)} km away (exceeds ${expandedRadius} km limit)`);
-            return false;
-          }
-          return true;
-        }) || [];
-        
-        console.log(`[start-order-search] ✅ Found ${expandedDrivers?.length || 0} drivers, ${validExpandedDrivers.length} within ${expandedRadius} km radius`);
-        
-        // استخدام validExpandedDrivers فقط
-        const driversToNotifyExpanded = validExpandedDrivers;
-        
-        // إرسال Push Notifications لجميع السائقين في النطاق 0-10 كيلو
-        // وليس فقط السائقين الجدد، لأن النطاق الموسع يبدأ من 0
-        console.log(`[start-order-search] 📤 Sending push notifications to ${driversToNotifyExpanded.length} drivers in expanded radius (0-${expandedRadius} km)`);
-        let pushSentCountExpanded = 0;
-        if (driversToNotifyExpanded && driversToNotifyExpanded.length > 0) {
-          for (const driver of driversToNotifyExpanded) {
-          try {
-            console.log(`[start-order-search] Notifying driver ${driver.driver_id} (expanded radius, distance: ${driver.distance_km?.toFixed(2) || 'N/A'} km)...`);
+            // إنشاء In-App Notification
             await supabase.rpc('insert_notification_for_driver', {
               p_user_id: driver.driver_id,
               p_title: 'طلب جديد متاح',
-              p_message: `طلب جديد متاح في نطاق ${expandedRadius} كم`,
+              p_message: `طلب جديد متاح - المسافة: ${distanceText}`,
               p_type: 'info',
               p_order_id: order_id,
             });
-            console.log(`[start-order-search] ✅ In-app notification created for driver ${driver.driver_id} (expanded)`);
+            console.log(`[start-order-search] ✅ In-app notification created for driver ${driver.driver_id}`);
 
             // إرسال Push Notification
             try {
-              console.log(`[start-order-search] 📤 Attempting to send push notification to driver ${driver.driver_id} (expanded radius)...`);
+              console.log(`[start-order-search] 📤 Attempting to send push notification to driver ${driver.driver_id}...`);
               const pushResponse = await fetch(`${supabaseUrl}/functions/v1/send-push-notification`, {
                 method: 'POST',
                 headers: {
@@ -317,13 +239,16 @@ Deno.serve(async (req) => {
                 body: JSON.stringify({
                   user_id: driver.driver_id,
                   title: 'طلب جديد متاح',
-                  message: `طلب جديد متاح في نطاق ${expandedRadius} كم`,
-                  data: { order_id: order_id },
+                  message: `طلب جديد متاح - المسافة: ${distanceText}`,
+                  data: { 
+                    order_id: order_id,
+                    distance_to_first_place_km: driver.distance_to_first_place_km,
+                  },
                 }),
               });
               
               const pushResult = await pushResponse.json();
-              console.log(`[start-order-search] Push notification response for driver ${driver.driver_id} (expanded):`, {
+              console.log(`[start-order-search] Push notification response for driver ${driver.driver_id}:`, {
                 status: pushResponse.status,
                 ok: pushResponse.ok,
                 sent: pushResult.sent,
@@ -331,97 +256,101 @@ Deno.serve(async (req) => {
               });
               
               if (pushResponse.ok && pushResult.sent && pushResult.sent > 0) {
-                pushSentCountExpanded++;
-                console.log(`✅ [start-order-search] Push notification sent successfully to driver ${driver.driver_id} (expanded)`);
+                pushSentCount++;
+                console.log(`✅ [start-order-search] Push notification sent successfully to driver ${driver.driver_id}`);
               } else {
-                console.warn(`⚠️ [start-order-search] Push notification not sent to driver ${driver.driver_id} (expanded):`, pushResult);
+                console.warn(`⚠️ [start-order-search] Push notification not sent to driver ${driver.driver_id}:`, pushResult);
               }
             } catch (pushErr) {
-              console.error(`❌ [start-order-search] Error sending push notification to driver ${driver.driver_id} (expanded):`, pushErr);
+              console.error(`❌ [start-order-search] Error sending push notification to driver ${driver.driver_id}:`, pushErr);
             }
           } catch (notifErr) {
-            console.error(`[start-order-search] Error notifying driver ${driver.driver_id} (expanded):`, notifErr);
+            console.error(`[start-order-search] Error notifying driver ${driver.driver_id}:`, notifErr);
           }
         }
-        
-        console.log(`[start-order-search] 📊 Summary (expanded): ${driversToNotifyExpanded.length} drivers notified, ${pushSentCountExpanded} push notifications sent`);
-      } else {
-        console.log(`[start-order-search] ⚠️ No drivers found in expanded radius (0-${expandedRadius} km)`);
+      }
+      
+      console.log(`[start-order-search] 📊 Summary: ${driversWithDistance.length} drivers notified, ${pushSentCount} push notifications sent`);
+    }
+
+    // إيقاف البحث بعد انتهاء المدة (60 ثانية)
+    console.log(`[start-order-search] ⏰ Scheduling search stop for order ${order_id} after ${searchDuration} seconds (${searchDuration * 1000}ms)`);
+    setTimeout(async () => {
+      // التحقق من أن الطلب لم يُقبل
+      const { data: order, error: orderError } = await supabase
+        .from('orders')
+        .select('status, driver_id, search_status, customer_id')
+        .eq('id', order_id)
+        .single();
+
+      if (orderError || !order) {
+        console.log(`[start-order-search] ❌ Order not found or error:`, orderError);
+        return;
       }
 
-      // إيقاف البحث بعد انتهاء المدة الموسعة
-      setTimeout(async () => {
-        // التحقق مرة أخرى من أن الطلب لم يُقبل
-        const { data: finalOrder, error: finalOrderError } = await supabase
-          .from('orders')
-          .select('status, driver_id, search_status, customer_id')
-          .eq('id', order_id)
-          .single();
+      // إذا تم قبول الطلب أو تم إلغاؤه، لا نوقف البحث
+      if (order.status === 'accepted' || order.status === 'cancelled' || order.driver_id) {
+        console.log(`[start-order-search] ⚠️ Order ${order_id} already accepted/cancelled, skipping search stop`);
+        return;
+      }
 
-        if (!finalOrderError && finalOrder) {
-          if (finalOrder.status !== 'accepted' && finalOrder.status !== 'cancelled' && !finalOrder.driver_id) {
-            // تحديث حالة البحث إلى stopped
-            await supabase
-              .from('orders')
-              .update({ search_status: 'stopped' })
-              .eq('id', order_id);
-            
-            console.log(`✅ Search stopped for order ${order_id}`);
+      // تحديث حالة البحث إلى stopped
+      await supabase
+        .from('orders')
+        .update({ search_status: 'stopped' })
+        .eq('id', order_id);
+      
+      console.log(`[start-order-search] ✅ Search stopped for order ${order_id}`);
 
-            // إرسال إشعار للعميل بأن البحث انتهى ولم يتم العثور على سائق
-            try {
-              // إنشاء In-App Notification مباشرة (باستخدام Service Role Key)
-              await supabase
-                .from('notifications')
-                .insert({
-                  user_id: finalOrder.customer_id,
-                  title: 'انتهى البحث عن سائق',
-                  message: 'لم يتم العثور على سائق في النطاق المحدد. يمكنك إعادة البحث أو إلغاء الطلب.',
-                  type: 'warning',
-                  order_id: order_id,
-                  is_read: false,
-                });
+      // إرسال إشعار للعميل بأن البحث انتهى ولم يتم العثور على سائق
+      try {
+        // إنشاء In-App Notification مباشرة
+        await supabase
+          .from('notifications')
+          .insert({
+            user_id: order.customer_id,
+            title: 'انتهى البحث عن سائق',
+            message: 'لم يتم العثور على سائق في النطاق المحدد. يمكنك إعادة البحث أو إلغاء الطلب.',
+            type: 'warning',
+            order_id: order_id,
+            is_read: false,
+          });
 
-              // إرسال Push Notification
-              try {
-                const pushResponse = await fetch(`${supabaseUrl}/functions/v1/send-push-notification`, {
-                  method: 'POST',
-                  headers: {
-                    'Authorization': `Bearer ${supabaseServiceKey}`,
-                    'X-Internal-Call': 'true',
-                    'Content-Type': 'application/json',
-                  },
-                  body: JSON.stringify({
-                    user_id: finalOrder.customer_id,
-                    title: 'انتهى البحث عن سائق',
-                    message: 'لم يتم العثور على سائق في النطاق المحدد. يمكنك إعادة البحث أو إلغاء الطلب.',
-                    data: { order_id: order_id },
-                  }),
-                });
-                const pushResult = await pushResponse.json();
-                if (pushResponse.ok && pushResult.sent && pushResult.sent > 0) {
-                  console.log(`✅ Push notification sent to customer ${finalOrder.customer_id}`);
-                }
-              } catch (pushErr) {
-                console.error(`Error sending push notification to customer:`, pushErr);
-              }
-            } catch (notifErr) {
-              console.error('Error notifying customer:', notifErr);
-            }
+        // إرسال Push Notification
+        try {
+          const pushResponse = await fetch(`${supabaseUrl}/functions/v1/send-push-notification`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${supabaseServiceKey}`,
+              'X-Internal-Call': 'true',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              user_id: order.customer_id,
+              title: 'انتهى البحث عن سائق',
+              message: 'لم يتم العثور على سائق في النطاق المحدد. يمكنك إعادة البحث أو إلغاء الطلب.',
+              data: { order_id: order_id },
+            }),
+          });
+          const pushResult = await pushResponse.json();
+          if (pushResponse.ok && pushResult.sent && pushResult.sent > 0) {
+            console.log(`✅ Push notification sent to customer ${order.customer_id}`);
           }
+        } catch (pushErr) {
+          console.error(`Error sending push notification to customer:`, pushErr);
         }
-      }, expandedDuration * 1000);
-    }, initialDuration * 1000);
+      } catch (notifErr) {
+        console.error('Error notifying customer:', notifErr);
+      }
+    }, searchDuration * 1000);
 
     return new Response(
       JSON.stringify({
         success: true,
         message: 'تم بدء البحث عن السائقين',
-        initial_radius: initialRadius,
-        expanded_radius: expandedRadius,
-        initial_duration: initialDuration,
-        expanded_duration: expandedDuration,
-        initial_drivers_count: initialDrivers?.length || 0,
+        search_radius: searchRadius,
+        search_duration: searchDuration,
+        drivers_count: drivers?.length || 0,
       }),
       {
         status: 200,
