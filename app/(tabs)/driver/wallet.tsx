@@ -185,7 +185,26 @@ export default function DriverWalletScreen() {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
-        renderItem={({ item }) => (
+        renderItem={({ item }) => {
+          // البحث عن معاملة deduction مرتبطة بنفس order_id (باقي العميل)
+          const relatedDeduction = item.type === 'earning' && item.order_id
+            ? transactions.find(t => 
+                t.type === 'deduction' && 
+                t.order_id === item.order_id &&
+                t.description?.includes('باقي العميل')
+              )
+            : null;
+          
+          // استخراج باقي العميل من description إذا كان موجوداً
+          let customerChange = 0;
+          if (relatedDeduction) {
+            const changeMatch = relatedDeduction.description?.match(/باقي العميل \(([\d.]+)/);
+            if (changeMatch) {
+              customerChange = parseFloat(changeMatch[1]);
+            }
+          }
+          
+          return (
           <TouchableOpacity
             style={styles.transactionCard}
             onPress={() => {
@@ -231,6 +250,11 @@ export default function DriverWalletScreen() {
                     عمولة: {item.commission.toFixed(2)} ج.م
                   </Text>
                 )}
+                {customerChange > 0 && (
+                  <Text style={styles.customerChangeInfo}>
+                    باقي العميل: {customerChange.toFixed(2)} ج.م
+                  </Text>
+                )}
                 {item.commission_paid && item.settlement_date && (
                   <View style={styles.settlementBadge}>
                     <Ionicons name="checkmark-circle" size={12} color="#34C759" />
@@ -251,7 +275,8 @@ export default function DriverWalletScreen() {
               })}
             </Text>
           </TouchableOpacity>
-        )}
+          );
+        }}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>لا توجد معاملات</Text>
@@ -423,6 +448,12 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   commissionInfo: {
     fontSize: responsive.getResponsiveFontSize(12),
     color: '#FF9500',
+    marginBottom: 4,
+    textAlign: 'right',
+  },
+  customerChangeInfo: {
+    fontSize: responsive.getResponsiveFontSize(12),
+    color: '#007AFF',
     marginBottom: 4,
     textAlign: 'right',
   },
