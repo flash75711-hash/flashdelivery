@@ -1144,14 +1144,80 @@ export default function TrackTripScreen() {
         }
       }
 
-      // إذا كان هناك باقي، إضافته إلى محفظة العميل
-      console.log('[handleCollectPayment] Checking if change should be added to customer wallet:', {
+      // إذا كان هناك باقي، خصمه من محفظة السائق وإضافته إلى محفظة العميل
+      console.log('[handleCollectPayment] Checking if change should be deducted from driver and added to customer wallet:', {
         change,
         hasChange: change > 0,
         hasCustomerId: !!order.customer_id,
         customerId: order.customer_id,
-        willAddToWallet: change > 0 && order.customer_id,
+        driverId: user?.id,
+        willProcessChange: change > 0 && order.customer_id && user?.id,
       });
+      
+      // خصم الباقي + العمولة من محفظة السائق (deduction)
+      if (change > 0 && user?.id && order.driver_id === user.id) {
+        try {
+          // حساب العمولة يدوياً إذا لم تكن موجودة في driverWalletData
+          let commission = driverWalletData?.commission || 0;
+          
+          // إذا لم تكن العمولة موجودة، نحسبها من حساب المشوار فقط
+          if (commission === 0 && order.total_fee > 0) {
+            try {
+              const { data: commissionSetting } = await supabase
+                .from('app_settings')
+                .select('setting_value')
+                .eq('setting_key', 'commission_rate')
+                .maybeSingle();
+              
+              const commissionRate = commissionSetting?.setting_value 
+                ? parseFloat(commissionSetting.setting_value) 
+                : 10; // افتراضي 10%
+              
+              commission = (order.total_fee * commissionRate) / 100;
+              console.log(`[handleCollectPayment] Calculated commission manually: ${commission.toFixed(2)} (${commissionRate}% of ${order.total_fee})`);
+            } catch (commissionErr) {
+              console.error('[handleCollectPayment] Error calculating commission:', commissionErr);
+              // إذا فشل حساب العمولة، نستخدم 0
+            }
+          }
+          
+          // حساب المبلغ المطلوب خصمه: الباقي + العمولة
+          const totalDeduction = change + commission;
+          
+          console.log(`[handleCollectPayment] Deducting ${totalDeduction.toFixed(2)} from driver wallet (change + commission):`, {
+            driverId: user.id,
+            change: change,
+            commission: commission,
+            totalDeduction: totalDeduction,
+            orderId: order.id,
+          });
+          
+          // إضافة deduction في جدول wallets (الباقي + العمولة)
+          const { data: deductionData, error: deductionError } = await supabase
+            .from('wallets')
+            .insert({
+              driver_id: user.id,
+              customer_id: null,
+              order_id: order.id,
+              amount: totalDeduction, // المبلغ المخصوم (الباقي + العمولة)
+              commission: commission, // حفظ قيمة العمولة للتفاصيل
+              type: 'deduction',
+              description: `باقي العميل (${change.toFixed(2)} جنيه) + عمولة (${commission.toFixed(2)} جنيه) من طلب #${order.id.substring(0, 8)}`,
+            })
+            .select()
+            .single();
+          
+          if (deductionError) {
+            console.error('[handleCollectPayment] Error deducting change + commission from driver wallet:', deductionError);
+            // لا نوقف العملية إذا فشل خصم الباقي
+          } else {
+            console.log('[handleCollectPayment] ✅ Change + commission deducted from driver wallet:', deductionData);
+          }
+        } catch (deductionErr: any) {
+          console.error('[handleCollectPayment] Exception deducting change + commission from driver wallet:', deductionErr);
+          // لا نوقف العملية إذا فشل خصم الباقي
+        }
+      }
       
       if (change > 0 && order.customer_id) {
         console.log('[handleCollectPayment] ✅ Conditions met, proceeding to add to customer wallet');
