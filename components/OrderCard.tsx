@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, TextInput, ActivityIndicator, Pressable } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, TextInput, ActivityIndicator, Pressable, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
-import responsive, { createShadowStyle } from '@/utils/responsive';
+import responsive, { createShadowStyle, getM3CardStyle, getM3ButtonStyle, getM3TouchTarget } from '@/utils/responsive';
+import M3Theme from '@/constants/M3Theme';
 import type { Order } from '@/hooks/useMyOrders';
 import OrderSearchCountdown from './OrderSearchCountdown';
 import { showConfirm, showSimpleAlert } from '@/lib/alert';
@@ -93,18 +94,35 @@ function OrderCard({
   // للعميل: إمكانية متابعة الطلب (للطلبات النشطة التي لديها سائق)
   const canTrackOrder = isCustomer && isActive && order.driver_id && ['accepted', 'pickedUp', 'inTransit'].includes(order.status);
 
-  const getStatusColor = (status: string) => {
+  // M3 Status Colors with Tonal Palettes
+  const getStatusBadgeStyle = (status: string) => {
     switch (status) {
       case 'completed':
-        return '#34C759';
+        return M3Theme.statusStyles.success; // Light green bg, dark green text
       case 'accepted':
       case 'pickedUp':
       case 'inTransit':
-        return '#007AFF';
+        return M3Theme.statusStyles.info; // Light blue bg, dark blue text
       case 'cancelled':
-        return '#FF3B30';
+        return M3Theme.statusStyles.error; // Light red bg, dark red text
       default:
-        return '#FF9500';
+        return M3Theme.statusStyles.pending; // Light yellow bg, dark yellow text
+    }
+  };
+  
+  // Legacy function for backward compatibility (if needed elsewhere)
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'completed':
+        return M3Theme.colors.success.onContainer;
+      case 'accepted':
+      case 'pickedUp':
+      case 'inTransit':
+        return M3Theme.colors.info.onContainer;
+      case 'cancelled':
+        return M3Theme.colors.onErrorContainer;
+      default:
+        return M3Theme.colors.pending.onContainer;
     }
   };
 
@@ -480,13 +498,8 @@ function OrderCard({
             </Text>
           </View>
         </View>
-        <View
-          style={[
-            styles.statusBadge,
-            { backgroundColor: getStatusColor(order.status) + '20' },
-          ]}
-        >
-          <Text style={[styles.statusText, { color: getStatusColor(order.status) }]}>
+        <View style={[styles.statusBadge, getStatusBadgeStyle(order.status)]}>
+          <Text style={styles.statusText}>
             {getStatusText(order.status)}
           </Text>
         </View>
@@ -934,17 +947,9 @@ function OrderCard({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 20,
+    ...getM3CardStyle(), // M3: 16px radius, 16px padding, subtle shadow
+    backgroundColor: M3Theme.colors.surface, // M3 Surface #FFFBFE
     marginBottom: 16,
-    ...createShadowStyle({
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.06,
-      shadowRadius: 16,
-      elevation: 6,
-    }),
   },
   header: {
     flexDirection: 'row',
@@ -962,25 +967,21 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   orderType: {
-    fontSize: responsive.getResponsiveFontSize(18),
-    fontWeight: '700',
-    color: '#1a1a1a',
+    ...M3Theme.typography.titleLarge, // 22px, weight 500 (semi-bold)
+    color: M3Theme.colors.onSurface,
     marginBottom: 6,
-    letterSpacing: 0.2,
   },
   date: {
-    fontSize: responsive.getResponsiveFontSize(13),
-    color: '#8E8E93',
-    fontWeight: '400',
+    ...M3Theme.typography.bodySmall, // 12px
+    color: M3Theme.colors.onSurfaceVariant, // #49454F
   },
   statusBadge: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 16,
+    paddingHorizontal: M3Theme.spacing.sm, // 8px
+    paddingVertical: M3Theme.spacing.xs, // 4px
+    borderRadius: M3Theme.shape.cornerSmall, // 8px
   },
   statusText: {
-    fontSize: responsive.getResponsiveFontSize(12),
-    fontWeight: '600',
+    ...M3Theme.typography.labelMedium, // 12px, weight 600
   },
   addressRow: {
     flexDirection: 'row',
@@ -989,23 +990,20 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   address: {
-    fontSize: responsive.getResponsiveFontSize(15),
-    color: '#8E8E93',
+    ...M3Theme.typography.bodyMedium, // 14px base font
+    color: M3Theme.colors.onSurfaceVariant,
     flex: 1,
     textAlign: 'right',
-    lineHeight: 22,
-    fontWeight: '400',
   },
   multiPointContainer: {
-    backgroundColor: '#F5F5F7',
-    borderRadius: 16,
-    padding: 16,
+    backgroundColor: M3Theme.colors.surfaceVariant, // #E7E0EC
+    borderRadius: M3Theme.shape.cornerLarge, // 16px
+    padding: M3Theme.spacing.md, // 16px
     marginTop: 12,
   },
   multiPointTitle: {
-    fontSize: responsive.getResponsiveFontSize(14),
-    fontWeight: '600',
-    color: '#007AFF',
+    ...M3Theme.typography.labelLarge, // 14px, weight 600
+    color: M3Theme.colors.primary,
     marginBottom: 8,
     textAlign: 'right',
   },
@@ -1016,11 +1014,10 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   multiPointAddress: {
-    fontSize: responsive.getResponsiveFontSize(13),
-    color: '#8E8E93',
+    ...M3Theme.typography.bodySmall, // 12px
+    color: M3Theme.colors.onSurfaceVariant,
     flex: 1,
     textAlign: 'right',
-    lineHeight: 20,
   },
   multiPointMore: {
     fontSize: responsive.getResponsiveFontSize(12),
@@ -1035,11 +1032,10 @@ const styles = StyleSheet.create({
     borderTopWidth: 0,
   },
   fee: {
-    fontSize: responsive.getResponsiveFontSize(20),
-    fontWeight: '700',
-    color: '#34C759',
+    ...M3Theme.typography.titleLarge, // 22px, weight 500
+    fontWeight: '700', // Override for emphasis
+    color: M3Theme.colors.success.onContainer, // Dark green
     textAlign: 'right',
-    letterSpacing: 0.3,
   },
   actionsContainer: {
     flexDirection: 'row',
@@ -1054,35 +1050,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 16,
-    minWidth: 110,
+    paddingHorizontal: M3Theme.spacing.lg, // 24px
+    paddingVertical: M3Theme.spacing.md, // 16px
+    borderRadius: M3Theme.shape.cornerLarge, // 16px
+    minWidth: 110, // Custom minWidth (>= 44px from M3 requirement)
+    minHeight: 44, // M3 minimum touch target
     justifyContent: 'center',
-    ...createShadowStyle({
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.08,
-      shadowRadius: 8,
-      elevation: 3,
+    ...Platform.select({
+      web: M3Theme.webViewStyles.button, // user-select: none
     }),
   },
   acceptButton: {
-    backgroundColor: '#34C759',
+    backgroundColor: M3Theme.colors.success.onContainer, // Dark green for filled button
     borderWidth: 0,
   },
   negotiateButton: {
-    backgroundColor: '#FF9500',
+    backgroundColor: M3Theme.colors.warning.onContainer, // Dark orange for filled button
     borderWidth: 0,
   },
   cancelButton: {
-    backgroundColor: '#FF3B30',
+    backgroundColor: M3Theme.colors.error, // M3 Error color
     borderWidth: 0,
   },
   actionButtonText: {
-    fontSize: responsive.getResponsiveFontSize(15),
-    fontWeight: '600',
-    color: '#fff',
+    ...M3Theme.typography.labelLarge, // 14px, weight 600
+    color: '#fff', // Will be overridden by button-specific styles
   },
   acceptButtonText: {
     color: '#fff',
@@ -1094,41 +1086,41 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   restartSearchButton: {
-    backgroundColor: '#E3F2FD',
-    borderWidth: 1,
-    borderColor: '#007AFF',
+    ...M3Theme.buttonVariants.outlined, // M3 Outlined button variant
+    backgroundColor: M3Theme.colors.info.container, // Light blue background
+    borderColor: M3Theme.colors.info.onContainer, // Dark blue border
   },
   restartSearchButtonText: {
-    color: '#007AFF',
+    ...M3Theme.typography.labelLarge,
+    color: M3Theme.colors.info.onContainer,
   },
   trackButton: {
-    backgroundColor: '#E3F2FD',
-    borderWidth: 1,
-    borderColor: '#007AFF',
+    ...M3Theme.buttonVariants.outlined,
+    backgroundColor: M3Theme.colors.info.container,
+    borderColor: M3Theme.colors.info.onContainer,
   },
   trackButtonText: {
-    color: '#007AFF',
-    fontSize: responsive.getResponsiveFontSize(14),
-    fontWeight: '600',
+    ...M3Theme.typography.labelLarge,
+    color: M3Theme.colors.info.onContainer,
   },
   driverProposalContainer: {
     marginTop: 12,
-    padding: 12,
-    backgroundColor: '#E8F5E9',
-    borderRadius: 12,
+    padding: M3Theme.spacing.md, // 16px
+    ...M3Theme.statusStyles.success, // M3 Success tonal palette
+    borderRadius: M3Theme.shape.cornerMedium, // 12px
     borderWidth: 1,
-    borderColor: '#34C759',
+    borderColor: M3Theme.colors.success.onContainer,
   },
   driverProposalLabel: {
-    fontSize: responsive.getResponsiveFontSize(12),
-    color: '#666',
+    ...M3Theme.typography.labelMedium, // 12px, weight 600
+    color: M3Theme.colors.onSurfaceVariant,
     marginBottom: 4,
     textAlign: 'right',
   },
   driverProposalPrice: {
-    fontSize: responsive.getResponsiveFontSize(18),
+    ...M3Theme.typography.titleMedium, // 16px, weight 600
     fontWeight: 'bold',
-    color: '#34C759',
+    color: M3Theme.colors.success.onContainer,
     textAlign: 'right',
     marginBottom: 8,
   },
@@ -1137,22 +1129,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: '#34C759',
-    padding: 10,
-    borderRadius: 8,
+    backgroundColor: M3Theme.colors.success.onContainer,
+    padding: M3Theme.spacing.sm, // 8px
+    borderRadius: M3Theme.shape.cornerSmall, // 8px
+    ...getM3TouchTarget('minimum'),
+    ...Platform.select({
+      web: M3Theme.webViewStyles.button,
+    }),
   },
   acceptProposalButtonText: {
+    ...M3Theme.typography.labelLarge,
     color: '#fff',
-    fontSize: responsive.getResponsiveFontSize(14),
-    fontWeight: '600',
   },
   negotiationContainer: {
     marginTop: 12,
-    padding: 16,
-    backgroundColor: '#FFF4E6',
-    borderRadius: 12,
+    padding: M3Theme.spacing.md, // 16px
+    ...M3Theme.statusStyles.warning, // M3 Warning tonal palette
+    borderRadius: M3Theme.shape.cornerMedium, // 12px
     borderWidth: 1,
-    borderColor: '#FF9500',
+    borderColor: M3Theme.colors.warning.onContainer,
   },
   negotiationHeader: {
     flexDirection: 'row',
@@ -1161,9 +1156,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   negotiationTitle: {
-    fontSize: responsive.getResponsiveFontSize(16),
-    fontWeight: '600',
-    color: '#1a1a1a',
+    ...M3Theme.typography.titleMedium, // 16px, weight 600
+    color: M3Theme.colors.onSurface,
   },
   negotiationPriceRow: {
     flexDirection: 'row',
@@ -1172,13 +1166,12 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   negotiationPriceLabel: {
-    fontSize: responsive.getResponsiveFontSize(14),
-    color: '#666',
+    ...M3Theme.typography.bodyMedium, // 14px
+    color: M3Theme.colors.onSurfaceVariant,
   },
   negotiationCurrentPrice: {
-    fontSize: responsive.getResponsiveFontSize(16),
-    fontWeight: '600',
-    color: '#007AFF',
+    ...M3Theme.typography.titleMedium, // 16px, weight 600
+    color: M3Theme.colors.primary,
   },
   negotiationInputRow: {
     flexDirection: 'row',
@@ -1187,30 +1180,33 @@ const styles = StyleSheet.create({
   },
   negotiationInput: {
     flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: responsive.getResponsiveFontSize(14),
+    backgroundColor: M3Theme.colors.surface,
+    borderRadius: M3Theme.shape.cornerSmall, // 8px
+    padding: M3Theme.spacing.sm, // 8px
+    fontSize: 16, // M3: 16px minimum for inputs (prevents iOS auto-zoom)
     textAlign: 'right',
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: M3Theme.colors.outlineVariant,
   },
   proposeButton: {
-    backgroundColor: '#FF9500',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
-    minWidth: 80,
+    backgroundColor: M3Theme.colors.warning.onContainer,
+    paddingHorizontal: M3Theme.spacing.lg, // 24px
+    paddingVertical: M3Theme.spacing.md, // 16px
+    borderRadius: M3Theme.shape.cornerSmall, // 8px
+    minWidth: 80, // Custom minWidth (>= 44px from M3 requirement)
+    minHeight: 44, // M3 minimum touch target
     alignItems: 'center',
     justifyContent: 'center',
+    ...Platform.select({
+      web: M3Theme.webViewStyles.button,
+    }),
   },
   proposeButtonDisabled: {
     opacity: 0.5,
   },
   proposeButtonText: {
+    ...M3Theme.typography.labelLarge,
     color: '#fff',
-    fontSize: responsive.getResponsiveFontSize(14),
-    fontWeight: '600',
   },
   proposeNewPriceButton: {
     marginTop: 12,
@@ -1218,13 +1214,16 @@ const styles = StyleSheet.create({
   },
   closeNegotiationButton: {
     marginTop: 8,
-    padding: 12,
+    padding: M3Theme.spacing.md, // 16px
     alignItems: 'center',
+    ...getM3TouchTarget('minimum'),
+    ...Platform.select({
+      web: M3Theme.webViewStyles.button,
+    }),
   },
   closeNegotiationButtonText: {
-    color: '#666',
-    fontSize: responsive.getResponsiveFontSize(14),
-    fontWeight: '500',
+    ...M3Theme.typography.labelLarge,
+    color: M3Theme.colors.onSurfaceVariant,
   },
   actionButtonDisabled: {
     opacity: 0.5,
@@ -1234,9 +1233,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   quickProposalsLabel: {
-    fontSize: responsive.getResponsiveFontSize(14),
-    fontWeight: '600',
-    color: '#1a1a1a',
+    ...M3Theme.typography.labelLarge,
+    color: M3Theme.colors.onSurface,
     marginBottom: 8,
     textAlign: 'right',
   },

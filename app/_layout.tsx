@@ -56,49 +56,92 @@ export default function RootLayout() {
         const style = document.createElement('style');
         style.id = styleId;
         style.textContent = `
+          /* M3 Material Design 3 - Global Styles for Mobile WebView */
+          
+          /* Base Typography - Minimum 14px to prevent iOS auto-zoom */
+          body {
+            font-size: 14px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden; /* Prevent horizontal scroll */
+          }
+          
+          /* Mobile-first: 16px horizontal padding globally */
+          body > * {
+            box-sizing: border-box;
+          }
+          
           /* Responsive container for large screens */
           @media (min-width: 1024px) {
             body {
               max-width: ${responsive.getMaxContentWidth()}px;
               margin: 0 auto;
-            }
-          }
-          
-          /* Responsive text */
-          @media (max-width: 480px) {
-            body {
-              font-size: 14px;
-            }
-          }
-          
-          @media (min-width: 1024px) {
-            body {
               font-size: 16px;
             }
           }
           
-          /* تحسين الـ Headers - تقليل الارتفاع وجعله شفاف جزئيًا */
-          /* تطبيق على جميع الـ headers التي تحتوي على borderBottom */
+          /* Input fields: 16px minimum to prevent iOS auto-zoom */
+          input, textarea, select {
+            font-size: 16px !important;
+          }
+          
+          /* Disable text selection on buttons (WebView optimization) */
+          button, [role="button"], .touchable, [data-touchable="true"] {
+            user-select: none !important;
+            -webkit-user-select: none !important;
+            -moz-user-select: none !important;
+            -ms-user-select: none !important;
+            cursor: pointer;
+          }
+          
+          /* Remove hover states for touch devices (WebView optimization) */
+          @media (hover: none) {
+            button:hover, [role="button"]:hover, .touchable:hover {
+              opacity: 1 !important;
+              transform: none !important;
+            }
+          }
+          
+          /* Ensure minimum touch target: 44x44px */
+          button, [role="button"], .touchable {
+            min-height: 44px;
+            min-width: 44px;
+          }
+          
+          /* M3 Elevated Cards shadow */
+          .m3-card, [class*="card"] {
+            border-radius: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+          }
+          
+          /* M3 Typography hierarchy */
+          h1, h2, h3, h4, h5, h6 {
+            font-weight: 600; /* Semi-bold for headings */
+          }
+          
+          /* Prevent horizontal scroll globally */
+          * {
+            max-width: 100%;
+          }
+          
+          /* تحسين الـ Headers - M3 style */
           [style*="borderBottomWidth"],
           [style*="border-bottom"] {
             padding-top: ${responsive.getResponsiveHeaderPadding()}px !important;
             padding-bottom: ${responsive.getResponsiveHeaderPadding()}px !important;
           }
           
-          /* تطبيق gradient overlay على الـ headers البيضاء */
+          /* M3 Surface background */
           [style*="backgroundColor: rgb(255, 255, 255)"],
           [style*="backgroundColor: #fff"] {
-            background: linear-gradient(to bottom, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.85) 100%) !important;
-            backdrop-filter: blur(10px) !important;
-            -webkit-backdrop-filter: blur(10px) !important;
+            background-color: #FFFBFE !important; /* M3 Surface */
           }
           
-          /* تطبيق خاص على الـ headers التي تحتوي على borderBottom */
-          [style*="borderBottomWidth"][style*="backgroundColor: rgb(255, 255, 255)"],
-          [style*="borderBottomWidth"][style*="backgroundColor: #fff"],
-          [style*="border-bottom"][style*="backgroundColor: rgb(255, 255, 255)"],
-          [style*="border-bottom"][style*="backgroundColor: #fff"] {
-            border-bottom-color: rgba(0, 0, 0, 0.08) !important;
+          /* M3 Outline color for borders */
+          [style*="borderBottomWidth"][style*="backgroundColor"],
+          [style*="border-bottom"][style*="backgroundColor"] {
+            border-bottom-color: #CAC4D0 !important; /* M3 Outline Variant */
             border-bottom-width: 1px !important;
           }
         `;

@@ -29,25 +29,28 @@ Deno.serve(async (req) => {
     const body: SettleCommissionsRequest = await req.json().catch(() => ({}));
     const { settlementDate, force = false } = body;
 
-    // جلب إعدادات التوريد
-    const { data: settlementDaySetting, error: dayError } = await supabase
+    // جلب إعدادات التوريد (يوم الأسبوع)
+    const { data: settlementDayOfWeekSetting, error: dayError } = await supabase
       .from('app_settings')
       .select('setting_value')
-      .eq('setting_key', 'settlement_day')
-      .single();
+      .eq('setting_key', 'settlement_day_of_week')
+      .maybeSingle();
 
-    const settlementDay = settlementDaySetting ? parseInt(settlementDaySetting.setting_value) : 1;
+    const settlementDayOfWeek = settlementDayOfWeekSetting ? parseInt(settlementDayOfWeekSetting.setting_value) : 0; // 0 = الأحد افتراضياً
     const today = new Date();
-    const currentDay = today.getDate();
+    const currentDayOfWeek = today.getDay(); // 0 = الأحد، 1 = الاثنين، ... 6 = السبت
 
     // التحقق من أن اليوم هو يوم التوريد (ما لم يكن force = true)
-    if (!force && currentDay !== settlementDay) {
+    if (!force && currentDayOfWeek !== settlementDayOfWeek) {
+      const days = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
       return new Response(
         JSON.stringify({ 
           success: false, 
-          error: `اليوم ليس يوم التوريد. يوم التوريد هو ${settlementDay} من كل شهر`,
-          currentDay,
-          settlementDay,
+          error: `اليوم ليس يوم التوريد. يوم التوريد هو ${days[settlementDayOfWeek] || 'الأحد'} من كل أسبوع`,
+          currentDayOfWeek,
+          settlementDayOfWeek,
+          currentDayName: days[currentDayOfWeek] || 'غير معروف',
+          settlementDayName: days[settlementDayOfWeek] || 'الأحد',
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
       );
@@ -56,8 +59,8 @@ Deno.serve(async (req) => {
     // استخدام التاريخ المحدد أو تاريخ اليوم
     const finalSettlementDate = settlementDate || today.toISOString().split('T')[0];
 
-    // جلب جميع السجلات التي لم يتم دفع عمولتها
-    const { data: unpaidCommissions, error: fetchError } = await supabase
+    // جلب إجمالي العمولة من معاملات earning
+    const { data: unpaidCommissions, error: commissionsError } = await supabase
       .from('wallets')
       .select('id, driver_id, commission, order_id, created_at')
       .eq('type', 'earning')
@@ -65,19 +68,36 @@ Deno.serve(async (req) => {
       .not('driver_id', 'is', null)
       .gt('commission', 0);
 
-    if (fetchError) {
-      console.error('Error fetching unpaid commissions:', fetchError);
+    if (commissionsError) {
+      console.error('Error fetching unpaid commissions:', commissionsError);
       return new Response(
-        JSON.stringify({ success: false, error: fetchError.message || 'Failed to fetch unpaid commissions' }),
+        JSON.stringify({ success: false, error: commissionsError.message || 'Failed to fetch unpaid commissions' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
       );
     }
 
-    if (!unpaidCommissions || unpaidCommissions.length === 0) {
+    // جلب إجمالي باقي العملاء من معاملات deduction
+    const { data: unpaidDeductions, error: deductionsError } = await supabase
+      .from('wallets')
+      .select('id, driver_id, amount, commission, order_id, created_at')
+      .eq('type', 'deduction')
+      .eq('commission_paid', false)
+      .not('driver_id', 'is', null)
+      .gt('amount', 0);
+
+    if (deductionsError) {
+      console.error('Error fetching unpaid deductions:', deductionsError);
+      return new Response(
+        JSON.stringify({ success: false, error: deductionsError.message || 'Failed to fetch unpaid deductions' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+      );
+    }
+
+    if ((!unpaidCommissions || unpaidCommissions.length === 0) && (!unpaidDeductions || unpaidDeductions.length === 0)) {
       return new Response(
         JSON.stringify({ 
           success: true, 
-          message: 'لا توجد عمولات غير مدفوعة',
+          message: 'لا توجد مستحقات غير مدفوعة',
           settledCount: 0,
           totalCommission: 0,
         }),
@@ -85,11 +105,16 @@ Deno.serve(async (req) => {
       );
     }
 
-    // حساب إجمالي العمولة
-    const totalCommission = unpaidCommissions.reduce((sum, item) => sum + (item.commission || 0), 0);
+    // حساب إجمالي المستحقات
+    const totalCommission = unpaidCommissions?.reduce((sum, item) => sum + (item.commission || 0), 0) || 0;
+    const totalCustomerChange = unpaidDeductions?.reduce((sum, item) => {
+      const customerChange = (item.amount || 0) - (item.commission || 0);
+      return sum + customerChange;
+    }, 0) || 0;
+    const totalSettlement = totalCommission + totalCustomerChange;
 
-    // تحديث جميع السجلات لتحديد أنها تم دفع عمولتها
-    const { data: updatedRecords, error: updateError } = await supabase
+    // تحديث معاملات earning
+    const { data: updatedEarnings, error: earningsUpdateError } = await supabase
       .from('wallets')
       .update({
         commission_paid: true,
@@ -100,6 +125,37 @@ Deno.serve(async (req) => {
       .not('driver_id', 'is', null)
       .gt('commission', 0)
       .select('id');
+
+    if (earningsUpdateError) {
+      console.error('Error updating earnings:', earningsUpdateError);
+      return new Response(
+        JSON.stringify({ success: false, error: earningsUpdateError.message || 'Failed to update earnings' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+      );
+    }
+
+    // تحديث معاملات deduction
+    const { data: updatedDeductions, error: deductionsUpdateError } = await supabase
+      .from('wallets')
+      .update({
+        commission_paid: true,
+        settlement_date: finalSettlementDate,
+      })
+      .eq('type', 'deduction')
+      .eq('commission_paid', false)
+      .not('driver_id', 'is', null)
+      .gt('amount', 0)
+      .select('id');
+
+    if (deductionsUpdateError) {
+      console.error('Error updating deductions:', deductionsUpdateError);
+      return new Response(
+        JSON.stringify({ success: false, error: deductionsUpdateError.message || 'Failed to update deductions' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+      );
+    }
+
+    const updatedRecords = [...(updatedEarnings || []), ...(updatedDeductions || [])];
 
     if (updateError) {
       console.error('Error updating commission status:', updateError);
@@ -118,9 +174,11 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({ 
         success: true, 
-        message: `تم توريد العمولات بنجاح`,
+        message: `تم توريد المستحقات بنجاح`,
         settledCount: updatedRecords?.length || 0,
+        totalSettlement: totalSettlement,
         totalCommission: totalCommission,
+        totalCustomerChange: totalCustomerChange,
         settlementDate: finalSettlementDate,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }

@@ -12,7 +12,8 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { useTranslation } from 'react-i18next';
-import responsive, { createShadowStyle } from '@/utils/responsive';
+import responsive, { createShadowStyle, getM3CardStyle, getM3HorizontalPadding } from '@/utils/responsive';
+import M3Theme from '@/constants/M3Theme';
 import { Ionicons } from '@expo/vector-icons';
 
 interface Order {
@@ -273,13 +274,12 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     }),
   },
   title: {
-    fontSize: responsive.getResponsiveFontSize(28),
-    fontWeight: 'bold',
-    color: '#1a1a1a',
+    ...M3Theme.typography.headlineMedium,
+    color: M3Theme.colors.onSurface,
     textAlign: 'right',
   },
   listContent: {
-    padding: responsive.isTablet() ? 20 : 16,
+    padding: getM3HorizontalPadding(),
     ...(responsive.isLargeScreen() && {
       maxWidth: responsive.getMaxContentWidth(),
       alignSelf: 'center',
@@ -287,17 +287,9 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     }),
   },
   orderCard: {
-    backgroundColor: '#fff',
-    marginBottom: responsive.isTablet() ? 20 : 16,
-    padding: responsive.isTablet() ? 20 : 16,
-    borderRadius: 12,
-    ...createShadowStyle({
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 4,
-      elevation: 3,
-    }),
+    ...getM3CardStyle(),
+    backgroundColor: M3Theme.colors.surface,
+    marginBottom: 16,
     ...(responsive.isLargeScreen() && {
       maxWidth: responsive.getMaxContentWidth() - (responsive.getResponsivePadding() * 2),
     }),
@@ -320,13 +312,11 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     borderRadius: 8,
   },
   statusText: {
-    fontSize: responsive.getResponsiveFontSize(14),
-    fontWeight: '600',
+    ...M3Theme.typography.labelLarge,
   },
   orderFee: {
-    fontSize: responsive.getResponsiveFontSize(18),
-    fontWeight: 'bold',
-    color: '#1a1a1a',
+    ...M3Theme.typography.titleMedium,
+    color: M3Theme.colors.onSurface,
   },
   orderDetails: {
     gap: 8,
@@ -338,8 +328,8 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   },
   addressText: {
     flex: 1,
-    fontSize: responsive.getResponsiveFontSize(14),
-    color: '#666',
+    ...M3Theme.typography.bodyMedium,
+    color: M3Theme.colors.onSurfaceVariant,
     textAlign: 'right',
   },
   driverRow: {

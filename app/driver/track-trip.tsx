@@ -1151,11 +1151,15 @@ export default function TrackTripScreen() {
         hasCustomerId: !!order.customer_id,
         customerId: order.customer_id,
         driverId: user?.id,
+        orderDriverId: order.driver_id,
+        isDriverOwner: order.driver_id === user?.id,
         willProcessChange: change > 0 && order.customer_id && user?.id,
+        willCreateDeduction: change > 0 && user?.id && order.driver_id === user.id,
       });
       
       // خصم الباقي + العمولة من محفظة السائق (deduction)
       if (change > 0 && user?.id && order.driver_id === user.id) {
+        console.log('[handleCollectPayment] ✅ Conditions met for deduction. Proceeding to deduct change + commission from driver wallet.');
         try {
           // حساب العمولة يدوياً إذا لم تكن موجودة في driverWalletData
           let commission = driverWalletData?.commission || 0;
@@ -1192,31 +1196,71 @@ export default function TrackTripScreen() {
             orderId: order.id,
           });
           
-          // إضافة deduction في جدول wallets (الباقي + العمولة)
-          const { data: deductionData, error: deductionError } = await supabase
-            .from('wallets')
-            .insert({
-              driver_id: user.id,
-              customer_id: null,
-              order_id: order.id,
-              amount: totalDeduction, // المبلغ المخصوم (الباقي + العمولة)
-              commission: commission, // حفظ قيمة العمولة للتفاصيل
-              type: 'deduction',
+          // خصم الباقي + العمولة من محفظة السائق باستخدام Edge Function لتجاوز RLS
+          const { data: deductionResponse, error: deductionError } = await supabase.functions.invoke('deduct-from-driver-wallet', {
+            body: {
+              driverId: user.id,
+              amount: totalDeduction, // المبلغ المطلوب خصمه (الباقي + العمولة)
+              orderId: order.id,
+              change: change, // باقي العميل
+              commission: commission, // العمولة
               description: `باقي العميل (${change.toFixed(2)} جنيه) + عمولة (${commission.toFixed(2)} جنيه) من طلب #${order.id.substring(0, 8)}`,
-            })
-            .select()
-            .single();
-          
+            },
+          });
+
           if (deductionError) {
-            console.error('[handleCollectPayment] Error deducting change + commission from driver wallet:', deductionError);
-            // لا نوقف العملية إذا فشل خصم الباقي
+            console.error('[handleCollectPayment] ❌ Error from Edge Function (deduct-from-driver-wallet):', deductionError);
+            // محاولة قراءة error message من response
+            try {
+              const errorText = await deductionError.context?.response?.text?.() || deductionError.message;
+              console.error('[handleCollectPayment] Error response:', errorText);
+            } catch (e) {
+              console.error('[handleCollectPayment] Could not read error response:', e);
+            }
+            // إظهار تنبيه للمستخدم
+            showSimpleAlert(
+              'تحذير',
+              `فشل خصم الباقي والعمولة من المحفظة.\n\nالباقي: ${change.toFixed(2)} جنيه\nالعمولة: ${commission.toFixed(2)} جنيه\nالمجموع: ${totalDeduction.toFixed(2)} جنيه\n\nيرجى مراجعة المحفظة يدوياً.`,
+              'warning'
+            );
+          } else if (!deductionResponse || !deductionResponse.success) {
+            console.error('[handleCollectPayment] Edge Function returned error:', {
+              error: deductionResponse?.error,
+              details: deductionResponse?.details,
+              hint: deductionResponse?.hint,
+              code: deductionResponse?.code,
+            });
+            // إظهار تنبيه للمستخدم
+            showSimpleAlert(
+              'تحذير',
+              `فشل خصم الباقي والعمولة من المحفظة.\n\nالباقي: ${change.toFixed(2)} جنيه\nالعمولة: ${commission.toFixed(2)} جنيه\nالمجموع: ${totalDeduction.toFixed(2)} جنيه\n\nيرجى مراجعة المحفظة يدوياً.`,
+              'warning'
+            );
           } else {
-            console.log('[handleCollectPayment] ✅ Change + commission deducted from driver wallet:', deductionData);
+            console.log('[handleCollectPayment] ✅ Change + commission deducted from driver wallet:', deductionResponse.walletEntry);
           }
         } catch (deductionErr: any) {
-          console.error('[handleCollectPayment] Exception deducting change + commission from driver wallet:', deductionErr);
-          // لا نوقف العملية إذا فشل خصم الباقي
+          console.error('[handleCollectPayment] ❌ Exception deducting change + commission from driver wallet:', {
+            error: deductionErr,
+            message: deductionErr?.message,
+            stack: deductionErr?.stack,
+          });
+          // إظهار تنبيه للمستخدم
+          showSimpleAlert(
+            'خطأ',
+            `حدث خطأ أثناء خصم الباقي والعمولة من المحفظة.\n\nيرجى مراجعة المحفظة يدوياً.`,
+            'error'
+          );
         }
+      } else {
+        console.log('[handleCollectPayment] ⚠️ Deduction skipped. Reasons:', {
+          change: change,
+          hasChange: change > 0,
+          userId: user?.id,
+          orderDriverId: order.driver_id,
+          isDriverOwner: order.driver_id === user?.id,
+          reason: !change ? 'No change (change <= 0)' : !user?.id ? 'No user ID' : order.driver_id !== user.id ? 'Driver is not owner' : 'Unknown',
+        });
       }
       
       if (change > 0 && order.customer_id) {

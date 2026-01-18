@@ -7,7 +7,6 @@ import {
   StyleSheet,
   SafeAreaView,
   ScrollView,
-  Alert,
   ActivityIndicator,
   Platform,
 } from 'react-native';
@@ -15,12 +14,11 @@ import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import responsive, { createShadowStyle } from '@/utils/responsive';
+import { showToast } from '@/lib/alert';
 
 interface SearchSettings {
-  initialRadius: string;
-  expandedRadius: string;
-  initialDuration: string;
-  expandedDuration: string;
+  searchRadius: string;
+  searchDuration: string;
 }
 
 export default function SearchSettingsScreen() {
@@ -28,10 +26,8 @@ export default function SearchSettingsScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [settings, setSettings] = useState<SearchSettings>({
-    initialRadius: '3',
-    expandedRadius: '6',
-    initialDuration: '10',
-    expandedDuration: '10',
+    searchRadius: '10',
+    searchDuration: '60',
   });
 
   useEffect(() => {
@@ -50,26 +46,15 @@ export default function SearchSettingsScreen() {
       }
 
       const newSettings: SearchSettings = {
-        initialRadius: '3',
-        expandedRadius: '6',
-        initialDuration: '10',
-        expandedDuration: '10',
+        searchRadius: '10',
+        searchDuration: '60',
       };
 
       data?.forEach((setting) => {
-        switch (setting.setting_key) {
-          case 'initial_search_radius_km':
-            newSettings.initialRadius = setting.setting_value;
-            break;
-          case 'expanded_search_radius_km':
-            newSettings.expandedRadius = setting.setting_value;
-            break;
-          case 'initial_search_duration_seconds':
-            newSettings.initialDuration = setting.setting_value;
-            break;
-          case 'expanded_search_duration_seconds':
-            newSettings.expandedDuration = setting.setting_value;
-            break;
+        if (setting.setting_key === 'search_radius_km' || setting.setting_key === 'initial_search_radius_km') {
+          newSettings.searchRadius = setting.setting_value;
+        } else if (setting.setting_key === 'search_duration_seconds' || setting.setting_key === 'initial_search_duration_seconds') {
+          newSettings.searchDuration = setting.setting_value;
         }
       });
 
@@ -83,43 +68,28 @@ export default function SearchSettingsScreen() {
 
   const saveSettings = async () => {
     // التحقق من القيم
-    const initialRadius = parseFloat(settings.initialRadius);
-    const expandedRadius = parseFloat(settings.expandedRadius);
-    const initialDuration = parseFloat(settings.initialDuration);
-    const expandedDuration = parseFloat(settings.expandedDuration);
+    const searchRadius = parseFloat(settings.searchRadius);
+    const searchDuration = parseFloat(settings.searchDuration);
 
-    if (isNaN(initialRadius) || initialRadius <= 0) {
-      showToast('نطاق البحث الأولي يجب أن يكون رقماً موجباً', 'error');
+    if (isNaN(searchRadius) || searchRadius <= 0) {
+      showToast('نطاق البحث يجب أن يكون رقماً موجباً', 'error');
       return;
     }
 
-    if (isNaN(expandedRadius) || expandedRadius <= 0) {
-      showToast('نطاق البحث الموسع يجب أن يكون رقماً موجباً', 'error');
-      return;
-    }
-
-    if (expandedRadius <= initialRadius) {
-      showToast('نطاق البحث الموسع يجب أن يكون أكبر من النطاق الأولي', 'error');
-      return;
-    }
-
-    if (isNaN(initialDuration) || initialDuration <= 0) {
-      showToast('مدة البحث الأولي يجب أن تكون رقماً موجباً', 'error');
-      return;
-    }
-
-    if (isNaN(expandedDuration) || expandedDuration <= 0) {
-      showToast('مدة البحث الموسع يجب أن تكون رقماً موجباً', 'error');
+    if (isNaN(searchDuration) || searchDuration <= 0) {
+      showToast('مدة البحث يجب أن تكون رقماً موجباً', 'error');
       return;
     }
 
     setSaving(true);
     try {
+      // حفظ الإعدادات الجديدة (النظام الموحد)
       const updates = [
-        { key: 'initial_search_radius_km', value: settings.initialRadius },
-        { key: 'expanded_search_radius_km', value: settings.expandedRadius },
-        { key: 'initial_search_duration_seconds', value: settings.initialDuration },
-        { key: 'expanded_search_duration_seconds', value: settings.expandedDuration },
+        { key: 'search_radius_km', value: settings.searchRadius },
+        { key: 'search_duration_seconds', value: settings.searchDuration },
+        // تحديث الإعدادات القديمة للتوافق (اختياري)
+        { key: 'initial_search_radius_km', value: settings.searchRadius },
+        { key: 'initial_search_duration_seconds', value: settings.searchDuration },
       ];
 
       for (const update of updates) {
@@ -173,53 +143,20 @@ export default function SearchSettingsScreen() {
 
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>نطاق البحث</Text>
+          <Text style={styles.sectionTitle}>إعدادات البحث عن السائقين</Text>
+          <Text style={styles.sectionDescription}>
+            النظام الحالي يستخدم مرحلة واحدة للبحث (نطاق واحد ومدة واحدة)
+          </Text>
           
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>نطاق البحث الأولي (كم)</Text>
+            <Text style={styles.label}>نطاق البحث (كم)</Text>
             <Text style={styles.description}>
-              النطاق الأولي للبحث عن السائقين عند إنشاء طلب جديد
+              النطاق الذي سيتم البحث فيه عن السائقين عند إنشاء طلب جديد
             </Text>
             <TextInput
               style={styles.input}
-              value={settings.initialRadius}
-              onChangeText={(value) => setSettings({ ...settings, initialRadius: value })}
-              keyboardType="numeric"
-              placeholder="3"
-              placeholderTextColor="#999"
-              textAlign="right"
-            />
-          </View>
-
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>نطاق البحث الموسع (كم)</Text>
-            <Text style={styles.description}>
-              النطاق الموسع للبحث إذا لم يتم العثور على سائق في النطاق الأولي
-            </Text>
-            <TextInput
-              style={styles.input}
-              value={settings.expandedRadius}
-              onChangeText={(value) => setSettings({ ...settings, expandedRadius: value })}
-              keyboardType="numeric"
-              placeholder="6"
-              placeholderTextColor="#999"
-              textAlign="right"
-            />
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>مدة البحث</Text>
-          
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>مدة البحث الأولي (ثانية)</Text>
-            <Text style={styles.description}>
-              المدة الزمنية للبحث في النطاق الأولي قبل التوسع
-            </Text>
-            <TextInput
-              style={styles.input}
-              value={settings.initialDuration}
-              onChangeText={(value) => setSettings({ ...settings, initialDuration: value })}
+              value={settings.searchRadius}
+              onChangeText={(value) => setSettings({ ...settings, searchRadius: value })}
               keyboardType="numeric"
               placeholder="10"
               placeholderTextColor="#999"
@@ -228,16 +165,16 @@ export default function SearchSettingsScreen() {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>مدة البحث الموسع (ثانية)</Text>
+            <Text style={styles.label}>مدة البحث (ثانية)</Text>
             <Text style={styles.description}>
-              المدة الزمنية للبحث في النطاق الموسع قبل إيقاف البحث
+              المدة الزمنية للبحث عن السائقين قبل إيقاف البحث تلقائياً
             </Text>
             <TextInput
               style={styles.input}
-              value={settings.expandedDuration}
-              onChangeText={(value) => setSettings({ ...settings, expandedDuration: value })}
+              value={settings.searchDuration}
+              onChangeText={(value) => setSettings({ ...settings, searchDuration: value })}
               keyboardType="numeric"
-              placeholder="10"
+              placeholder="60"
               placeholderTextColor="#999"
               textAlign="right"
             />
@@ -315,8 +252,15 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     fontSize: responsive.getResponsiveFontSize(18),
     fontWeight: 'bold',
     color: '#1a1a1a',
+    marginBottom: 8,
+    textAlign: 'right',
+  },
+  sectionDescription: {
+    fontSize: responsive.getResponsiveFontSize(14),
+    color: '#666',
     marginBottom: 16,
     textAlign: 'right',
+    fontStyle: 'italic',
   },
   inputGroup: {
     marginBottom: 20,

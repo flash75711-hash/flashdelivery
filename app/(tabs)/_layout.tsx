@@ -574,6 +574,12 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="admin/settlement-requests"
+        options={{
+          tabBarButton: () => null, // إخفاء من الـ navbar
+        }}
+      />
+      <Tabs.Screen
         name="admin/users"
         options={{
           title: 'المستخدمين',

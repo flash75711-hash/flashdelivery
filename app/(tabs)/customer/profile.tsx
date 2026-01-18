@@ -18,7 +18,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase, reverseGeocode } from '@/lib/supabase';
 import { getLocationWithAddress } from '@/lib/webLocationUtils';
 import { showConfirm, showSimpleAlert } from '@/lib/alert';
-import responsive, { createShadowStyle } from '@/utils/responsive';
+import responsive, { createShadowStyle, getM3CardStyle, getM3ButtonStyle, getM3HorizontalPadding, getM3TouchTarget } from '@/utils/responsive';
+import M3Theme from '@/constants/M3Theme';
 
 interface Address {
   id?: string;
@@ -789,7 +790,7 @@ export default function CustomerProfileScreen() {
 const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: M3Theme.colors.background,
     paddingBottom: tabBarBottomPadding,
   },
   flex: {
@@ -811,14 +812,13 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     }),
   },
   title: {
-    fontSize: responsive.getResponsiveFontSize(28),
-    fontWeight: 'bold',
-    color: '#1a1a1a',
+    ...M3Theme.typography.headlineMedium,
+    color: M3Theme.colors.onSurface,
     textAlign: 'right',
   },
   content: {
     flex: 1,
-    padding: responsive.getResponsivePadding(),
+    padding: getM3HorizontalPadding(),
     ...(responsive.isLargeScreen() && {
       maxWidth: responsive.getMaxContentWidth(),
       alignSelf: 'center',

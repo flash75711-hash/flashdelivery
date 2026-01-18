@@ -86,13 +86,15 @@ export default function AdminDashboardScreen() {
     setSavingDistance(true);
     try {
       const { error } = await supabase
-        .from('settings')
+        .from('app_settings')
         .upsert({
-          key: 'max_delivery_distance',
-          value: distance.toString(),
+          setting_key: 'max_delivery_distance',
+          setting_value: distance.toString(),
+          setting_type: 'number',
           description: 'المسافة القصوى للتوصيل بالكيلومتر (للطلبات بدون مزود خدمة)',
+          category: 'orders',
         }, {
-          onConflict: 'key',
+          onConflict: 'setting_key',
         });
 
       if (error) throw error;
@@ -153,24 +155,17 @@ export default function AdminDashboardScreen() {
   };
 
   const handleLogout = async () => {
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      const confirmed = window.confirm('هل أنت متأكد من تسجيل الخروج؟');
-      if (confirmed) {
-        performLogout();
+    const confirmed = await showConfirm(
+      'تسجيل الخروج',
+      'هل أنت متأكد من تسجيل الخروج؟',
+      {
+        confirmText: 'تسجيل الخروج',
+        cancelText: 'إلغاء',
+        type: 'warning',
       }
-    } else {
-      const confirmed = await showConfirm(
-        'تسجيل الخروج',
-        'هل أنت متأكد من تسجيل الخروج؟',
-        {
-          confirmText: 'تسجيل الخروج',
-          cancelText: 'إلغاء',
-          type: 'warning',
-        }
-      );
-      if (confirmed) {
-        performLogout();
-      }
+    );
+    if (confirmed) {
+      performLogout();
     }
   };
 
@@ -412,6 +407,22 @@ export default function AdminDashboardScreen() {
             </View>
             <Ionicons name="chevron-forward" size={24} color="#999" />
           </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.managementCard}
+            onPress={() => router.push('/(tabs)/admin/settlement-requests')}
+          >
+            <View style={styles.managementInfo}>
+              <Ionicons name="cash-outline" size={24} color="#FF9500" />
+              <View style={styles.managementTextContainer}>
+                <Text style={styles.managementLabel}>مراجعة طلبات التوريد</Text>
+                <Text style={styles.managementDescription}>
+                  مراجعة وقبول أو رفض طلبات توريد العمولة من السائقين
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={24} color="#999" />
+          </TouchableOpacity>
         </View>
 
         {/* قسم إعدادات البحث عن السائقين */}
@@ -440,6 +451,22 @@ export default function AdminDashboardScreen() {
         {/* قسم الإعدادات */}
         <View style={styles.settingsSection}>
           <Text style={styles.settingsTitle}>الإعدادات</Text>
+          
+          <TouchableOpacity
+            style={styles.managementCard}
+            onPress={() => router.push('/(tabs)/admin/settings')}
+          >
+            <View style={styles.managementInfo}>
+              <Ionicons name="settings-outline" size={24} color="#007AFF" />
+              <View style={styles.managementTextContainer}>
+                <Text style={styles.managementLabel}>إعدادات النظام</Text>
+                <Text style={styles.managementDescription}>
+                  تعديل إعدادات العمولة والتوريد وإعدادات البحث عن السائقين
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={24} color="#999" />
+          </TouchableOpacity>
           
           <View style={styles.settingCard}>
             <View style={styles.settingHeader}>

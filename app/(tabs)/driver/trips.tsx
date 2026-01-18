@@ -15,7 +15,8 @@ import { supabase } from '@/lib/supabase';
 import { useTranslation } from 'react-i18next';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import responsive, { createShadowStyle } from '@/utils/responsive';
+import responsive, { createShadowStyle, getM3CardStyle, getM3ButtonStyle, getM3HorizontalPadding, getM3TouchTarget } from '@/utils/responsive';
+import M3Theme from '@/constants/M3Theme';
 import { showSimpleAlert } from '@/lib/alert';
 import OrderSearchCountdown from '@/components/OrderSearchCountdown';
 
@@ -873,14 +874,14 @@ export default function DriverTripsScreen() {
 const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: M3Theme.colors.background,
     paddingBottom: tabBarBottomPadding,
   },
   header: {
-    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.95)' : '#fff',
+    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 251, 254, 0.95)' : M3Theme.colors.surface,
     padding: responsive.getResponsiveHeaderPadding(),
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0, 0, 0, 0.08)',
+    borderBottomColor: M3Theme.colors.outlineVariant,
     ...(Platform.OS === 'web' && {
       backdropFilter: 'blur(10px)',
       WebkitBackdropFilter: 'blur(10px)',
@@ -892,14 +893,13 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     }),
   },
   title: {
-    fontSize: responsive.getResponsiveFontSize(28),
-    fontWeight: 'bold',
-    color: '#1a1a1a',
+    ...M3Theme.typography.headlineMedium,
+    color: M3Theme.colors.onSurface,
     textAlign: 'right',
   },
   content: {
-    padding: responsive.getResponsivePadding(),
-    paddingBottom: responsive.getResponsivePadding() + 20,
+    padding: getM3HorizontalPadding(),
+    paddingBottom: getM3HorizontalPadding() + 20,
     ...(responsive.isLargeScreen() && {
       maxWidth: responsive.getMaxContentWidth(),
       alignSelf: 'center',
@@ -910,24 +910,15 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     marginBottom: 24,
   },
   sectionTitle: {
-    fontSize: responsive.getResponsiveFontSize(20),
-    fontWeight: 'bold',
-    color: '#1a1a1a',
+    ...M3Theme.typography.titleLarge,
+    color: M3Theme.colors.onSurface,
     marginBottom: 16,
     textAlign: 'right',
   },
   orderCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
+    ...getM3CardStyle(),
+    backgroundColor: M3Theme.colors.surface,
     marginBottom: 16,
-    ...createShadowStyle({
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 8,
-      elevation: 4,
-    }),
   },
   orderHeader: {
     flexDirection: 'row',
@@ -936,23 +927,21 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     marginBottom: 12,
   },
   orderType: {
-    fontSize: responsive.getResponsiveFontSize(16),
-    fontWeight: '600',
-    color: '#1a1a1a',
+    ...M3Theme.typography.titleMedium,
+    color: M3Theme.colors.onSurface,
     marginBottom: 4,
   },
   orderDate: {
-    fontSize: responsive.getResponsiveFontSize(12),
-    color: '#666',
+    ...M3Theme.typography.bodySmall,
+    color: M3Theme.colors.onSurfaceVariant,
   },
   statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
+    paddingHorizontal: M3Theme.spacing.md,
+    paddingVertical: M3Theme.spacing.xs,
+    borderRadius: M3Theme.shape.cornerMedium,
   },
   statusText: {
-    fontSize: responsive.getResponsiveFontSize(12),
-    fontWeight: '600',
+    ...M3Theme.typography.labelMedium,
   },
   addressRow: {
     flexDirection: 'row',
@@ -961,8 +950,8 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     marginTop: 8,
   },
   address: {
-    fontSize: responsive.getResponsiveFontSize(14),
-    color: '#666',
+    ...M3Theme.typography.bodyMedium,
+    color: M3Theme.colors.onSurfaceVariant,
     flex: 1,
     textAlign: 'right',
   },
@@ -1000,19 +989,22 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#34C759',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 12,
+    backgroundColor: M3Theme.colors.success.onContainer,
+    paddingHorizontal: M3Theme.spacing.lg,
+    paddingVertical: M3Theme.spacing.sm,
+    borderRadius: M3Theme.shape.cornerMedium,
+    ...getM3TouchTarget('minimum'),
+    ...Platform.select({
+      web: M3Theme.webViewStyles.button,
+    }),
   },
   acceptButtonDisabled: {
     opacity: 0.5,
     backgroundColor: '#999',
   },
   acceptButtonText: {
+    ...M3Theme.typography.labelLarge,
     color: '#fff',
-    fontSize: responsive.getResponsiveFontSize(14),
-    fontWeight: '600',
   },
   trackButton: {
     flexDirection: 'row',

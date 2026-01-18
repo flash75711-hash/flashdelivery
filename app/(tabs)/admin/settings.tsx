@@ -13,7 +13,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import responsive from '@/utils/responsive';
+import responsive, { getM3CardStyle, getM3ButtonStyle, getM3HorizontalPadding, getM3TouchTarget } from '@/utils/responsive';
+import M3Theme from '@/constants/M3Theme';
 import { showSimpleAlert } from '@/lib/alert';
 
 interface Setting {
@@ -195,9 +196,9 @@ export default function AdminSettingsScreen() {
             💰 نسبة العمولة المئوية التي تأخذها الإدارة من كل تحصيل (10 = 10%)
           </Text>
         )}
-        {setting.setting_key === 'settlement_day' && (
+        {setting.setting_key === 'settlement_day_of_week' && (
           <Text style={styles.helperText}>
-            📅 يوم التوريد من كل شهر (1-28) - اليوم الذي يتم فيه خصم العمولات من محافظ السائقين
+            📅 يوم التوريد من كل أسبوع (0 = الأحد، 1 = الاثنين، 2 = الثلاثاء، 3 = الأربعاء، 4 = الخميس، 5 = الجمعة، 6 = السبت) - اليوم الذي يمكن للسائقين فيه طلب توريد العمولة
           </Text>
         )}
       </View>
@@ -293,21 +294,20 @@ export default function AdminSettingsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: M3Theme.colors.background,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    padding: responsive.getResponsivePadding(),
-    backgroundColor: '#fff',
+    padding: responsive.getResponsiveHeaderPadding(),
+    backgroundColor: M3Theme.colors.surface,
     borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
+    borderBottomColor: M3Theme.colors.outlineVariant,
   },
   title: {
-    fontSize: responsive.getResponsiveFontSize(24),
-    fontWeight: '700',
-    color: '#1a1a1a',
+    ...M3Theme.typography.headlineSmall,
+    color: M3Theme.colors.onSurface,
   },
   loadingContainer: {
     flex: 1,

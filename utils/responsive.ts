@@ -47,15 +47,25 @@ export const isLargeScreen = (): boolean => {
   return SCREEN_WIDTH >= BREAKPOINTS.lg;
 };
 
-// Get responsive padding
+// Get responsive padding - M3 Mobile-first: 16px default
 export const getResponsivePadding = (): number => {
+  // M3 principle: 16px horizontal padding for mobile
+  return 16;
+};
+
+// Get horizontal padding (for M3 mobile-first approach)
+export const getM3HorizontalPadding = (): number => {
+  return 16; // M3 standard: 16px horizontal padding
+};
+
+// Get vertical padding (can vary by context)
+export const getM3VerticalPadding = (): number => {
   if (isLargeScreen()) {
-    return 32;
-  } else if (isTablet()) {
     return 24;
-  } else {
+  } else if (isTablet()) {
     return 20;
   }
+  return 16;
 };
 
 // Get responsive header padding (أقل من padding العادي)
@@ -69,16 +79,19 @@ export const getResponsiveHeaderPadding = (): number => {
   }
 };
 
-// Get responsive font size
+// Get responsive font size - M3: Minimum 14px base, 16px for inputs
 export const getResponsiveFontSize = (baseSize: number): number => {
+  // Ensure minimum 14px for base text (prevents iOS auto-zoom)
+  const minBaseSize = Math.max(baseSize, 14);
+  
   if (isLargeScreen()) {
-    return baseSize * 1.2;
+    return minBaseSize * 1.2;
   } else if (isTablet()) {
-    return baseSize * 1.1;
+    return minBaseSize * 1.1;
   } else if (isSmallScreen()) {
-    return baseSize * 0.9;
+    return Math.max(minBaseSize * 0.9, 14); // Never below 14px
   }
-  return baseSize;
+  return minBaseSize;
 };
 
 // Get max content width for large screens
@@ -155,6 +168,42 @@ export const createShadowStyle = (options: ShadowOptions) => {
   }
 };
 
+// M3 Button helper - ensures minimum 48px height for primary actions
+export const getM3ButtonStyle = (fullWidth: boolean = false) => {
+  return {
+    minHeight: 48, // M3 comfortable touch target
+    ...(fullWidth && { width: '100%' }),
+  };
+};
+
+// M3 Card helper - creates elevated card style
+export const getM3CardStyle = () => {
+  return {
+    borderRadius: 16, // M3 card corner radius
+    padding: 16, // M3 card internal padding
+    ...createShadowStyle({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.05,
+      shadowRadius: 8,
+      elevation: 1,
+    }),
+  };
+};
+
+// M3 Touch Target helper - ensures minimum 44x44px
+export const getM3TouchTarget = (size: 'minimum' | 'comfortable' | 'large' = 'minimum') => {
+  const sizes = {
+    minimum: 44,
+    comfortable: 48,
+    large: 56,
+  };
+  return {
+    minHeight: sizes[size],
+    minWidth: sizes[size],
+  };
+};
+
 export default {
   wp,
   hp,
@@ -169,6 +218,11 @@ export default {
   getCardWidth,
   getTabBarBottomPadding,
   createShadowStyle,
+  getM3HorizontalPadding,
+  getM3VerticalPadding,
+  getM3ButtonStyle,
+  getM3CardStyle,
+  getM3TouchTarget,
   SCREEN_WIDTH,
   SCREEN_HEIGHT,
   BREAKPOINTS,

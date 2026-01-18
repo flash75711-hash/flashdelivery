@@ -16,7 +16,8 @@ import {
 import { useTranslation } from 'react-i18next';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
-import responsive, { createShadowStyle } from '@/utils/responsive';
+import responsive, { createShadowStyle, getM3CardStyle, getM3ButtonStyle, getM3HorizontalPadding, getM3TouchTarget } from '@/utils/responsive';
+import M3Theme from '@/constants/M3Theme';
 import { createNotification, notifyAllAdmins } from '@/lib/notifications';
 import { showToast, showSimpleAlert, showConfirm } from '@/lib/alert';
 
@@ -47,7 +48,6 @@ export default function AdminDriversScreen() {
   const styles = getStyles(tabBarBottomPadding);
 
   useEffect(() => {
-    console.log('AdminDrivers: useEffect triggered');
     loadDrivers();
     // التحقق من أن المستخدم الحالي هو admin
     checkAdminStatus();
@@ -55,13 +55,8 @@ export default function AdminDriversScreen() {
 
   useEffect(() => {
     // إعادة تحميل السائقين عند تغيير الفلتر
-    console.log('AdminDrivers: filterActive changed to:', filterActive);
     loadDrivers();
   }, [filterActive]);
-
-  useEffect(() => {
-    console.log('AdminDrivers: drivers state changed, count:', drivers.length);
-  }, [drivers]);
 
   const checkAdminStatus = async () => {
     try {
@@ -85,7 +80,6 @@ export default function AdminDriversScreen() {
   const loadDrivers = async () => {
     setLoading(true);
     try {
-      console.log('AdminDrivers: Loading drivers...', filterActive ? '(active only)' : '(all)');
       let query = supabase
         .from('profiles')
         .select('*')
@@ -103,18 +97,7 @@ export default function AdminDriversScreen() {
         throw error;
       }
       
-      console.log('AdminDrivers: Loaded drivers:', data?.length || 0);
-      if (data && data.length > 0) {
-        console.log('AdminDrivers: Drivers data:', data.map(d => ({
-          id: d.id,
-          name: d.full_name,
-          status: d.status,
-          approval_status: d.approval_status,
-          canSuspend: d.status === 'active' && d.approval_status === 'approved'
-        })));
-      }
       setDrivers(data || []);
-      console.log('AdminDrivers: setDrivers called with', data?.length || 0, 'drivers');
     } catch (error: any) {
       console.error('AdminDrivers: Error loading drivers:', error);
       showToast(`فشل تحميل السائقين: ${error.message || error.code || 'خطأ غير معروف'}`, 'error');
@@ -124,19 +107,10 @@ export default function AdminDriversScreen() {
   };
 
   const approveDriver = async (driverId: string) => {
-    console.log('AdminDrivers: approveDriver called for:', driverId);
-    
     const performApproval = async () => {
-      console.log('AdminDrivers: Approving driver:', driverId);
       setProcessingDriverId(driverId);
       try {
         // استخدام Edge Function لتجاوز RLS
-        console.log('🌐 [AdminDrivers] Calling Edge Function update-driver-profile to approve driver...', {
-          driverId,
-          approval_status: 'approved',
-          registration_complete: true,
-          status: 'active',
-        });
 
         const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('update-driver-profile', {
           body: {
@@ -147,13 +121,6 @@ export default function AdminDriversScreen() {
           },
         });
 
-        console.log('📥 [AdminDrivers] Edge Function response received:', {
-          hasData: !!edgeFunctionData,
-          success: edgeFunctionData?.success,
-          hasError: !!edgeFunctionError,
-          errorMessage: edgeFunctionError?.message || edgeFunctionData?.error,
-          profileId: edgeFunctionData?.profile?.id,
-        });
 
         if (edgeFunctionError) {
           console.error('❌ [AdminDrivers] Edge Function error:', edgeFunctionError);
@@ -165,7 +132,6 @@ export default function AdminDriversScreen() {
           throw new Error(edgeFunctionData?.error || 'فشل الموافقة على السائق');
         }
 
-        console.log('AdminDrivers: Driver approved successfully via Edge Function');
         
         // إرسال إشعار للإدارة عن الموافقة على السائق
         const driverName = edgeFunctionData.profile?.full_name || 'سائق';
@@ -211,10 +177,8 @@ export default function AdminDriversScreen() {
   };
 
   const rejectDriver = async (driverId: string) => {
-    console.log('AdminDrivers: rejectDriver called for:', driverId);
     
     const performRejection = async () => {
-      console.log('AdminDrivers: Rejecting driver:', driverId);
       setProcessingDriverId(driverId);
       try {
         // استخدام Edge Function لتجاوز RLS
@@ -232,13 +196,6 @@ export default function AdminDriversScreen() {
           },
         });
 
-        console.log('📥 [AdminDrivers] Edge Function response received:', {
-          hasData: !!edgeFunctionData,
-          success: edgeFunctionData?.success,
-          hasError: !!edgeFunctionError,
-          errorMessage: edgeFunctionError?.message || edgeFunctionData?.error,
-          profileId: edgeFunctionData?.profile?.id,
-        });
 
         if (edgeFunctionError) {
           console.error('❌ [AdminDrivers] Edge Function error:', edgeFunctionError);
@@ -250,7 +207,6 @@ export default function AdminDriversScreen() {
           throw new Error(edgeFunctionData?.error || 'فشل رفض السائق');
         }
 
-        console.log('AdminDrivers: Driver rejected successfully via Edge Function');
         
         showToast('تم رفض تسجيل السائق', 'success');
         
@@ -280,14 +236,11 @@ export default function AdminDriversScreen() {
   };
 
   const suspendDriver = async (driverId: string) => {
-    console.log('AdminDrivers: suspendDriver called for:', driverId);
     
     const performSuspension = async () => {
-      console.log('AdminDrivers: Suspending driver:', driverId);
       setProcessingDriverId(driverId);
       try {
         const { data: { user } } = await supabase.auth.getUser();
-        console.log('AdminDrivers: Current user:', user?.id);
         
         // جلب بيانات السائق لإرسال إشعار
         const { data: driverData } = await supabase
@@ -302,7 +255,6 @@ export default function AdminDriversScreen() {
           .eq('id', driverId)
           .select();
 
-        console.log('AdminDrivers: Suspend result:', { data, error, driverId });
 
         if (error) {
           console.error('AdminDrivers: Suspend error details:', {
@@ -387,11 +339,9 @@ export default function AdminDriversScreen() {
     console.log('AdminDrivers: reactivateDriver called for:', driverId);
     
     const performReactivation = async () => {
-      console.log('AdminDrivers: Reactivating driver:', driverId);
       setProcessingDriverId(driverId);
       try {
         const { data: { user } } = await supabase.auth.getUser();
-        console.log('AdminDrivers: Current user:', user?.id);
         
         // جلب بيانات السائق لإرسال إشعار
         const { data: driverData } = await supabase
@@ -406,7 +356,6 @@ export default function AdminDriversScreen() {
           .eq('id', driverId)
           .select();
 
-        console.log('AdminDrivers: Reactivate result:', { data, error, driverId });
 
         if (error) {
           console.error('AdminDrivers: Reactivate error details:', {
@@ -423,7 +372,6 @@ export default function AdminDriversScreen() {
           throw new Error('لم يتم تحديث أي صفوف. يرجى التحقق من الصلاحيات.');
         }
         
-        console.log('AdminDrivers: Driver reactivated successfully, updated rows:', data.length);
         
         // إرسال إشعار للإدارة عن إعادة تنشيط السائق
         const driverName = driverData?.full_name || 'سائق';
@@ -486,16 +434,6 @@ export default function AdminDriversScreen() {
     }
   };
 
-  console.log('AdminDrivers: Component render, drivers count:', drivers.length, 'loading:', loading);
-  if (drivers.length > 0) {
-    console.log('AdminDrivers: Drivers state:', drivers.map(d => ({
-      id: d.id,
-      name: d.full_name,
-      status: d.status,
-      approval_status: d.approval_status,
-      canSuspend: d.status === 'active' && d.approval_status === 'approved'
-    })));
-  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -521,24 +459,11 @@ export default function AdminDriversScreen() {
 
       <FlatList
         data={drivers}
-        keyExtractor={(item) => {
-          console.log('AdminDrivers: keyExtractor called for:', item.id);
-          return item.id;
-        }}
+        keyExtractor={(item) => item.id}
         refreshControl={
           <RefreshControl refreshing={loading} onRefresh={loadDrivers} />
         }
-        onLayout={() => {
-          console.log('AdminDrivers: FlatList onLayout, drivers count:', drivers.length);
-        }}
         renderItem={({ item, index }) => {
-          console.log(`AdminDrivers: Rendering driver [${index}]:`, {
-            id: item.id,
-            name: item.full_name,
-            status: item.status,
-            approval_status: item.approval_status,
-            shouldShowSuspend: item.status === 'active' && item.approval_status === 'approved'
-          });
           return (
           <TouchableOpacity 
             style={styles.driverCard}
@@ -607,7 +532,6 @@ export default function AdminDriversScreen() {
                       (processingDriverId === item.id || loading) && styles.actionButtonDisabled
                     ]}
                     onPress={() => {
-                      console.log('AdminDrivers: Approve button pressed for:', item.id, 'item:', item);
                       if (!item.id) {
                         console.error('AdminDrivers: No driver ID!');
                         showToast('معرف السائق غير موجود', 'error');
@@ -633,7 +557,6 @@ export default function AdminDriversScreen() {
                       (processingDriverId === item.id || loading) && styles.actionButtonDisabled
                     ]}
                     onPress={() => {
-                      console.log('AdminDrivers: Reject button pressed for:', item.id, 'item:', item);
                       if (!item.id) {
                         console.error('AdminDrivers: No driver ID!');
                         showToast('معرف السائق غير موجود', 'error');
@@ -671,10 +594,8 @@ export default function AdminDriversScreen() {
                 <TouchableOpacity
                   style={styles.suspendButton}
                   onPressIn={() => {
-                    console.log('AdminDrivers: Suspend button onPressIn triggered');
                   }}
                   onPress={() => {
-                    console.log('AdminDrivers: Suspend button pressed for:', item.id, 'item:', item);
                     if (!item.id) {
                       console.error('AdminDrivers: No driver ID!');
                       showToast('معرف السائق غير موجود', 'error');
@@ -702,16 +623,13 @@ export default function AdminDriversScreen() {
                 <TouchableOpacity
                   style={styles.reactivateButton}
                   onPressIn={() => {
-                    console.log('AdminDrivers: Reactivate button onPressIn triggered');
                   }}
                   onPress={() => {
-                    console.log('AdminDrivers: Reactivate button pressed for:', item.id, 'item:', item);
                     if (!item.id) {
                       console.error('AdminDrivers: No driver ID!');
                       showToast('معرف السائق غير موجود', 'error');
                       return;
                     }
-                    console.log('AdminDrivers: Calling reactivateDriver with ID:', item.id);
                     reactivateDriver(item.id);
                   }}
                   disabled={processingDriverId === item.id || loading}
@@ -1060,7 +978,6 @@ export default function AdminDriversScreen() {
                     processingDriverId === selectedDriver.id && styles.actionButtonDisabled
                   ]}
                   onPress={() => {
-                    console.log('AdminDrivers: Modal reject button pressed for:', selectedDriver.id);
                     setShowDocumentsModal(false);
                     rejectDriver(selectedDriver.id);
                   }}
@@ -1082,7 +999,6 @@ export default function AdminDriversScreen() {
                     processingDriverId === selectedDriver.id && styles.actionButtonDisabled
                   ]}
                   onPress={() => {
-                    console.log('AdminDrivers: Modal approve button pressed for:', selectedDriver.id);
                     setShowDocumentsModal(false);
                     approveDriver(selectedDriver.id);
                   }}
@@ -1127,9 +1043,8 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     }),
   },
   title: {
-    fontSize: responsive.getResponsiveFontSize(28),
-    fontWeight: 'bold',
-    color: '#1a1a1a',
+    ...M3Theme.typography.headlineMedium,
+    color: M3Theme.colors.onSurface,
     textAlign: 'right',
     flex: 1,
   },

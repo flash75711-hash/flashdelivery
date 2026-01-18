@@ -13,21 +13,22 @@ import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import CurrentLocationDisplay from '@/components/CurrentLocationDisplay';
-import responsive, { createShadowStyle } from '@/utils/responsive';
+import responsive, { createShadowStyle, getM3CardStyle, getM3HorizontalPadding, getM3TouchTarget } from '@/utils/responsive';
+import M3Theme from '@/constants/M3Theme';
 import NotificationCard from '@/components/NotificationCard';
 import { showToast } from '@/lib/alert';
 
 const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: M3Theme.colors.background, // M3 Background
     paddingBottom: tabBarBottomPadding,
   },
   header: {
-    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.95)' : '#fff',
+    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 251, 254, 0.95)' : M3Theme.colors.surface,
     padding: responsive.getResponsiveHeaderPadding(),
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0, 0, 0, 0.08)',
+    borderBottomColor: M3Theme.colors.outlineVariant, // M3 Outline Variant
     ...(Platform.OS === 'web' && {
       backdropFilter: 'blur(10px)',
       WebkitBackdropFilter: 'blur(10px)',
@@ -55,17 +56,10 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     }),
   },
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
+    ...getM3CardStyle(), // M3: 16px radius, 16px padding, subtle shadow
+    backgroundColor: M3Theme.colors.surface,
     padding: responsive.isTablet() ? 36 : 28,
     alignItems: 'center',
-    ...createShadowStyle({
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.06,
-      shadowRadius: 16,
-      elevation: 6,
-    }),
     ...(responsive.isLargeScreen() && {
       maxWidth: 600,
       alignSelf: 'center',
@@ -76,19 +70,16 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     marginBottom: 20,
   },
   cardTitle: {
-    fontSize: responsive.getResponsiveFontSize(22),
-    fontWeight: '700',
-    color: '#1a1a1a',
+    ...M3Theme.typography.titleLarge, // 22px, weight 500
+    fontWeight: '700', // Override for emphasis
+    color: M3Theme.colors.onSurface,
     marginBottom: 10,
     textAlign: 'center',
-    letterSpacing: 0.2,
   },
   cardDescription: {
-    fontSize: responsive.getResponsiveFontSize(15),
-    color: '#8E8E93',
+    ...M3Theme.typography.bodyMedium, // 14px base font
+    color: M3Theme.colors.onSurfaceVariant,
     textAlign: 'center',
-    lineHeight: 22,
-    fontWeight: '400',
   },
 });
 

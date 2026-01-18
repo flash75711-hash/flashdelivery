@@ -11,7 +11,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import responsive, { createShadowStyle } from '@/utils/responsive';
+import responsive, { createShadowStyle, getM3CardStyle, getM3HorizontalPadding, getM3TouchTarget } from '@/utils/responsive';
+import M3Theme from '@/constants/M3Theme';
 
 export interface FloatingNotificationData {
   id: string;
@@ -186,29 +187,30 @@ export default function FloatingNotification({
     }
   };
 
+  // M3 Colors based on notification type
   const getIconColor = (type: string) => {
     switch (type) {
       case 'success':
-        return '#34C759';
+        return M3Theme.colors.success.onContainer; // Dark green
       case 'error':
-        return '#FF3B30';
+        return M3Theme.colors.onErrorContainer; // Dark red
       case 'warning':
-        return '#FF9500';
+        return M3Theme.colors.warning.onContainer; // Dark orange
       default:
-        return '#007AFF';
+        return M3Theme.colors.info.onContainer; // Dark blue
     }
   };
 
   const getBackgroundColor = (type: string) => {
     switch (type) {
       case 'success':
-        return '#E8F5E9';
+        return M3Theme.colors.success.container; // Light green
       case 'error':
-        return '#FFEBEE';
+        return M3Theme.colors.errorContainer; // Light red
       case 'warning':
-        return '#FFF3E0';
+        return M3Theme.colors.warning.container; // Light orange
       default:
-        return '#E3F2FD';
+        return M3Theme.colors.info.container; // Light blue
     }
   };
 
@@ -259,30 +261,24 @@ const getStyles = () => StyleSheet.create({
   container: {
     position: 'absolute',
     top: Platform.OS === 'web' ? 20 : 60,
-    left: 16,
-    right: 16,
+    left: getM3HorizontalPadding(), // M3: 16px
+    right: getM3HorizontalPadding(), // M3: 16px
     zIndex: 9999,
     ...(responsive.isLargeScreen() && {
       left: '50%',
       right: 'auto',
-      marginLeft: -(responsive.getMaxContentWidth() / 2) + 16,
-      maxWidth: responsive.getMaxContentWidth() - 32,
+      marginLeft: -(responsive.getMaxContentWidth() / 2) + getM3HorizontalPadding(),
+      maxWidth: responsive.getMaxContentWidth() - (getM3HorizontalPadding() * 2),
     }),
   },
   content: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
-    borderRadius: 12,
-    ...createShadowStyle({
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.25,
-      shadowRadius: 8,
-      elevation: 5,
-    }),
+    padding: M3Theme.spacing.md, // M3: 16px
+    borderRadius: M3Theme.shape.cornerMedium, // 12px
+    ...M3Theme.elevation.level1, // M3 subtle shadow
     borderLeftWidth: 4,
-    borderLeftColor: '#007AFF',
+    borderLeftColor: M3Theme.colors.primary, // Will be overridden by dynamic color
   },
   iconContainer: {
     marginRight: 12,
@@ -291,20 +287,23 @@ const getStyles = () => StyleSheet.create({
     flex: 1,
   },
   title: {
-    fontSize: responsive.getResponsiveFontSize(16),
-    fontWeight: 'bold',
-    color: '#1a1a1a',
+    ...M3Theme.typography.titleMedium, // 16px, weight 600
+    fontWeight: 'bold', // Override for emphasis
+    color: M3Theme.colors.onSurface,
     marginBottom: 4,
     textAlign: 'right',
   },
   message: {
-    fontSize: responsive.getResponsiveFontSize(14),
-    color: '#666',
+    ...M3Theme.typography.bodyMedium, // 14px base font
+    color: M3Theme.colors.onSurfaceVariant,
     textAlign: 'right',
-    lineHeight: 20,
   },
   closeButton: {
-    padding: 4,
-    marginLeft: 8,
+    padding: M3Theme.spacing.xs, // 4px
+    marginLeft: M3Theme.spacing.sm, // 8px
+    ...getM3TouchTarget('minimum'), // 44x44px minimum
+    ...Platform.select({
+      web: M3Theme.webViewStyles.button, // user-select: none
+    }),
   },
 });

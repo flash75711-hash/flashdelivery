@@ -19,7 +19,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase, isRegistrationComplete } from '@/lib/supabase';
 import CurrentLocationDisplay from '@/components/CurrentLocationDisplay';
 import { useRouter, useFocusEffect } from 'expo-router';
-import responsive, { createShadowStyle } from '@/utils/responsive';
+import responsive, { createShadowStyle, getM3CardStyle, getM3HorizontalPadding, getM3TouchTarget } from '@/utils/responsive';
+import M3Theme from '@/constants/M3Theme';
 import NotificationCard from '@/components/NotificationCard';
 import { showSimpleAlert, showAlert } from '@/lib/alert';
 
@@ -73,6 +74,13 @@ export default function DriverDashboardScreen() {
   const [instapayNumber, setInstapayNumber] = useState<string>('');
   const [cashNumber, setCashNumber] = useState<string>('');
   const [editingPaymentLinks, setEditingPaymentLinks] = useState(false);
+  
+  // حالة التوريد
+  const [unpaidCommission, setUnpaidCommission] = useState(0);
+  const [isSettlementDay, setIsSettlementDay] = useState(false);
+  const [hasPendingOrApprovedRequest, setHasPendingOrApprovedRequest] = useState(false);
+  const [settlementDayOfWeek, setSettlementDayOfWeek] = useState(0);
+  const [shouldBlockOnline, setShouldBlockOnline] = useState(false);
 
   // قراءة الحالة الأولية من localStorage عند تحميل المكون
   useEffect(() => {
@@ -100,6 +108,7 @@ export default function DriverDashboardScreen() {
       loadDriverStatus();
       loadDriverProfile();
       loadWalletBalance();
+      checkSettlementStatus();
       
       // الاشتراك في Realtime لتحديث بيانات السائق تلقائياً
       const profileChannel = supabase
@@ -137,6 +146,7 @@ export default function DriverDashboardScreen() {
             // إعادة تحميل رصيد المحفظة عند إضافة مبلغ جديد
             setTimeout(() => {
               loadWalletBalance();
+              checkSettlementStatus(); // التحقق من حالة التوريد بعد تحديث المحفظة
             }, 500); // تأخير بسيط للتأكد من حفظ البيانات
           }
         )
@@ -196,6 +206,7 @@ export default function DriverDashboardScreen() {
         const timer = setTimeout(() => {
           loadDriverProfile();
           loadWalletBalance(); // تحديث رصيد المحفظة عند العودة للصفحة
+          checkSettlementStatus(); // التحقق من حالة التوريد
         }, 100); // تأخير بسيط لتجنب الاستدعاءات المتكررة
         
         return () => clearTimeout(timer);
@@ -259,6 +270,90 @@ export default function DriverDashboardScreen() {
       clearInterval(checkApprovalInterval);
     };
   }, [user, driverProfile?.approval_status, registrationComplete]);
+
+  // التحقق من حالة التوريد
+  const checkSettlementStatus = async () => {
+    if (!user?.id) return;
+
+    try {
+      // 1. جلب بيانات المحفظة لحساب المستحقات
+      const { data: walletResponse, error: walletError } = await supabase.functions.invoke('get-driver-wallet', {
+        body: { driverId: user.id },
+      });
+
+      if (walletError || !walletResponse?.success) {
+        console.error('DriverDashboard: Error loading wallet for settlement check:', walletError);
+        return;
+      }
+
+      const transactions = walletResponse.transactions || [];
+      
+      // حساب المستحقات غير المدفوعة
+      const totalCommission = transactions
+        .filter((t: any) => t.type === 'earning' && !t.commission_paid && t.commission > 0)
+        .reduce((sum: number, t: any) => sum + (t.commission || 0), 0);
+      
+      const totalCustomerChange = transactions
+        .filter((t: any) => t.type === 'deduction' && !t.commission_paid && t.amount > 0)
+        .reduce((sum: number, t: any) => {
+          const customerChange = (t.amount || 0) - (t.commission || 0);
+          return sum + (customerChange > 0 ? customerChange : 0);
+        }, 0);
+      
+      const unpaid = totalCommission + totalCustomerChange;
+      setUnpaidCommission(unpaid);
+
+      // 2. التحقق من يوم التوريد
+      const { data: setting } = await supabase
+        .from('app_settings')
+        .select('setting_value')
+        .eq('setting_key', 'settlement_day_of_week')
+        .maybeSingle();
+
+      const dayOfWeek = setting?.setting_value ? parseInt(setting.setting_value) : 0;
+      setSettlementDayOfWeek(dayOfWeek);
+      
+      const today = new Date();
+      const currentDayOfWeek = today.getDay();
+      const todayIsSettlementDay = currentDayOfWeek === dayOfWeek;
+      setIsSettlementDay(todayIsSettlementDay);
+
+      // 3. التحقق من وجود طلب pending أو approved
+      const { data: settlementRequest, error: requestError } = await supabase
+        .from('settlement_requests')
+        .select('id, status')
+        .eq('driver_id', user.id)
+        .in('status', ['pending', 'approved'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (requestError) {
+        console.error('DriverDashboard: Error checking settlement request:', requestError);
+        return;
+      }
+
+      const hasRequest = !!settlementRequest;
+      setHasPendingOrApprovedRequest(hasRequest);
+
+      // 4. تحديد إذا كان يجب تعطيل الـ Switch
+      // الشرط: إذا كان هناك مستحقات (unpaid > 0) وليس اليوم يوم التوريد وليس هناك طلب pending/approved
+      // هذا يعني أن يوم التوريد مر ولم يورد السائق
+      const shouldBlock = unpaid > 0 && !todayIsSettlementDay && !hasRequest;
+      setShouldBlockOnline(shouldBlock);
+
+      console.log('DriverDashboard: Settlement status check:', {
+        unpaidCommission: unpaid,
+        isSettlementDay: todayIsSettlementDay,
+        hasPendingOrApprovedRequest: hasRequest,
+        shouldBlockOnline: shouldBlock,
+        settlementDayOfWeek: dayOfWeek,
+        currentDayOfWeek: currentDayOfWeek,
+      });
+    } catch (error) {
+      console.error('DriverDashboard: Error checking settlement status:', error);
+    }
+  };
 
   const loadDriverStatus = async () => {
     if (!user) {
@@ -732,6 +827,18 @@ export default function DriverDashboardScreen() {
       );
       return;
     }
+
+    // التحقق من حالة التوريد - إذا مر يوم التوريد ولم يورد السائق
+    if (shouldBlockOnline) {
+      const days = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+      const settlementDayName = days[settlementDayOfWeek] || 'الأحد';
+      await showSimpleAlert(
+        '🔒 تم تعطيل استقبال الرحلات',
+        `يوم التوريد (${settlementDayName}) قد مر ولم تقم بتوريد العمولة المستحقة (${unpaidCommission.toFixed(2)} ج.م).\n\nيرجى توريد العمولة أولاً من صفحة المحفظة حتى تتمكن من استقبال الرحلات.`,
+        'error'
+      );
+      return;
+    }
     
     setToggling(true);
     try {
@@ -999,7 +1106,7 @@ export default function DriverDashboardScreen() {
                 trackColor={{ false: '#e0e0e0', true: '#34C759' }}
                 thumbColor={(isOnline ?? false) ? '#fff' : '#f4f3f4'}
                 ios_backgroundColor="#e0e0e0"
-                disabled={toggling || driverProfile?.approval_status !== 'approved' || !registrationComplete || driverProfile?.status === 'suspended'}
+                disabled={toggling || driverProfile?.approval_status !== 'approved' || !registrationComplete || driverProfile?.status === 'suspended' || shouldBlockOnline}
               />
             )}
           </View>
@@ -1025,6 +1132,22 @@ export default function DriverDashboardScreen() {
                   ? 'تم رفض طلبك. يرجى التواصل مع الإدارة'
                   : 'يرجى إكمال التسجيل أولاً'}
               </Text>
+            </View>
+          )}
+
+          {/* رسالة تحذيرية إذا مر يوم التوريد ولم يورد السائق */}
+          {shouldBlockOnline && driverProfile?.approval_status === 'approved' && registrationComplete && (
+            <View style={[styles.statusMessage, styles.settlementBlockMessage]}>
+              <Ionicons name="lock-closed" size={20} color="#FF3B30" />
+              <Text style={[styles.statusMessageText, styles.settlementBlockText]}>
+                ⚠️ تم تعطيل استقبال الرحلات: يجب توريد العمولة أولاً ({unpaidCommission.toFixed(2)} ج.م)
+              </Text>
+              <TouchableOpacity
+                style={styles.goToWalletButton}
+                onPress={() => router.push('/(tabs)/driver/wallet')}
+              >
+                <Text style={styles.goToWalletButtonText}>اذهب إلى المحفظة</Text>
+              </TouchableOpacity>
             </View>
           )}
 
@@ -1355,14 +1478,14 @@ export default function DriverDashboardScreen() {
 const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: M3Theme.colors.background, // M3 Background #FFFBFE
     paddingBottom: tabBarBottomPadding,
   },
   header: {
-    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 255, 255, 0.95)' : '#fff',
+    backgroundColor: Platform.OS === 'web' ? 'rgba(255, 251, 254, 0.95)' : M3Theme.colors.surface,
     padding: responsive.getResponsiveHeaderPadding(),
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0, 0, 0, 0.08)',
+    borderBottomColor: M3Theme.colors.outlineVariant, // M3 Outline Variant
     ...(Platform.OS === 'web' && {
       backdropFilter: 'blur(10px)',
       WebkitBackdropFilter: 'blur(10px)',
@@ -1374,14 +1497,13 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     }),
   },
   title: {
-    fontSize: responsive.getResponsiveFontSize(28),
-    fontWeight: 'bold',
-    color: '#1a1a1a',
+    ...M3Theme.typography.headlineMedium, // 28px, weight 600
+    color: M3Theme.colors.onSurface,
     textAlign: 'right',
   },
   content: {
-    padding: responsive.getResponsivePadding(),
-    paddingBottom: responsive.getResponsivePadding() + 20,
+    padding: getM3HorizontalPadding(), // M3: 16px horizontal padding
+    paddingBottom: getM3HorizontalPadding() + 20,
     ...(responsive.isLargeScreen() && {
       maxWidth: responsive.getMaxContentWidth(),
       alignSelf: 'center',
@@ -1392,36 +1514,25 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     marginBottom: 20,
   },
   newOrderCard: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 24,
+    ...getM3CardStyle(), // M3: 16px radius, 16px padding, subtle shadow
+    backgroundColor: M3Theme.colors.surface,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    gap: M3Theme.spacing.md, // 16px
     marginBottom: 16,
-    ...createShadowStyle({
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.06,
-      shadowRadius: 16,
-      elevation: 6,
-    }),
   },
   newOrderTextContainer: {
     flex: 1,
   },
   newOrderTitle: {
-    fontSize: responsive.getResponsiveFontSize(19),
-    fontWeight: '700',
-    color: '#1a1a1a',
+    ...M3Theme.typography.titleMedium, // 16px, weight 600
+    fontWeight: '700', // Override for emphasis
+    color: M3Theme.colors.onSurface,
     marginBottom: 6,
-    letterSpacing: 0.2,
   },
   newOrderDescription: {
-    fontSize: responsive.getResponsiveFontSize(15),
-    color: '#8E8E93',
-    lineHeight: 22,
-    fontWeight: '400',
+    ...M3Theme.typography.bodyMedium, // 14px base font
+    color: M3Theme.colors.onSurfaceVariant,
   },
   loadingContainer: {
     flex: 1,
@@ -1434,17 +1545,9 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     color: '#666',
   },
   statusCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
+    ...getM3CardStyle(), // M3 Elevated Card
+    backgroundColor: M3Theme.colors.surface,
     marginBottom: 20,
-    ...createShadowStyle({
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 8,
-      elevation: 4,
-    }),
   },
   statusHeader: {
     flexDirection: 'row',
@@ -1459,9 +1562,8 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     flex: 1,
   },
   statusLabel: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1a1a1a',
+    ...M3Theme.typography.titleMedium, // 16px, weight 600
+    color: M3Theme.colors.onSurface,
   },
   locationContainer: {
     marginTop: 16,
@@ -1471,15 +1573,14 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   statusMessage: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: M3Theme.spacing.sm, // 8px
     marginTop: 12,
-    padding: 12,
-    backgroundColor: '#FFF4E6',
-    borderRadius: 8,
+    padding: M3Theme.spacing.md, // 16px
+    ...M3Theme.statusStyles.warning, // M3 Warning tonal palette
+    borderRadius: M3Theme.shape.cornerSmall, // 8px
   },
   statusMessageText: {
-    fontSize: 12,
-    color: '#FF9500',
+    ...M3Theme.typography.labelMedium, // 12px, weight 600
     flex: 1,
     textAlign: 'right',
   },
@@ -1493,29 +1594,48 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  settlementBlockMessage: {
+    backgroundColor: '#FFEBEE',
+    borderWidth: 1,
+    borderColor: '#FF3B30',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  settlementBlockText: {
+    color: '#FF3B30',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'right',
+  },
+  goToWalletButton: {
+    backgroundColor: '#FF3B30',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+  },
+  goToWalletButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   welcomeCard: {
-    backgroundColor: '#007AFF',
-    borderRadius: 20,
-    padding: 28,
+    backgroundColor: M3Theme.colors.primary, // M3 Primary Purple
+    borderRadius: M3Theme.shape.cornerLarge, // 16px
+    padding: M3Theme.spacing.xl, // 32px
     marginBottom: 16,
-    ...createShadowStyle({
-      shadowColor: '#007AFF',
-      shadowOffset: { width: 0, height: 8 },
-      shadowOpacity: 0.2,
-      shadowRadius: 20,
-      elevation: 8,
-    }),
+    ...M3Theme.elevation.level2, // M3 Elevation level 2
   },
   welcomeText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
+    ...M3Theme.typography.headlineSmall, // 24px, weight 600
+    color: M3Theme.colors.onPrimary,
     marginBottom: 8,
     textAlign: 'right',
   },
   subText: {
-    fontSize: 16,
-    color: '#fff',
+    ...M3Theme.typography.bodyLarge, // 16px
+    color: M3Theme.colors.onPrimary,
     opacity: 0.9,
     textAlign: 'right',
   },
@@ -1525,79 +1645,68 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
   },
   statCard: {
     flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 24,
+    ...getM3CardStyle(), // M3 Elevated Card
+    backgroundColor: M3Theme.colors.surface,
     alignItems: 'center',
-    ...createShadowStyle({
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.06,
-      shadowRadius: 16,
-      elevation: 6,
-    }),
   },
   statNumber: {
-    fontSize: 34,
-    fontWeight: '700',
-    color: '#1a1a1a',
+    ...M3Theme.typography.displaySmall, // 36px, weight 400
+    fontWeight: '700', // Override for emphasis
+    color: M3Theme.colors.onSurface,
     marginTop: 12,
-    letterSpacing: 0.3,
   },
   statLabel: {
-    fontSize: 15,
-    color: '#8E8E93',
+    ...M3Theme.typography.bodyMedium, // 14px base font
+    color: M3Theme.colors.onSurfaceVariant,
     marginTop: 8,
     textAlign: 'center',
-    fontWeight: '400',
   },
   logoutButton: {
+    ...M3Theme.buttonVariants.outlined, // M3 Outlined button
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: M3Theme.colors.surface,
+    borderColor: M3Theme.colors.error, // M3 Error color
     marginTop: 20,
     marginBottom: 40,
-    borderWidth: 1,
-    borderColor: '#FF3B30',
-    gap: 8,
+    gap: M3Theme.spacing.sm, // 8px
+    ...getM3TouchTarget('comfortable'), // 48px min height
+    ...Platform.select({
+      web: M3Theme.webViewStyles.button, // user-select: none
+    }),
   },
   logoutText: {
-    color: '#FF3B30',
-    fontSize: 18,
-    fontWeight: '600',
+    ...M3Theme.typography.labelLarge, // 14px, weight 600
+    color: M3Theme.colors.error,
   },
   registrationCard: {
-    backgroundColor: '#FFF4E6',
-    borderRadius: 16,
-    padding: 20,
+    ...M3Theme.statusStyles.warning, // M3 Warning tonal palette
+    borderRadius: M3Theme.shape.cornerLarge, // 16px
+    padding: M3Theme.spacing.md, // 16px
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: '#FF9500',
+    borderColor: M3Theme.colors.warning.onContainer,
   },
   registrationHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: M3Theme.spacing.sm, // 8px
     marginBottom: 8,
   },
   registrationTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FF9500',
+    ...M3Theme.typography.titleLarge, // 22px, weight 500
+    fontWeight: 'bold', // Override for emphasis
+    color: M3Theme.colors.warning.onContainer,
   },
   registrationText: {
-    fontSize: 14,
-    color: '#666',
+    ...M3Theme.typography.bodyMedium, // 14px base font
+    color: M3Theme.colors.onSurfaceVariant,
     textAlign: 'right',
-    lineHeight: 20,
   },
   profileCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
+    ...getM3CardStyle(), // M3 Elevated Card
+    backgroundColor: M3Theme.colors.surface,
     marginBottom: 20,
     ...createShadowStyle({
       shadowColor: '#000',
@@ -1614,13 +1723,17 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     marginBottom: 16,
   },
   profileTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1a1a1a',
+    ...M3Theme.typography.titleLarge, // 22px, weight 500
+    fontWeight: 'bold', // Override for emphasis
+    color: M3Theme.colors.onSurface,
     flex: 1,
   },
   editButton: {
-    padding: 4,
+    padding: M3Theme.spacing.xs, // 4px
+    ...getM3TouchTarget('minimum'), // 44x44px minimum
+    ...Platform.select({
+      web: M3Theme.webViewStyles.button,
+    }),
   },
   profileInfo: {
     marginBottom: 16,
@@ -1634,14 +1747,13 @@ const getStyles = (tabBarBottomPadding: number = 0) => StyleSheet.create({
     borderBottomColor: '#f0f0f0',
   },
   profileLabel: {
-    fontSize: 14,
-    color: '#666',
+    ...M3Theme.typography.bodyMedium, // 14px base font
+    color: M3Theme.colors.onSurfaceVariant,
     fontWeight: '500',
   },
   profileValue: {
-    fontSize: 14,
-    color: '#1a1a1a',
-    fontWeight: '600',
+    ...M3Theme.typography.labelLarge, // 14px, weight 600
+    color: M3Theme.colors.onSurface,
   },
   imagesSection: {
     marginTop: 16,

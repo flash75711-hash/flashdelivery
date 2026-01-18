@@ -16,7 +16,8 @@ import { useMyOrders } from '@/hooks/useMyOrders';
 import OrderCard from '@/components/OrderCard';
 import OrderTypeCards from '@/components/OrderTypeCards';
 import CompletedOrdersCard from '@/components/CompletedOrdersCard';
-import responsive from '@/utils/responsive';
+import responsive, { getM3HorizontalPadding } from '@/utils/responsive';
+import M3Theme from '@/constants/M3Theme';
 import { supabase } from '@/lib/supabase';
 import { createNotification } from '@/lib/notifications';
 import { showAlert, showSimpleAlert, showConfirm } from '@/lib/alert';
@@ -308,14 +309,14 @@ const getStyles = (tabBarBottomPadding: number = 0) =>
   StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: '#f5f5f5',
+      backgroundColor: M3Theme.colors.background,
       paddingBottom: tabBarBottomPadding,
     },
     header: {
-      backgroundColor: '#fff',
-      padding: responsive.getResponsivePadding(),
+      backgroundColor: M3Theme.colors.surface,
+      padding: responsive.getResponsiveHeaderPadding(),
       borderBottomWidth: 1,
-      borderBottomColor: '#e0e0e0',
+      borderBottomColor: M3Theme.colors.outlineVariant,
       ...(responsive.isLargeScreen() && {
         maxWidth: responsive.getMaxContentWidth(),
         alignSelf: 'center',
@@ -323,13 +324,12 @@ const getStyles = (tabBarBottomPadding: number = 0) =>
       }),
     },
     title: {
-      fontSize: responsive.getResponsiveFontSize(28),
-      fontWeight: 'bold',
-      color: '#1a1a1a',
+      ...M3Theme.typography.headlineMedium,
+      color: M3Theme.colors.onSurface,
       textAlign: 'right',
     },
     listContent: {
-      padding: responsive.getResponsivePadding(),
+      padding: getM3HorizontalPadding(),
       gap: 16,
       ...(responsive.isLargeScreen() && {
         maxWidth: responsive.getMaxContentWidth(),
@@ -346,23 +346,21 @@ const getStyles = (tabBarBottomPadding: number = 0) =>
       paddingHorizontal: 4,
     },
     sectionTitle: {
-      fontSize: responsive.getResponsiveFontSize(18),
-      fontWeight: 'bold',
-      color: '#1a1a1a',
+      ...M3Theme.typography.titleMedium,
+      color: M3Theme.colors.onSurface,
       flex: 1,
     },
     badge: {
-      backgroundColor: '#007AFF',
-      borderRadius: 12,
-      paddingHorizontal: 8,
-      paddingVertical: 4,
+      backgroundColor: M3Theme.colors.primary,
+      borderRadius: M3Theme.shape.cornerMedium,
+      paddingHorizontal: M3Theme.spacing.sm,
+      paddingVertical: M3Theme.spacing.xs,
       minWidth: 24,
       alignItems: 'center',
     },
     badgeText: {
-      fontSize: responsive.getResponsiveFontSize(12),
-      fontWeight: 'bold',
-      color: '#fff',
+      ...M3Theme.typography.labelMedium,
+      color: M3Theme.colors.onPrimary,
     },
     loadingContainer: {
       flex: 1,
@@ -376,13 +374,13 @@ const getStyles = (tabBarBottomPadding: number = 0) =>
       paddingVertical: 64,
     },
     emptyText: {
-      fontSize: responsive.getResponsiveFontSize(18),
-      color: '#999',
+      ...M3Theme.typography.titleLarge,
+      color: M3Theme.colors.onSurfaceVariant,
       marginTop: 16,
     },
     emptySubtext: {
-      fontSize: responsive.getResponsiveFontSize(14),
-      color: '#666',
+      ...M3Theme.typography.bodyMedium,
+      color: M3Theme.colors.onSurfaceVariant,
       marginTop: 8,
     },
   });

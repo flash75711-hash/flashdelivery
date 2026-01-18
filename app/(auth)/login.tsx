@@ -22,7 +22,8 @@ import { loginWithPin, formatPhone, isValidPhone } from '@/lib/pinAuth';
 import { showToast } from '@/lib/alert';
 import { vibrateError, vibrateSuccess } from '@/lib/vibration';
 import PinInput from '@/components/PinInput';
-import responsive from '@/utils/responsive';
+import responsive, { getM3CardStyle, getM3ButtonStyle, getM3HorizontalPadding, getM3TouchTarget } from '@/utils/responsive';
+import M3Theme from '@/constants/M3Theme';
 
 export default function LoginScreen() {
   const [phone, setPhone] = useState('');
@@ -231,12 +232,12 @@ export default function LoginScreen() {
 const getStyles = () => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: M3Theme.colors.background, // M3 Background
   },
   content: {
     flex: 1,
     justifyContent: 'center',
-    padding: responsive.getResponsivePadding(),
+    padding: getM3HorizontalPadding(), // M3: 16px horizontal padding
     ...(responsive.isLargeScreen() && {
       maxWidth: 500,
       alignSelf: 'center',
@@ -244,87 +245,99 @@ const getStyles = () => StyleSheet.create({
     }),
   },
   title: {
-    fontSize: responsive.getResponsiveFontSize(32),
-    fontWeight: 'bold',
+    ...M3Theme.typography.headlineLarge, // 32px, weight 600
     textAlign: 'center',
     marginBottom: 10,
-    color: '#1a1a1a',
+    color: M3Theme.colors.onBackground,
   },
   subtitle: {
-    fontSize: responsive.getResponsiveFontSize(18),
+    ...M3Theme.typography.titleLarge, // 22px, weight 500
     textAlign: 'center',
     marginBottom: 40,
-    color: '#666',
+    color: M3Theme.colors.onSurfaceVariant,
   },
   inputContainer: {
     marginBottom: 20,
   },
   input: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 12,
-    padding: responsive.isTablet() ? 18 : 16,
-    fontSize: responsive.getResponsiveFontSize(16),
+    backgroundColor: M3Theme.colors.surfaceVariant, // M3 Surface Variant
+    borderRadius: M3Theme.shape.cornerMedium, // 12px
+    padding: M3Theme.spacing.md, // 16px
+    fontSize: 16, // M3: 16px minimum for inputs (prevents iOS auto-zoom)
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: M3Theme.colors.outlineVariant,
   },
   phoneDisplayContainer: {
     alignItems: 'center',
     marginBottom: 30,
-    padding: 20,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 12,
+    padding: M3Theme.spacing.md, // 16px
+    backgroundColor: M3Theme.colors.surfaceVariant,
+    borderRadius: M3Theme.shape.cornerMedium, // 12px
   },
   phoneDisplayLabel: {
-    fontSize: responsive.getResponsiveFontSize(14),
-    color: '#666',
+    ...M3Theme.typography.bodyMedium, // 14px base font
+    color: M3Theme.colors.onSurfaceVariant,
     marginBottom: 8,
   },
   phoneDisplay: {
-    fontSize: responsive.getResponsiveFontSize(18),
-    fontWeight: '600',
-    color: '#1a1a1a',
+    ...M3Theme.typography.titleMedium, // 16px, weight 600
+    color: M3Theme.colors.onSurface,
     marginBottom: 12,
   },
   changePhoneButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
+    paddingVertical: M3Theme.spacing.sm, // 8px
+    paddingHorizontal: M3Theme.spacing.md, // 16px
+    ...getM3TouchTarget('minimum'), // 44x44px minimum
+    ...Platform.select({
+      web: M3Theme.webViewStyles.button,
+    }),
   },
   changePhoneText: {
-    color: '#007AFF',
-    fontSize: responsive.getResponsiveFontSize(14),
+    ...M3Theme.typography.labelLarge, // 14px, weight 600
+    color: M3Theme.colors.primary,
   },
   pinContainer: {
     marginVertical: 20,
   },
   button: {
-    backgroundColor: '#007AFF',
-    borderRadius: 12,
-    padding: responsive.isTablet() ? 18 : 16,
+    ...getM3ButtonStyle(true), // M3: Full-width, 48px min height
+    backgroundColor: M3Theme.colors.primary, // M3 Primary
+    borderRadius: M3Theme.shape.cornerLarge, // 16px
     alignItems: 'center',
     marginTop: 8,
+    ...Platform.select({
+      web: M3Theme.webViewStyles.button, // user-select: none
+    }),
   },
   buttonDisabled: {
     opacity: 0.6,
   },
   buttonText: {
-    color: '#fff',
-    fontSize: responsive.getResponsiveFontSize(18),
-    fontWeight: '600',
+    ...M3Theme.typography.labelLarge, // 14px, weight 600
+    color: M3Theme.colors.onPrimary,
   },
   forgotPinButton: {
     marginTop: 20,
     alignItems: 'center',
+    ...getM3TouchTarget('minimum'),
+    ...Platform.select({
+      web: M3Theme.webViewStyles.button,
+    }),
   },
   forgotPinText: {
-    color: '#007AFF',
-    fontSize: responsive.getResponsiveFontSize(14),
+    ...M3Theme.typography.labelLarge, // 14px, weight 600
+    color: M3Theme.colors.primary,
   },
   registerButton: {
     marginTop: 20,
     alignItems: 'center',
+    ...getM3TouchTarget('minimum'),
+    ...Platform.select({
+      web: M3Theme.webViewStyles.button,
+    }),
   },
   registerText: {
-    color: '#007AFF',
-    fontSize: responsive.getResponsiveFontSize(16),
+    ...M3Theme.typography.bodyLarge, // 16px
+    color: M3Theme.colors.primary,
   },
 });
